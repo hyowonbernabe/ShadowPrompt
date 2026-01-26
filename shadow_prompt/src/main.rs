@@ -4,12 +4,14 @@ mod clipboard;
 mod ui;
 mod ocr;
 mod llm;
+mod knowledge;
 
 use crate::config::Config;
 use crate::input::{InputManager, InputEvent, parse_keys};
 use crate::clipboard::ClipboardManager;
 use crate::ui::{UIManager, UICommand};
 use crate::llm::LlmClient;
+use crate::knowledge::KnowledgeProvider;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -80,10 +82,26 @@ async fn main() -> anyhow::Result<()> {
                             }
                         };
 
-                        println!("[*] Sending Query: {:.50}...", prompt);
+                        println!("[*] Processing Query: {:.50}...", prompt);
 
-                        // 2. Query LLM
-                        let response = match LlmClient::query(&prompt, &config_clone).await {
+                        // 2. Gather Context (Search/RAG)
+                        let context = match KnowledgeProvider::gather_context(&prompt, &config_clone).await {
+                             Ok(ctx) => ctx,
+                             Err(e) => {
+                                 eprintln!("Knowledge Error: {}", e);
+                                 String::new() 
+                             }
+                        };
+                        
+                        let augmented_prompt = if !context.is_empty() {
+                            println!("[*] Context found. Augmenting prompt.");
+                            format!("Context:\n{}\nQuestion:\n{}", context, prompt)
+                        } else {
+                            prompt.clone()
+                        };
+
+                        // 3. Query LLM
+                        let response = match LlmClient::query(&augmented_prompt, &config_clone).await {
                              Ok(res) => res,
                              Err(e) => {
                                  eprintln!("LLM Error: {}", e);

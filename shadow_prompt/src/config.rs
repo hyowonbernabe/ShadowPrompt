@@ -9,8 +9,16 @@ pub struct Config {
     pub general: GeneralConfig,
     pub visuals: VisualsConfig,
     pub models: ModelConfig,
+    pub search: SearchConfig,
     pub rag: RagConfig,
     pub safety: SafetyConfig,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
+pub struct SearchConfig {
+    pub enabled: bool,
+    pub max_results: usize,
 }
 
 #[derive(Debug, Deserialize, Clone)]

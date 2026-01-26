@@ -18,13 +18,22 @@ impl LlmClient {
         }
     }
 
+    fn load_system_prompt() -> String {
+        std::fs::read_to_string("config/system_prompt.txt")
+            .or_else(|_| std::fs::read_to_string("../config/system_prompt.txt"))
+            .unwrap_or_else(|_| "You are a concise assistant.".to_string())
+    }
+
     async fn query_openrouter(client: &Client, prompt: &str, config: &Config) -> Result<String> {
         let openrouter_config = config.models.openrouter.as_ref()
             .context("OpenRouter config missing")?;
 
+        let system_prompt = Self::load_system_prompt();
+
         let body = json!({
             "model": openrouter_config.model_id,
             "messages": [
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ]
         });
@@ -52,10 +61,12 @@ impl LlmClient {
 
     async fn query_ollama(client: &Client, prompt: &str, config: &Config) -> Result<String> {
          let ollama_config = config.models.ollama.as_ref().context("Ollama config missing")?;
+         let system_prompt = Self::load_system_prompt();
          
          let body = json!({
              "model": ollama_config.model_id,
              "prompt": prompt,
+             "system": system_prompt,
              "stream": false
          });
 
