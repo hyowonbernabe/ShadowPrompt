@@ -1,0 +1,20 @@
+# Rust Build Artifacts
+**/target/
+**/*.rs.bk
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Executables & Logs (Runtime)
+*.exe
+*.dll
+*.pdb
+*.log
+config/usage.json
