@@ -1,9 +1,10 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::fs;
 use anyhow::{Result, Context};
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct Config {
     pub general: GeneralConfig,
     pub visuals: VisualsConfig,
@@ -13,6 +14,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct GeneralConfig {
     pub mode: String,
     pub wake_key: String,
@@ -22,6 +24,7 @@ pub struct GeneralConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct VisualsConfig {
     pub indicator_color: String,
     pub ready_color: String,
@@ -29,6 +32,7 @@ pub struct VisualsConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct ModelConfig {
     pub provider: String,
     pub openrouter: Option<OpenRouterConfig>,
@@ -39,30 +43,35 @@ pub struct ModelConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct OpenRouterConfig {
     pub api_key: String,
     pub model_id: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct GeminiConfig {
     pub api_key: String,
     pub model_id: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct OllamaConfig {
     pub base_url: String,
     pub model_id: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct RagConfig {
     pub chunk_size: usize,
     pub overlap: usize,
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct SafetyConfig {
     pub daily_spend_limit_usd: f64,
 }
