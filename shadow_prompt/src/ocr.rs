@@ -1,34 +1,60 @@
 #![allow(unused)]
 use windows::Media::Ocr::OcrEngine;
-use windows::Graphics::Imaging::{BitmapDecoder, SoftwareBitmap};
-use windows::Storage::Streams::{InMemoryRandomAccessStream, DataWriter};
+use windows::Graphics::Imaging::{SoftwareBitmap, BitmapPixelFormat, BitmapAlphaMode};
+use windows::Storage::Streams::DataWriter;
 use windows::Win32::Graphics::Gdi::{
-    GetDC, GetDeviceCaps, CreateCompatibleDC, CreateCompatibleBitmap, SelectObject, BitBlt, 
-    GetObjectW, DeleteObject, DeleteDC, ReleaseDC, BITMAP, SRCCOPY, HBITMAP, HDC,
-    HORZRES, VERTRES, GetDIBits, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, BI_RGB,
+    GetDC, CreateCompatibleDC, CreateCompatibleBitmap, SelectObject, BitBlt, 
+    DeleteObject, DeleteDC, ReleaseDC, SRCCOPY, BITMAPINFO, BITMAPINFOHEADER, 
+    DIB_RGB_COLORS, BI_RGB, GetDIBits,
 };
-use windows::core::HSTRING;
 use windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow;
 use windows::Win32::Foundation::HWND;
-use windows::Foundation::IAsyncOperation;
+use windows::Foundation::AsyncStatus;
 use anyhow::{Result, Context};
-use std::future::Future;
+
+// Blocking helper removed. We rely on async/await support in windows-rs.
 
 pub struct OcrManager;
 
 impl OcrManager {
     pub async fn extract_from_screen(x: i32, y: i32, width: i32, height: i32) -> Result<String> {
-        // Stub for compilation (Async WinRT issues)
-        // let stream = capture_screen_area(x, y, width, height)?;
-        // ... decoding ...
+        // 1. Capture Pixels
+        let pixels = capture_pixels(x, y, width, height)?;
         
-        Ok("MOCK OCR TEXT".to_string())
+        // 2. Create IBuffer via DataWriter
+        let writer = DataWriter::new()?;
+        writer.WriteBytes(&pixels)?;
+        let buffer = writer.DetachBuffer()?;
+
+        // 3. Create SoftwareBitmap
+        let bitmap = SoftwareBitmap::CreateCopyFromBuffer(
+            &buffer, 
+            BitmapPixelFormat::Bgra8, 
+            width, 
+            height
+        )?;
+
+        // 4. Init Engine
+        let engine = OcrEngine::TryCreateFromUserProfileLanguages().unwrap_or_else(|_| {
+             panic!("Failed to create OCR engine from profile languages.");
+        });
+
+        // 5. Recognize
+        let operation = engine.RecognizeAsync(&bitmap)?;
+        
+        // Manual blocking wait
+        while operation.Status()? == AsyncStatus::Started {
+             std::thread::yield_now();
+        }
+        
+        let result = operation.GetResults()?;
+        let text = result.Text()?.to_string();
+
+        Ok(text)
     }
 }
 
-
-
-fn capture_screen_area(x: i32, y: i32, width: i32, height: i32) -> Result<InMemoryRandomAccessStream> {
+fn capture_pixels(x: i32, y: i32, width: i32, height: i32) -> Result<Vec<u8>> {
     unsafe {
         let hwnd_desktop = GetDesktopWindow();
         let hdc_screen = GetDC(hwnd_desktop);
@@ -37,18 +63,18 @@ fn capture_screen_area(x: i32, y: i32, width: i32, height: i32) -> Result<InMemo
         let hbitmap = CreateCompatibleBitmap(hdc_screen, width, height);
         let h_old = SelectObject(hdc_mem, hbitmap);
 
-        BitBlt(hdc_mem, 0, 0, width, height, hdc_screen, x, y, SRCCOPY)
-            .ok()
-            .context("BitBlt failed")?;
+        if BitBlt(hdc_mem, 0, 0, width, height, hdc_screen, x, y, SRCCOPY).is_err() {
+            SelectObject(hdc_mem, h_old); DeleteObject(hbitmap); DeleteDC(hdc_mem); ReleaseDC(hwnd_desktop, hdc_screen);
+            anyhow::bail!("BitBlt failed");
+        }
 
-        // Prepare info for GetDIBits
         let mut bmi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
                 biWidth: width,
                 biHeight: -height, // Top-down
                 biPlanes: 1,
-                biBitCount: 32, // Request 32-bit for easy alignment
+                biBitCount: 32, 
                 biCompression: BI_RGB.0,
                 ..Default::default()
             },
@@ -56,61 +82,10 @@ fn capture_screen_area(x: i32, y: i32, width: i32, height: i32) -> Result<InMemo
         };
 
         let mut pixels = vec![0u8; (width * height * 4) as usize];
+        GetDIBits(hdc_mem, hbitmap, 0, height as u32, Some(pixels.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS);
+
+        SelectObject(hdc_mem, h_old); DeleteObject(hbitmap); DeleteDC(hdc_mem); ReleaseDC(hwnd_desktop, hdc_screen);
         
-        GetDIBits(
-            hdc_mem,
-            hbitmap,
-            0,
-            height as u32,
-            Some(pixels.as_mut_ptr() as *mut _),
-            &mut bmi,
-            DIB_RGB_COLORS,
-        );
-
-        // Cleanup GDI
-        SelectObject(hdc_mem, h_old);
-        DeleteObject(hbitmap);
-        DeleteDC(hdc_mem);
-        ReleaseDC(hwnd_desktop, hdc_screen);
-
-        // Create BMP in Memory
-        let stream = InMemoryRandomAccessStream::new()?;
-        let writer = DataWriter::CreateDataWriter(&stream)?;
-        
-        // Write BITMAPFILEHEADER (14 bytes)
-        // Signature "BM"
-        writer.WriteByte(0x42)?; writer.WriteByte(0x4D)?;
-        // File Size (14 + 40 + pixels)
-        let file_size = 14 + 40 + pixels.len() as u32;
-        writer.WriteUInt32(file_size)?;
-        // Reserved
-        writer.WriteUInt16(0)?; writer.WriteUInt16(0)?;
-        // Offset to data (14 + 40 = 54)
-        writer.WriteUInt32(54)?;
-
-        // Write BITMAPINFOHEADER (40 bytes) - matches bmiHeader
-        let b = &bmi.bmiHeader;
-        writer.WriteUInt32(b.biSize)?;
-        writer.WriteInt32(b.biWidth)?;
-        writer.WriteInt32(b.biHeight)?;
-        writer.WriteUInt16(b.biPlanes)?;
-        writer.WriteUInt16(b.biBitCount)?;
-        writer.WriteUInt32(b.biCompression)?;
-        writer.WriteUInt32(b.biSizeImage)?;
-        writer.WriteInt32(b.biXPelsPerMeter)?;
-        writer.WriteInt32(b.biYPelsPerMeter)?;
-        writer.WriteUInt32(b.biClrUsed)?;
-        writer.WriteUInt32(b.biClrImportant)?;
-
-        // Write Pixels
-        writer.WriteBytes(&pixels)?;
-
-        // Flush and Detach
-        // Flush and Detach (Async in Sync blocked - stubbed for now)
-        // writer.StoreAsync()?.await?;
-        // writer.DetachStream()?;
-        
-        stream.Seek(0)?;
-        Ok(stream)
+        Ok(pixels)
     }
 }

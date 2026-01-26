@@ -57,12 +57,39 @@ async fn main() -> anyhow::Result<()> {
         if let Ok(event) = rx.recv() {
             match event {
                 InputEvent::Wake => {
-                    println!("[!] EVENT: Wake Key Pressed (OCR Trigger)");
+                    println!("[!] EVENT: Wake Key Pressed (Enter OCR Selection Mode)");
                     let _ = ui_tx.send(UICommand::SetColor(0x000000FF)); // Red
-                    // Trigger OCR Flow (Future)
-                    // Mock completion:
-                    thread::sleep(Duration::from_millis(500));
-                    let _ = ui_tx.send(UICommand::SetColor(0x0000FF00)); // Reset Green
+                },
+                InputEvent::OCRClick1 => {
+                    println!("[!] EVENT: OCR Point 1 Captured");
+                    let _ = ui_tx.send(UICommand::SetColor(0x0000A5FF)); // Orange (BGR: FF A5 00)
+                },
+                InputEvent::OCRRect(x, y, w, h) => {
+                    println!("[*] OCR Region Captured: x={}, y={}, w={}, h={}", x, y, w, h);
+                    let _ = ui_tx.send(UICommand::SetColor(0x0000FFFF)); // Yellow (BGR: FF FF 00)
+                    let _ = ui_tx.send(UICommand::DrawDebugRect(x, y, w, h));
+
+                    let ui_tx_clone = ui_tx.clone();
+                    
+                    tokio::spawn(async move {
+                        println!("[*] Extracting text...");
+                        
+                        match crate::ocr::OcrManager::extract_from_screen(x, y, w, h).await {
+                            Ok(text) => {
+                                println!("[+] OCR Success: \"{}\"", text.trim());
+                                if let Err(e) = ClipboardManager::write(&text) {
+                                    eprintln!("Clipboard Write Error: {}", e);
+                                }
+                            },
+                            Err(e) => {
+                                eprintln!("[-] OCR Failed: {}", e);
+                            }
+                        }
+                        
+                        // Cleanup
+                        let _ = ui_tx_clone.send(UICommand::ClearDebugRect);
+                        let _ = ui_tx_clone.send(UICommand::SetColor(0x0000FF00)); // Reset Green
+                    });
                 },
                 InputEvent::Model => {
                     println!("[!] EVENT: Model Key Pressed (Clipboard Trigger)");
