@@ -36,6 +36,9 @@ toml = "0.8"
 anyhow = "1"
 image = "0.25"
 regex = "1.12.2"
+oauth2 = { version = "4.4.2", features = ["reqwest"] }
+open = "5.3.3"
+url = "2.5.8"
 
 # Embeddings & Vector DB (Commented out until Phase 3/4 to speed up initial build)
 # ort = "2.0"

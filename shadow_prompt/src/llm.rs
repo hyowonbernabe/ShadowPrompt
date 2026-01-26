@@ -14,7 +14,18 @@ impl LlmClient {
             "openrouter" => Self::query_openrouter(&client, prompt, config).await,
             "ollama" => Self::query_ollama(&client, prompt, config).await,
             "google_gemini_api" => Self::query_gemini(&client, prompt, config).await,
+            "google_antigravity" => Self::query_antigravity(&client, prompt, config).await,
             _ => anyhow::bail!("Unknown or unimplemented provider: {}", config.models.provider),
+        }
+    }
+
+    async fn query_antigravity(_client: &Client, _prompt: &str, _config: &Config) -> Result<String> {
+        // Check for Auth Token
+        if let Some(token) = crate::auth::AuthManager::load_token() {
+             let len = std::cmp::min(10, token.access_token.len());
+             Ok(format!("AntiGravity Auth Connected! Token prefix: {}... (Endpoint implementation pending)", &token.access_token[0..len]))
+        } else {
+             Ok("AntiGravity Provider Selected. Authentication required. Trigger via Model Key.".to_string())
         }
     }
 

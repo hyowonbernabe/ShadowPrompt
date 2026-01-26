@@ -12,6 +12,22 @@ pub struct Config {
     pub search: SearchConfig,
     pub rag: RagConfig,
     pub safety: SafetyConfig,
+    pub auth: Option<AuthConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
+pub struct AuthConfig {
+    pub google: Option<GoogleAuthConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
+pub struct GoogleAuthConfig {
+    pub enabled: bool,
+    pub client_id: Option<String>,
+    pub client_secret: Option<String>,
+    pub redirect_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

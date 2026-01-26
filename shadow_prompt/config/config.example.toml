@@ -1,0 +1,40 @@
+[general]
+mode = "active" # "active" or "background"
+wake_key = "ctrl+space" # Global hotkey to trigger OCR/Input
+model_key = "ctrl+alt+space" # Global hotkey to trigger AI from clipboard
+panic_key = "f9" # Kill switch
+use_rag = true
+
+[visuals]
+indicator_color = "0x00FF00" # Green (Ready)
+ready_color = "0x00FF00"
+cursor_change = true
+
+[models]
+provider = "google_antigravity" # or "ollama", "openai", etc.
+
+[models.google_antigravity]
+# No specific config needed for default auth
+
+[models.ollama]
+base_url = "http://localhost:11434"
+model_id = "llama3"
+
+# [auth]
+# Optional: Configure Google Auth if you want to use your own GCP Project.
+# If omitted, basic features work with the built-in public client.
+# [auth.google]
+# enabled = true
+# client_id = "YOUR_CLIENT_ID"
+# client_secret = "YOUR_CLIENT_SECRET"
+
+[search]
+enabled = true
+max_results = 5
+
+[rag]
+chunk_size = 500
+overlap = 50
+
+[safety]
+daily_spend_limit_usd = 1.0

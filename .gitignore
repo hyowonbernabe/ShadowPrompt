@@ -18,3 +18,8 @@ Thumbs.db
 *.pdb
 *.log
 config/usage.json
+
+# Local Config & Secrets
+shadow_prompt/config/config.toml
+shadow_prompt/auth.json
+auth.json

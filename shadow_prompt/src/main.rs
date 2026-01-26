@@ -5,6 +5,7 @@ mod ui;
 mod ocr;
 mod llm;
 mod knowledge;
+mod auth;
 
 use crate::config::Config;
 use crate::input::{InputManager, InputEvent, parse_keys};
@@ -99,6 +100,45 @@ async fn main() -> anyhow::Result<()> {
                     let ui_tx_clone = ui_tx.clone();
 
                     tokio::spawn(async move {
+                        // 0. Authentication Check
+                        if let Some(auth_config) = &config_clone.auth {
+                            if let Some(google_config) = &auth_config.google {
+                                if google_config.enabled {
+                                    // Check if we have a token
+                                    let token = crate::auth::AuthManager::load_token();
+                                    
+                                    if token.is_none() {
+                                        println!("[*] Authentication Required.");
+                                        let _ = ui_tx_clone.send(UICommand::SetColor(0x0000A5FF)); // Orange (Waiting for Auth)
+                                        
+                                        // Trigger Auth Flow
+                                        let res = crate::auth::google::perform_auth(
+                                            google_config.client_id.clone(),
+                                            google_config.client_secret.clone(),
+                                            8006
+                                        ).await;
+
+                                        match res {
+                                            Ok(data) => {
+                                                println!("[+] Authentication Successful.");
+                                                if let Err(e) = crate::auth::AuthManager::save_token(&data) {
+                                                    eprintln!("[-] Failed to save token: {}", e);
+                                                }
+                                                // Proceed...
+                                            },
+                                            Err(e) => {
+                                                eprintln!("[-] Authentication Failed: {}", e);
+                                                let _ = ui_tx_clone.send(UICommand::SetColor(0x000000FF)); // Red Error
+                                                return; 
+                                            }
+                                        }
+                                    } else {
+                                        // TODO: Check expiry and refresh if needed
+                                    }
+                                }
+                            }
+                        }
+
                         // 1. Read Clipboard
                         let prompt = match ClipboardManager::read() {
                             Ok(text) => text,
