@@ -11,10 +11,7 @@ ready_color = "0x00FF00"
 cursor_change = true
 
 [models]
-provider = "google_antigravity" # or "ollama", "openai", etc.
-
-[models.google_antigravity]
-# No specific config needed for default auth
+provider = "ollama" # or "openrouter", "openai", etc.
 
 [models.ollama]
 base_url = "http://localhost:11434"

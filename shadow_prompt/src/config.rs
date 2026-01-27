@@ -61,7 +61,6 @@ pub struct ModelConfig {
     pub provider: String,
     pub openrouter: Option<OpenRouterConfig>,
     pub github_copilot: Option<HashMap<String, String>>, // Flexible for now
-    pub google_antigravity: Option<HashMap<String, String>>,
     pub google_gemini_api: Option<GeminiConfig>,
     pub ollama: Option<OllamaConfig>,
 }
