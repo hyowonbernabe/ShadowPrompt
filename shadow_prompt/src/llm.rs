@@ -9,27 +9,13 @@ impl LlmClient {
     pub async fn query(prompt: &str, config: &Config) -> Result<String> {
         let client = Client::new();
         
-        // --- Fallback Chain: Groq -> OpenRouter -> Ollama ---
-        
-        // 1. Try Groq
-        match Self::query_groq(&client, prompt, config).await {
-            Ok(res) => return Ok(res),
-            Err(e) => {
-                eprintln!("Groq failed (falling back to OpenRouter): {}", e);
-            }
+        match config.models.provider.as_str() {
+            "groq" => Self::query_groq(&client, prompt, config).await,
+            "openrouter" => Self::query_openrouter(&client, prompt, config).await,
+            "ollama" => Self::query_ollama(&client, prompt, config).await,
+            "github_copilot" => anyhow::bail!("GitHub Copilot provider not fully implemented yet"),
+            _ => anyhow::bail!("Unknown provider: {}", config.models.provider),
         }
-
-        // 2. Try OpenRouter
-        match Self::query_openrouter(&client, prompt, config).await {
-            Ok(res) => return Ok(res),
-            Err(e) => {
-                eprintln!("OpenRouter failed (falling back to Ollama): {}", e);
-            }
-        }
-
-        // 3. Try Ollama (Final Fallback)
-        Self::query_ollama(&client, prompt, config).await
-            .context("All LLM providers failed. Ensure Ollama is running.")
     }
 
     async fn query_groq(client: &Client, prompt: &str, config: &Config) -> Result<String> {

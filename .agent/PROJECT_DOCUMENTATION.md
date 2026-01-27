@@ -11,6 +11,7 @@ ShadowPrompt is a "Zero-Install" AI assistant designed to run entirely from a US
 
 ### Core Philosophy
 * **Contained:** All logic, dependencies (DLLs), authentication, and vector indices reside on the USB. No files are written to the host machine.
+  > **Note:** "Local Model" support via Ollama requires an external installation and is technically **NOT** contained. It is provided as a developer/debug option or for users with pre-existing setups (e.g. USB-portable Ollama).
 * **Invisible:** The UI is non-intrusive. Interactions occur via invisible overlays and clipboard injections.
 * **Agnostic:** Capable of reading screen context (OCR) or clipboard content to query generic LLMs or project-specific RAG data.
 
@@ -25,7 +26,7 @@ We utilize **Rust** for its memory safety, zero-dependency compilation (static b
 | **OCR Engine** | **Windows.Media.Ocr** | Native Windows 10/11 API. Adds **0MB** to binary size. Privacy-friendly (local). |
 | **Windowing/GUI** | **Windows API (Win32)** | Required for creating the "invisible" overlay and handling global keyboard hooks without a GUI framework. |
 | **Vector DB** | **LanceDB** | Serverless, embedded vector database. |
-| **LLM Provider** | **Groq (Primary) + OpenRouter (Fallback)** | **Justification:** Multi-tier fallback strategy for high availability and low latency. <br> 1. **Groq:** `llama-3.1-8b-instant` (Ultra-fast, Free). <br> 2. **OpenRouter:** `google/gemma-3-27b-it:free` (High-quality fallback). <br> 3. **Ollama:** `llama3` (Local offline fallback). |
+| **LLM Provider** | **Groq (Primary) / OpenRouter (Secondary) / Ollama (Dev)** | **Justification:** Configurable provider selection. <br> 1. **Groq:** `llama-3.1-8b-instant` (Ultra-fast, Free). <br> 2. **OpenRouter:** `google/gemma-3-27b-it:free` (High-quality). <br> 3. **Ollama:** `llama3` (Local Dev/Debug). |
 
 ---
 
@@ -45,10 +46,10 @@ This is the primary method. The user supplies the text via standard system copy.
 3.  **Visual:** **Red Pixel** appears (Top Right) to indicate "Thinking/Processing".
 4.  **Processing:**
     *   App reads current clipboard content.
-    *   **Logic (Fallback Chain):** 
-        1. **Try Groq:** Fast inference using `llama-3.1-8b-instant`.
-        2. **Try OpenRouter:** If Groq fails (Rate Limit/Error), use `google/gemma-3-27b-it:free`.
-        3. **Try Ollama:** Final local fallback if internet is down.
+    *   **Logic:** Uses the provider specified in `config.toml` (Strict Mode).
+        *   **Groq:** Fast inference using `llama-3.1-8b-instant`.
+        *   **OpenRouter:** General purpose API.
+        *   **Ollama:** Local development/debug mode (Requires running instance).
     *   *Note: If "Web Search" is strictly needed (live data), we will need to add a specialized search tool (e.g., DuckDuckGo API), but for now, we rely on the generic intelligence of the LLM.*
 5.  **Output:** App overwrites system clipboard with the Answer.
 6.  **Visual:** Red Pixel disappears.

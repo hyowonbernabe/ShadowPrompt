@@ -6,9 +6,23 @@ panic_key = "f9" # Kill switch
 use_rag = true
 
 [visuals]
-indicator_color = "0x00FF00" # Green (Ready)
-ready_color = "0x00FF00"
-cursor_change = true
+indicator_color = "#FF0000" # Processing
+ready_color = "#00FF00"     # Ready
+cursor_change = false
+
+# New Configurable Options
+position = "top-right" 
+size = 5               
+offset = 0             
+x_axis = 0            
+y_axis = 0            
+
+# MCQ Colors
+color_mcq_a = "#00FFFF" 
+color_mcq_b = "#FF00FF" 
+color_mcq_c = "#FFFF00" 
+color_mcq_d = "#000000" 
+color_processing = "#FF0000"
 
 [models]
 provider = "ollama" # or "openrouter", "openai", etc.
