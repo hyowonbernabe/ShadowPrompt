@@ -1,3 +1,4 @@
+use crate::config::VisualsConfig;
 use windows::core::w;
 use windows::Win32::Foundation::{HINSTANCE, HWND, COLORREF, LPARAM, WPARAM, LRESULT};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -7,6 +8,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
     SetWindowPos, SWP_NOACTIVATE, SWP_SHOWWINDOW,
     PeekMessageW, PM_REMOVE, SetLayeredWindowAttributes, LWA_ALPHA, MSG,
+    GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN,
 };
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateSolidBrush, EndPaint, FillRect, PAINTSTRUCT, InvalidateRect, DeleteObject,
@@ -31,7 +33,7 @@ static mut SECONDARY_COLOR: u32 = 0x00000000;
 pub struct UIManager;
 
 impl UIManager {
-    pub fn start(rx: Receiver<UICommand>) {
+    pub fn start(rx: Receiver<UICommand>, config: VisualsConfig) {
         thread::spawn(move || {
             unsafe {
                 let instance = HINSTANCE::default();
@@ -74,29 +76,84 @@ impl UIManager {
                 };
                 RegisterClassW(&wc_debug);
 
-                // Create Indicator 1 (Top)
-                let x = 1920 - 5; 
-                let y = 0;
+                // Calculate Position
+                let screen_w = GetSystemMetrics(SM_CXSCREEN);
+                let screen_h = GetSystemMetrics(SM_CYSCREEN);
+                
+                let size = config.size;
+                let offset = config.offset;
+                let user_x = config.x_axis;
+                let user_y = config.y_axis;
+                
+                let (mut x, mut y) = match config.position.as_str() {
+                    "top-left" => (0 + offset, 0 + offset),
+                    "bottom-left" => (0 + offset, screen_h - size - offset),
+                    "bottom-right" => (screen_w - size - offset, screen_h - size - offset),
+                    _ => (screen_w - size - offset, 0 + offset), // Default top-right
+                };
 
+                // Apply User Axis Overrides
+                // Right/Left Logic: +X is Right
+                x += user_x;
+
+                // Up/Down Logic: "Subtracting will bring it down" -> -Y = Down (User Intention)
+                // Screen Y: +Down. So to move Down (+Y), we need to Subtract UserY ONLY IF UserY is negative?
+                // Wait. "Subtracting will bring it down": 
+                // X - (-50) = X + 50 (Right). 
+                // Y - (-50) = Y + 50 (Down).
+                // So "User Input" maps to "-ScreenDelta".
+                // Let's adhere to "Subtracting moves LEFT/DOWN".
+                // Standard Screen: -X is Left. +Y is Down.
+                // User: "Subtracting X is Left". Okay, so User X = Screen X.
+                // User: "Subtracting Y is Down". Okay, so User Y = -Screen Y (because +ScreenY is Down).
+                // Wait, if I subtract 10 -> -10. 
+                // If I want it to go DOWN (+ScreenY), I need POSITIVE ScreenY.
+                // So -10 User -> +10 Screen.
+                // So ScreenY_Delta = -UserY.
+                
+                // Let's re-read: "If Y axis, subtracting will bring it down".
+                // Current Y = 0.
+                // User Y = -10 (Subtracted 10 from 0 default).
+                // Target Y = 10 (Down 10 pixels).
+                // So yes, subtract UserY.
+                
+                y -= user_y;
+
+
+                // Create Indicator 1 (Main)
                 let hwnd = CreateWindowExW(
                     WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED,
                     class_name,
                     w!(""),
                     WS_POPUP | WS_VISIBLE,
-                    x, y, 5, 5,
+                    x, y, size, size,
                     HWND::default(),
                     HMENU::default(),
                     instance,
                     None,
                 ).unwrap_or(HWND::default());
 
-                // Create Indicator 2 (Bottom)
+                // Create Indicator 2 (Secondary)
+                // Default heuristic: Place BELOW if Top, ABOVE if Bottom?
+                // Or just stack vertically always?
+                // Let's place it just *below* the main one by default, separated by size?
+                // Or just adding `size` to Y?
+                // If Bottom, maybe above?
+                // Let's assume Top alignment for now as default.
+                // If it's bottom aligned, we might want to stack upwards.
+                
+                let sec_y = if config.position.contains("bottom") {
+                    y - size // Stack above
+                } else {
+                    y + size // Stack below
+                };
+
                 let hwnd_sec = CreateWindowExW(
                     WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED,
                     secondary_class_name,
                     w!(""),
                     WS_POPUP | WS_VISIBLE,
-                    x, y + 5, 5, 5, // Just below the first one
+                    x, sec_y, size, size,
                     HWND::default(),
                     HMENU::default(),
                     instance,

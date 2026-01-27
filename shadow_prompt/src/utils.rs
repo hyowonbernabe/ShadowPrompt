@@ -85,4 +85,26 @@ mod tests {
         assert_eq!(parse_mcq_answer("The answer is C"), None); // Too strict for now, can relax if needed
         assert_eq!(parse_mcq_answer("1) Paris"), Some(McqAnswer::A));
     }
+
+    #[test]
+    fn test_hex_parsing() {
+        assert_eq!(parse_hex_color("#FF0000"), 0x000000FF); // Blue=00, Green=00, Red=FF -> 0x000000FF
+        assert_eq!(parse_hex_color("#00FF00"), 0x0000FF00);
+        assert_eq!(parse_hex_color("#00FFFF"), 0x00FFFF00); // BGR: FF FF 00
+        assert_eq!(parse_hex_color("ZZZ"), 0x00000000);
+    }
+}
+
+pub fn parse_hex_color(hex: &str) -> u32 {
+    let hex = hex.trim_start_matches('#');
+    if hex.len() != 6 {
+        return 0x00000000; // Default Black or Transparent if invalid
+    }
+    
+    let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0);
+    let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
+    let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
+
+    // Windows COLORREF is 0x00BBGGRR
+    ((b as u32) << 16) | ((g as u32) << 8) | (r as u32)
 }

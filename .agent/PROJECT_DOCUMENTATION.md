@@ -68,6 +68,19 @@ Used when copy is disabled or text is an image.
 5.  **Visual:** Red Pixel disappears (indicating text is ready).
 6.  **Follow-up:** User proceeds to **Scenario 1** (Presses `Model Key` to process the now-copied text).
 
+### D. Scenario 3: Multiple Choice Questions (MCQ)
+ShadowPrompt automatically detects if the answer is a multiple choice option (A, B, C, D or 1, 2, 3, 4) and provides a secondary visual cue.
+
+1.  **Trigger:** Standard Model Query (Scenario 1).
+2.  **Detection:** If the LLM response starts with "A", "B", "C", "D" (or equivalent numbers/formats).
+3.  **Visual Feedback:** A **Secondary Pixel** appears just below the main indicator:
+    *   **Cyan:** Answer is **A** or **1**
+    *   **Magenta:** Answer is **B** or **2**
+    *   **Yellow:** Answer is **C** or **3**
+    *   **Black:** Answer is **D** or **4**
+4.  **Clipboard:** The full answer text is still copied to the clipboard.
+5.  **Reset:** The secondary indicator resets when a new query is started.
+
 ---
 
 ## 4. Directory Structure (USB Layout)
@@ -131,9 +144,23 @@ panic_key = "Ctrl+Shift+F12"
 use_rag = true
 
 [visuals]
-indicator_color = "#FF0000"
+indicator_color = "#FF0000" # Processing Color
 ready_color = "#00FF00"
 cursor_change = false
+
+# New Configurable Options
+position = "top-right" # Options: top-right, top-left, bottom-right, bottom-left
+size = 5               # Pixel size (default 5)
+offset = 0             # Distance from corner (e.g. 10 to move in)
+x_axis = 0            # Add to move Right (Desktop coords)
+y_axis = 0            # Subtract to move Down (User preference logic: -Y = Down)
+
+# MCQ Colors
+color_mcq_a = "#00FFFF" # Cyan
+color_mcq_b = "#FF00FF" # Magenta
+color_mcq_c = "#FFFF00" # Yellow
+color_mcq_d = "#000000" # Black
+color_processing = "#FF0000" # Red
 
 [models]
 # Options: "openrouter", "github_copilot", "ollama", "groq"

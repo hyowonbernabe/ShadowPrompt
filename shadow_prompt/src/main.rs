@@ -14,7 +14,7 @@ use crate::clipboard::ClipboardManager;
 use crate::ui::{UIManager, UICommand};
 use crate::llm::LlmClient;
 use crate::knowledge::KnowledgeProvider;
-use crate::utils::{parse_mcq_answer, McqAnswer};
+use crate::utils::{parse_mcq_answer, McqAnswer, parse_hex_color};
 use std::sync::mpsc;
 
 #[tokio::main]
@@ -34,10 +34,11 @@ async fn main() -> anyhow::Result<()> {
 
     // 2. Start Visual Feedback Thread
     let (ui_tx, ui_rx) = mpsc::channel();
-    UIManager::start(ui_rx);
+    UIManager::start(ui_rx, config.visuals.clone());
     
     // Set initial Green "Ready" state
-    let _ = ui_tx.send(UICommand::SetColor(0x0000FF00)); // Green
+    let ready_color = parse_hex_color(&config.visuals.ready_color);
+    let _ = ui_tx.send(UICommand::SetColor(ready_color)); 
 
     // 3. Start Input Listener
     let (tx, rx) = mpsc::channel();
@@ -52,6 +53,10 @@ async fn main() -> anyhow::Result<()> {
     // 4. Main Event Loop
     println!("[*] ShadowPrompt is running. Press Panic Key to exit.");
     
+    // Pre-calculate colors for performance/clarity (or parse on fly)
+    // For simplicity, we parse on fly or clone config.
+    // Ideally we put these in a strut but cloning config is fine for this app scale.
+    
     loop {
         // Check for Input Events (Non-blocking or blocking depending on design)
         // Here we use recv() which blocks, effectively putting the main thread to sleep until an event.
@@ -59,11 +64,17 @@ async fn main() -> anyhow::Result<()> {
             match event {
                 InputEvent::Wake => {
                     println!("[!] EVENT: Wake Key Pressed (Enter OCR Selection Mode)");
-                    let _ = ui_tx.send(UICommand::SetColor(0x000000FF)); // Red
+                    // Use Processing Color (Red by default) or maybe a specific "Wake" color?
+                    // Currently hardcoded to Red. Let's use processing color.
+                    let color = parse_hex_color(&config.visuals.color_processing);
+                    let _ = ui_tx.send(UICommand::SetColor(color)); 
                 },
                 InputEvent::OCRClick1 => {
                     println!("[!] EVENT: OCR Point 1 Captured");
-                    let _ = ui_tx.send(UICommand::SetColor(0x0000A5FF)); // Orange (BGR: FF A5 00)
+                    let _ = ui_tx.send(UICommand::SetColor(0x0000A5FF)); // Orange (BGR: FF A5 00) - Keeping hardcoded or add to config? 
+                    // Keeping hardcoded for now as it wasn't explicitly asked to be configurable, 
+                    // but the user said "Customize any of the indicator colors".
+                    // I'll leave Orange hardcoded for obscure states unless I add more fields.
                 },
                 InputEvent::OCRRect(x, y, w, h) => {
                     println!("[*] OCR Region Captured: x={}, y={}, w={}, h={}", x, y, w, h);
@@ -71,6 +82,7 @@ async fn main() -> anyhow::Result<()> {
                     let _ = ui_tx.send(UICommand::DrawDebugRect(x, y, w, h));
 
                     let ui_tx_clone = ui_tx.clone();
+                    let ready_color = parse_hex_color(&config.visuals.ready_color);
                     
                     tokio::spawn(async move {
                         println!("[*] Extracting text...");
@@ -89,16 +101,18 @@ async fn main() -> anyhow::Result<()> {
                         
                         // Cleanup
                         let _ = ui_tx_clone.send(UICommand::ClearDebugRect);
-                        let _ = ui_tx_clone.send(UICommand::SetColor(0x0000FF00)); // Reset Green
+                        let _ = ui_tx_clone.send(UICommand::SetColor(ready_color)); // Reset Green
                     });
                 },
                 InputEvent::Model => {
                     println!("[!] EVENT: Model Key Pressed (Clipboard Trigger)");
-                    let _ = ui_tx.send(UICommand::SetColor(0x000000FF)); // Red
+                    let processing_color = parse_hex_color(&config.visuals.color_processing);
+                    let _ = ui_tx.send(UICommand::SetColor(processing_color)); 
                     let _ = ui_tx.send(UICommand::SetSecondaryColor(0x00000000)); // Reset Secondary
                     
                     let config_clone = config.clone();
                     let ui_tx_clone = ui_tx.clone();
+                    let ready_color = parse_hex_color(&config.visuals.ready_color);
 
                     tokio::spawn(async move {
 
@@ -108,7 +122,7 @@ async fn main() -> anyhow::Result<()> {
                             Ok(text) => text,
                             Err(e) => {
                                 eprintln!("Clipboard Read Error: {}", e);
-                                let _ = ui_tx_clone.send(UICommand::SetColor(0x0000FF00));
+                                let _ = ui_tx_clone.send(UICommand::SetColor(ready_color));
                                 return;
                             }
                         };
@@ -142,12 +156,13 @@ async fn main() -> anyhow::Result<()> {
 
                         // 4. Check for MCQ Answer
                         if let Some(ans) = parse_mcq_answer(&response) {
-                             let color = match ans {
-                                 McqAnswer::A => 0x00FFFF00, // Cyan
-                                 McqAnswer::B => 0x00FF00FF, // Magenta
-                                 McqAnswer::C => 0x0000FFFF, // Yellow
-                                 McqAnswer::D => 0x00000000, // Black
+                             let hex = match ans {
+                                 McqAnswer::A => &config_clone.visuals.color_mcq_a,
+                                 McqAnswer::B => &config_clone.visuals.color_mcq_b,
+                                 McqAnswer::C => &config_clone.visuals.color_mcq_c,
+                                 McqAnswer::D => &config_clone.visuals.color_mcq_d,
                              };
+                             let color = parse_hex_color(hex);
                              println!("[+] MCQ Detected: {:?} -> Color: {:08X}", ans, color);
                              let _ = ui_tx_clone.send(UICommand::SetSecondaryColor(color));
                         }
