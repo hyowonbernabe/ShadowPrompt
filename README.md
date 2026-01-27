@@ -57,7 +57,7 @@ ShadowPrompt was born from the need for a **Discrete Academic Interface**—a to
 ## 🚀 Installation & Setup (The "Happy Path")
 1. **Clone the Repository**:
    ```bash
-   git clone https://github.com/yourusername/ShadowPrompt.git
+   git clone https://github.com/hyowonbernabe/ShadowPrompt.git
    ```
 2. **Transfer to USB**:
    Copy the `ShadowPrompt` folder to your USB drive.
