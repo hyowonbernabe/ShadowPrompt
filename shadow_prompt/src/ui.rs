@@ -5,7 +5,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, HICON, HCURSOR, HMENU,
     SW_SHOW, SW_HIDE, WM_DESTROY, WM_PAINT, WNDCLASSW, WS_EX_LAYERED,
     WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
-    SetWindowPos, SWP_NOACTIVATE, SWP_SHOWWINDOW, SWP_HIDEWINDOW,
+    SetWindowPos, SWP_NOACTIVATE, SWP_SHOWWINDOW,
     PeekMessageW, PM_REMOVE, SetLayeredWindowAttributes, LWA_ALPHA, MSG,
 };
 use windows::Win32::Graphics::Gdi::{
@@ -18,6 +18,7 @@ const HWND_TOPMOST: HWND = HWND(-1 as isize as *mut std::ffi::c_void);
 
 pub enum UICommand {
     SetColor(u32), 
+    SetSecondaryColor(u32),
     DrawDebugRect(i32, i32, i32, i32),
     ClearDebugRect,
     #[allow(dead_code)]
@@ -25,6 +26,7 @@ pub enum UICommand {
 }
 
 static mut CURRENT_COLOR: u32 = 0x0000FF00; 
+static mut SECONDARY_COLOR: u32 = 0x00000000;
 
 pub struct UIManager;
 
@@ -34,6 +36,7 @@ impl UIManager {
             unsafe {
                 let instance = HINSTANCE::default();
                 let class_name = w!("ShadowPromptIndicator");
+                let secondary_class_name = w!("ShadowPromptIndicatorSecondary");
                 let debug_class_name = w!("ShadowPromptDebug");
 
                 // 1. Indicator Window Class
@@ -48,6 +51,18 @@ impl UIManager {
                 };
                 RegisterClassW(&wc);
 
+                // 1b. Secondary Indicator Window Class
+                let wc_sec = WNDCLASSW {
+                    hCursor: HCURSOR::default(),
+                    hIcon: HICON::default(),
+                    lpszClassName: secondary_class_name,
+                    hInstance: instance,
+                    lpfnWndProc: Some(secondary_wnd_proc),
+                    style: CS_HREDRAW | CS_VREDRAW,
+                    ..Default::default()
+                };
+                RegisterClassW(&wc_sec);
+
                 // 2. Debug Overlay Window Class (Black Box)
                 let wc_debug = WNDCLASSW {
                     hCursor: HCURSOR::default(),
@@ -59,7 +74,7 @@ impl UIManager {
                 };
                 RegisterClassW(&wc_debug);
 
-                // Create Indicator
+                // Create Indicator 1 (Top)
                 let x = 1920 - 5; 
                 let y = 0;
 
@@ -69,6 +84,19 @@ impl UIManager {
                     w!(""),
                     WS_POPUP | WS_VISIBLE,
                     x, y, 5, 5,
+                    HWND::default(),
+                    HMENU::default(),
+                    instance,
+                    None,
+                ).unwrap_or(HWND::default());
+
+                // Create Indicator 2 (Bottom)
+                let hwnd_sec = CreateWindowExW(
+                    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED,
+                    secondary_class_name,
+                    w!(""),
+                    WS_POPUP | WS_VISIBLE,
+                    x, y + 5, 5, 5, // Just below the first one
                     HWND::default(),
                     HMENU::default(),
                     instance,
@@ -91,9 +119,13 @@ impl UIManager {
                 if hwnd.0.is_null() { return; }
 
                 let _ = ShowWindow(hwnd, SW_SHOW);
+                let _ = ShowWindow(hwnd_sec, SW_SHOW);
                 
-                // Opacity for Indicator
+                // Opacity for Indicator 1
                 let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
+
+                // Opacity for Indicator 2
+                let _ = SetLayeredWindowAttributes(hwnd_sec, COLORREF(0), 255, LWA_ALPHA);
 
                 // Opacity for Debug (50%)
                 let _ = SetLayeredWindowAttributes(hwnd_debug, COLORREF(0), 128, LWA_ALPHA);
@@ -112,6 +144,10 @@ impl UIManager {
                             UICommand::SetColor(c) => {
                                 CURRENT_COLOR = c;
                                 let _ = InvalidateRect(hwnd, None, false);
+                            },
+                             UICommand::SetSecondaryColor(c) => {
+                                SECONDARY_COLOR = c;
+                                let _ = InvalidateRect(hwnd_sec, None, false);
                             },
                             UICommand::DrawDebugRect(x, y, w, h) => {
                                 let _ = ShowWindow(hwnd_debug, SW_SHOW);
@@ -149,6 +185,23 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }
+
+unsafe extern "system" fn secondary_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    match msg {
+        WM_PAINT => {
+            let mut ps = PAINTSTRUCT::default();
+            let hdc = BeginPaint(hwnd, &mut ps);
+            let color = COLORREF(SECONDARY_COLOR); 
+            let brush = CreateSolidBrush(color);
+            FillRect(hdc, &ps.rcPaint, brush);
+            let _ = DeleteObject(brush);
+            let _ = EndPaint(hwnd, &ps);
+            LRESULT(0)
+        }
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
 
 unsafe extern "system" fn debug_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {

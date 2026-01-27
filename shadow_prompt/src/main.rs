@@ -5,6 +5,7 @@ mod ui;
 mod ocr;
 mod llm;
 mod knowledge;
+mod utils;
 
 
 use crate::config::Config;
@@ -13,6 +14,7 @@ use crate::clipboard::ClipboardManager;
 use crate::ui::{UIManager, UICommand};
 use crate::llm::LlmClient;
 use crate::knowledge::KnowledgeProvider;
+use crate::utils::{parse_mcq_answer, McqAnswer};
 use std::sync::mpsc;
 
 #[tokio::main]
@@ -93,6 +95,7 @@ async fn main() -> anyhow::Result<()> {
                 InputEvent::Model => {
                     println!("[!] EVENT: Model Key Pressed (Clipboard Trigger)");
                     let _ = ui_tx.send(UICommand::SetColor(0x000000FF)); // Red
+                    let _ = ui_tx.send(UICommand::SetSecondaryColor(0x00000000)); // Reset Secondary
                     
                     let config_clone = config.clone();
                     let ui_tx_clone = ui_tx.clone();
@@ -137,13 +140,31 @@ async fn main() -> anyhow::Result<()> {
                              }
                         };
 
-                        // 3. Write Clipboard
+                        // 4. Check for MCQ Answer
+                        if let Some(ans) = parse_mcq_answer(&response) {
+                             let color = match ans {
+                                 McqAnswer::A => 0x00FFFF00, // Cyan
+                                 McqAnswer::B => 0x00FF00FF, // Magenta
+                                 McqAnswer::C => 0x0000FFFF, // Yellow
+                                 McqAnswer::D => 0x00000000, // Black
+                             };
+                             println!("[+] MCQ Detected: {:?} -> Color: {:08X}", ans, color);
+                             let _ = ui_tx_clone.send(UICommand::SetSecondaryColor(color));
+                        }
+
+                        // 5. Write Clipboard (Always)
                         if let Err(e) = ClipboardManager::write(&response) {
                             eprintln!("Clipboard Write Error: {}", e);
                         }
 
                         println!("[*] Response written to clipboard.");
                         let _ = ui_tx_clone.send(UICommand::SetColor(0x0000FF00)); // Reset Green
+                        
+                        // We do NOT reset the secondary color immediately here, so the user can see it.
+                        // However, we should probably reset it on the NEXT trigger or after a timeout?
+                        // The user request didn't specify reset behavior, but usually indicators stay until next action.
+                        // But wait, if I run another query, I should probably clear it at the START of the event.
+                        // I'll add a clear command at the start of InputEvent::Model.
                     });
                 },
                 InputEvent::Panic => {

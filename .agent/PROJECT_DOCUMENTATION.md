@@ -25,7 +25,7 @@ We utilize **Rust** for its memory safety, zero-dependency compilation (static b
 | **OCR Engine** | **Windows.Media.Ocr** | Native Windows 10/11 API. Adds **0MB** to binary size. Privacy-friendly (local). |
 | **Windowing/GUI** | **Windows API (Win32)** | Required for creating the "invisible" overlay and handling global keyboard hooks without a GUI framework. |
 | **Vector DB** | **LanceDB** | Serverless, embedded vector database. |
-| **LLM Provider** | **OpenRouter** | **Justification:** Aggregates top-tier *free* models (e.g., Gemini Free, Llama 3 Free) into a single API. <br> **Alternatives:** <br> 1. **Groq:** (Free/Fast) - *Recommended if OpenRouter adds cost.* <br> 2. **Google Gemini API:** (Free Tier) - *Good fallback.* |
+| **LLM Provider** | **Groq (Primary) + OpenRouter (Fallback)** | **Justification:** Multi-tier fallback strategy for high availability and low latency. <br> 1. **Groq:** `llama-3.1-8b-instant` (Ultra-fast, Free). <br> 2. **OpenRouter:** `google/gemma-3-27b-it:free` (High-quality fallback). <br> 3. **Ollama:** `llama3` (Local offline fallback). |
 
 ---
 
@@ -45,7 +45,10 @@ This is the primary method. The user supplies the text via standard system copy.
 3.  **Visual:** **Red Pixel** appears (Top Right) to indicate "Thinking/Processing".
 4.  **Processing:**
     *   App reads current clipboard content.
-    *   **Logic:** Sends content to **Google Gemini Flash 2.0** (via OpenRouter or Direct) for high-speed, free reasoning.
+    *   **Logic (Fallback Chain):** 
+        1. **Try Groq:** Fast inference using `llama-3.1-8b-instant`.
+        2. **Try OpenRouter:** If Groq fails (Rate Limit/Error), use `google/gemma-3-27b-it:free`.
+        3. **Try Ollama:** Final local fallback if internet is down.
     *   *Note: If "Web Search" is strictly needed (live data), we will need to add a specialized search tool (e.g., DuckDuckGo API), but for now, we rely on the generic intelligence of the LLM.*
 5.  **Output:** App overwrites system clipboard with the Answer.
 6.  **Visual:** Red Pixel disappears.
@@ -133,18 +136,21 @@ ready_color = "#00FF00"
 cursor_change = false
 
 [models]
-# Options: "openrouter", "github_copilot", "ollama", "google_gemini_api"
-provider = "ollama"
+# Options: "openrouter", "github_copilot", "ollama", "groq"
+provider = "groq"
+
+[models.groq]
+api_key = "gsk_..."
+model_id = "llama-3.1-8b-instant"
 
 [models.openrouter]
-api_key = "sk-..."
-model_id = "google/gemini-2.0-flash-001"
-
-[models.github_copilot]
-token_path = "config/copilot_token.json"
-
+api_key = "sk-or-..."
+model_id = "google/gemma-3-27b-it:free"
 
 [models.ollama]
 base_url = "http://localhost:11434"
 model_id = "llama3"
+
+[models.github_copilot]
+token_path = "config/copilot_token.json"
 ```
