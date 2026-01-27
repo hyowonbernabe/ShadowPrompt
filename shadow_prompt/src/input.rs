@@ -98,23 +98,3 @@ fn check_combo(pressed: &HashSet<Key>, target: &Vec<Key>) -> bool {
     if target.is_empty() { return false; }
     target.iter().all(|k| pressed.contains(k))
 }
-
-// Helper to convert string config to Keys (Simplified for prototype)
-pub fn parse_keys(config_str: &str) -> Vec<Key> {
-    let mut keys = Vec::new();
-    for part in config_str.split('+') {
-        match part.trim().to_lowercase().as_str() {
-            "ctrl" => keys.push(Key::ControlLeft), // Assume Left for simplicity or add both
-            "shift" => keys.push(Key::ShiftLeft),
-            "alt" => keys.push(Key::Alt),
-            "space" => keys.push(Key::Space),
-            "v" => keys.push(Key::KeyV),
-            "f12" => keys.push(Key::F12),
-            _ => {
-                // In a real app, map all keys. For now, handle common ones.
-                eprintln!("Warning: Unknown key in config: {}", part);
-            }
-        }
-    }
-    keys
-}

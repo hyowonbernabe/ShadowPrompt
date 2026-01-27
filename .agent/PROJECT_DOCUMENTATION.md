@@ -137,10 +137,17 @@ The application assumes relative paths. The USB drive letter can change without 
 
 ```toml
 [general]
-mode = "stealth"
-wake_key = "Ctrl+Shift+Space"
-model_key = "Ctrl+Shift+V"
-panic_key = "Ctrl+Shift+F12"
+mode = "default"
+wake_key = "Alt + Space"     # Enter OCR Selection Mode
+model_key = "Ctrl + Space"   # Send Clipboard to Model
+panic_key = "F8"             # Force Exit
+
+# Keybind Configuration:
+# - Supported Modifiers: Ctrl, Shift, Alt, Win/Meta
+# - Supported Keys: A-Z, 0-9, F1-F12, Space, Enter, Esc, Tab, Backspace, CapsLock
+# - Format: "Modifier + Key" or "Modifier + Modifier + Key"
+# - Note: Overlapping keybinds will trigger a warning on startup.
+
 use_rag = true
 
 [visuals]

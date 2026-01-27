@@ -9,12 +9,12 @@ mod utils;
 
 
 use crate::config::Config;
-use crate::input::{InputManager, InputEvent, parse_keys};
+use crate::input::{InputManager, InputEvent};
 use crate::clipboard::ClipboardManager;
 use crate::ui::{UIManager, UICommand};
 use crate::llm::LlmClient;
 use crate::knowledge::KnowledgeProvider;
-use crate::utils::{parse_mcq_answer, McqAnswer, parse_hex_color};
+use crate::utils::{parse_mcq_answer, McqAnswer, parse_hex_color, parse_keys};
 use std::sync::mpsc;
 
 #[tokio::main]
@@ -31,6 +31,19 @@ async fn main() -> anyhow::Result<()> {
 
     println!("[*] Loaded Configuration. Mode: {}", config.general.mode);
     println!("[*] Active Provider: {}", config.models.provider);
+
+    // KEYBIND CONFLICT CHECK
+    let wake_str = config.general.wake_key.to_lowercase();
+    let model_str = config.general.model_key.to_lowercase();
+    let panic_str = config.general.panic_key.to_lowercase();
+
+    if wake_str == model_str || wake_str == panic_str || model_str == panic_str {
+        eprintln!("\n/!\\ WARNING: DUPLICATE KEYBINDS DETECTED /!\\");
+        eprintln!("    Wake:  {}", config.general.wake_key);
+        eprintln!("    Model: {}", config.general.model_key);
+        eprintln!("    Panic: {}", config.general.panic_key);
+        eprintln!("    Behavior is undefined for overlapping keys.\n");
+    }
 
     // 2. Start Visual Feedback Thread
     let (ui_tx, ui_rx) = mpsc::channel();
