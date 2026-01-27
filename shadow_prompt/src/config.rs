@@ -111,8 +111,11 @@ pub struct OllamaConfig {
 #[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)]
 pub struct RagConfig {
-    pub chunk_size: usize,
-    pub overlap: usize,
+    pub enabled: bool,
+    pub knowledge_path: String,
+    pub index_path: String,
+    pub max_results: usize,
+    pub min_score: f32,
 }
 
 #[derive(Debug, Deserialize, Clone)]

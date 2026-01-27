@@ -25,7 +25,8 @@ We utilize **Rust** for its memory safety, zero-dependency compilation (static b
 | **Language** | **Rust** | Compiles to a single `.exe`. Extremely performant and lightweight. |
 | **OCR Engine** | **Windows.Media.Ocr** | Native Windows 10/11 API. Adds **0MB** to binary size. Privacy-friendly (local). |
 | **Windowing/GUI** | **Windows API (Win32)** | Required for creating the "invisible" overlay and handling global keyboard hooks without a GUI framework. |
-| **Vector DB** | **LanceDB** | Serverless, embedded vector database. |
+| **Vector DB** | **Lightweight (JSON/Memory)** | Simplified RAG using in-memory vectors and JSON storage for maximum portability. |
+| **Embeddings** | **FastEmbed-rs** | Local ONNX-based embedding generation (BGE-Small-EN-v1.5). No API keys required. |
 | **LLM Provider** | **Groq (Primary) / OpenRouter (Secondary) / Ollama (Dev)** | **Justification:** Configurable provider selection. <br> 1. **Groq:** `llama-3.1-8b-instant` (Ultra-fast, Free). <br> 2. **OpenRouter:** `google/gemma-3-27b-it:free` (High-quality). <br> 3. **Ollama:** `llama3` (Local Dev/Debug). |
 
 ---
@@ -97,11 +98,14 @@ The application assumes relative paths. The USB drive letter can change without 
 │   ├── config.toml             # Keys, Model IDs, Prompts
 │   └── system_prompt.txt       # "You are a concise assistant..."
 ├── data/
-│   ├── vectors/                # LanceDB data files
+│   ├── rag_index/              # JSON index + logs
 │   └── logs/
-├── knowledge/                  # RAG Source
-│   ├── documentation.pdf
-│   └── cheat_sheet.txt
+├── knowledge/                  # RAG Source (Drop .md/.txt files here)
+│   ├── documentation.md
+│   └── secure_notes.txt
+├── tools/                      # Build Tools
+│   └── protoc/                 # Portable Protobuf Compiler (Required for Build)
+└── Launcher.bat                # Portable Launcher (Sets up env vars)
 └── models/
     └── embedding_model.onnx    # Local quantization model
 ```
@@ -149,7 +153,14 @@ panic_key = "F8"             # Force Exit
 # - Format: "Modifier + Key" or "Modifier + Modifier + Key"
 # - Note: Overlapping keybinds will trigger a warning on startup.
 
-use_rag = true
+# - Note: Overlapping keybinds will trigger a warning on startup.
+ 
+[rag]
+enabled = true
+knowledge_path = "knowledge"    # Relative path to scan
+index_path = "data/rag_index"   # Internal DB path
+max_results = 3
+min_score = 0.7
 
 [visuals]
 indicator_color = "#FF0000" # Processing Color
@@ -188,4 +199,11 @@ model_id = "llama3"
 
 [models.github_copilot]
 token_path = "config/copilot_token.json"
+token_path = "config/copilot_token.json"
+
+## 8. Build & Deployment
+To ensure portability across Windows machines:
+1.  **Build**: Use the provided `Launcher.bat` or manually set `PROTOC` env var to `tools/protoc/bin/protoc.exe`.
+2.  **Run**: Double-click `Launcher.bat`.
+3.  **Knowledge**: Add files to `knowledge/`. Restart app to re-index.
 ```

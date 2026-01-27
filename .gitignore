@@ -23,3 +23,8 @@ config/usage.json
 shadow_prompt/config/config.toml
 shadow_prompt/auth.json
 auth.json
+
+# Local Data (Models, Indices)
+shadow_prompt/data/
+shadow_prompt/tools/protoc/bin/
+shadow_prompt/tools/protoc/include/

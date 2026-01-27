@@ -45,6 +45,11 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("    Behavior is undefined for overlapping keys.\n");
     }
 
+    // 2. Initialize Knowledge Provider (Search & RAG)
+    // This might take a moment if downloading embedding models.
+    println!("[*] Initializing Knowledge Provider...");
+    let knowledge_provider = std::sync::Arc::new(KnowledgeProvider::new(&config).await?);
+
     // 2. Start Visual Feedback Thread
     let (ui_tx, ui_rx) = mpsc::channel();
     UIManager::start(ui_rx, config.visuals.clone());
@@ -126,9 +131,9 @@ async fn main() -> anyhow::Result<()> {
                     let config_clone = config.clone();
                     let ui_tx_clone = ui_tx.clone();
                     let ready_color = parse_hex_color(&config.visuals.ready_color);
+                    let kp_arc = knowledge_provider.clone();
 
                     tokio::spawn(async move {
-
 
                         // 1. Read Clipboard
                         let prompt = match ClipboardManager::read() {
@@ -142,8 +147,9 @@ async fn main() -> anyhow::Result<()> {
 
                         println!("[*] Processing Query: {:.50}...", prompt);
 
+
                         // 2. Gather Context (Search/RAG)
-                        let context = match KnowledgeProvider::gather_context(&prompt, &config_clone).await {
+                        let context = match kp_arc.gather_context(&prompt, &config_clone).await {
                              Ok(ctx) => ctx,
                              Err(e) => {
                                  eprintln!("Knowledge Error: {}", e);

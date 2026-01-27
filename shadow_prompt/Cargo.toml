@@ -40,6 +40,17 @@ oauth2 = { version = "4.4.2", features = ["reqwest"] }
 open = "5.3.3"
 url = "2.5.8"
 
-# Embeddings & Vector DB (Commented out until Phase 3/4 to speed up initial build)
-# ort = "2.0"
-# lancedb = "0.6"
+# Build dependencies removed (Using local tools/protoc via Launcher.bat)
+
+
+# Embeddings & Vector DB
+fastembed = "4"
+# lancedb & arrow removed for portability/simplicity
+
+
+# File Scanning & Text Processing
+glob = "0.3"
+text-splitter = { version = "0.16", features = ["markdown"] }
+uuid = { version = "1", features = ["v4"] } # For ID generation
+
+
