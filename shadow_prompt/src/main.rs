@@ -6,6 +6,7 @@ mod ocr;
 mod llm;
 mod knowledge;
 mod utils;
+mod setup;
 
 
 use crate::config::Config;
@@ -17,15 +18,40 @@ use crate::knowledge::KnowledgeProvider;
 use crate::utils::{parse_mcq_answer, McqAnswer, parse_hex_color, parse_keys};
 use std::sync::mpsc;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // 1. Load Configuration
+fn main() -> anyhow::Result<()> {
+    // 1. Setup Wizard (First Run or --setup)
+    let args: Vec<String> = std::env::args().collect();
+    let force_setup = args.contains(&"--setup".to_string()) || args.contains(&"--reset-setup".to_string());
+
+    if !Config::is_setup_complete() || force_setup {
+        println!("[*] Starting ShadowPrompt Setup Wizard...");
+        let wizard = crate::setup::SetupWizard::new();
+        wizard.show();
+        
+        // If show returns, it means the window was closed without finishing.
+        // We exit here to avoid starting the app without setup.
+        // If they finished, the wizard would have re-execed and exited.
+        println!("[*] Setup Wizard closed. Exit.");
+        return Ok(());
+    }
+
+    // 2. Start Main Application Logic (Async)
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+
+    rt.block_on(run_app())
+}
+
+async fn run_app() -> anyhow::Result<()> {
+    // 2. Load Configuration
     println!("[*] Loading ShadowPrompt...");
     let config = match Config::load() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("[!] Configuration Error: {}", e);
-            return Err(e);
+            // Fallback to default if load fails (might happen if config is corrupted)
+            Config::default()
         }
     };
 

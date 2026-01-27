@@ -24,7 +24,8 @@ We utilize **Rust** for its memory safety, zero-dependency compilation (static b
 | :--- | :--- | :--- |
 | **Language** | **Rust** | Compiles to a single `.exe`. Extremely performant and lightweight. |
 | **OCR Engine** | **Windows.Media.Ocr** | Native Windows 10/11 API. Adds **0MB** to binary size. Privacy-friendly (local). |
-| **Windowing/GUI** | **Windows API (Win32)** | Required for creating the "invisible" overlay and handling global keyboard hooks without a GUI framework. |
+| **Windowing/GUI** | **Windows API (Win32)** | Required for creating the "invisible" overlay and handling global keyboard hooks. |
+| **Setup Framework** | **eframe (egui)** | Lightweight GUI used exclusively for the First-Run Setup Wizard. |
 | **Vector DB** | **Lightweight (JSON/Memory)** | Simplified RAG using in-memory vectors and JSON storage for maximum portability. |
 | **Embeddings** | **FastEmbed-rs** | Local ONNX-based embedding generation (BGE-Small-EN-v1.5). No API keys required. |
 | **LLM Provider** | **Groq (Primary) / OpenRouter (Secondary) / Ollama (Dev)** | **Justification:** Configurable provider selection. <br> 1. **Groq:** `llama-3.1-8b-instant` (Ultra-fast, Free). <br> 2. **OpenRouter:** `google/gemma-3-27b-it:free` (High-quality). <br> 3. **Ollama:** `llama3` (Local Dev/Debug). |
@@ -33,7 +34,16 @@ We utilize **Rust** for its memory safety, zero-dependency compilation (static b
 
 ## 3. Workflow & UX Strategy
 
-### A. The "Stealth" Loop (Startup)
+### A. First-Run GUI Setup
+On initial launch (or when using the `--setup` flag), ShadowPrompt launches a visible configuration wizard.
+
+1.  **Welcome**: Warns that setup runs only once and settings must be edited manually in `config.toml` afterwards.
+2.  **API Config**: Configures the primary LLM provider and API keys.
+3.  **Hotkeys**: Records user-preferred keybinds for Wake, Model, and Panic operations.
+4.  **Resources**: downloads essential `fastembed` models to `data/models` and verifies `onnxruntime.dll`.
+5.  **Re-exec Logic**: To ensure a clean transition, the Wizard spawns a new stealth instance of the app and exits itself immediately. This prevents "Not Responding" hangs on Windows.
+
+### B. The "Stealth" Loop (Startup)
 1.  **User Action:** Plug in USB, run `shadow_prompt.exe`.
 2.  **State:** Background process starts.
 3.  **Visual Feedback:** A single **Green Pixel** appears in the top-right (or very right) of the screen to indicate "Loaded/Ready".

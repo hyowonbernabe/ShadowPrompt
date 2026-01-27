@@ -1,7 +1,7 @@
 {
   "documents": [
     {
-      "id": "82fe55e2-321a-4425-ba06-c2ca2fd93419",
+      "id": "459fe148-94c0-42e7-9e34-37246100d64f",
       "path": "knowledge\\password.md",
       "content": "# Password For The Question\r\nThe password is: Duck",
       "embedding": [
@@ -392,7 +392,7 @@
       ]
     },
     {
-      "id": "9b58ec45-8730-4aee-92ca-b5c20a54ac65",
+      "id": "b1f50600-4761-411e-bc96-f37bd4528ab5",
       "path": "knowledge\\sample.md",
       "content": "# ShadowPrompt Capabilities\r\n\r\nShadowPrompt is an advanced AI interaction tool that uses OCR to \"read\" your screen and answer questions about it.\r\nIt integrates with Local RAG to provide knowledge from files in this folder.\r\nThe Secret Code for verification is: MIRAGE-42.",
       "embedding": [
