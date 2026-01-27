@@ -17,13 +17,6 @@ provider = "ollama" # or "openrouter", "openai", etc.
 base_url = "http://localhost:11434"
 model_id = "llama3"
 
-# [auth]
-# Optional: Configure Google Auth if you want to use your own GCP Project.
-# If omitted, basic features work with the built-in public client.
-# [auth.google]
-# enabled = true
-# client_id = "YOUR_CLIENT_ID"
-# client_secret = "YOUR_CLIENT_SECRET"
 
 [search]
 enabled = true

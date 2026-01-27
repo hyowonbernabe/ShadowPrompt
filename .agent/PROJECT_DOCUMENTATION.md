@@ -133,8 +133,8 @@ ready_color = "#00FF00"
 cursor_change = false
 
 [models]
-# Options: "openrouter", "github_copilot", "google_antigravity", "ollama", "google_gemini_api"
-provider = "openrouter"
+# Options: "openrouter", "github_copilot", "ollama", "google_gemini_api"
+provider = "ollama"
 
 [models.openrouter]
 api_key = "sk-..."
@@ -143,8 +143,6 @@ model_id = "google/gemini-2.0-flash-001"
 [models.github_copilot]
 token_path = "config/copilot_token.json"
 
-[models.google_antigravity]
-api_key = "ag-..."
 
 [models.ollama]
 base_url = "http://localhost:11434"
