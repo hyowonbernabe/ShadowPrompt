@@ -1,6 +1,6 @@
 # ShadowPrompt: Portable Stealth AI Architecture
 
-**Version:** 1.0.0
+**Version:** 1.0.5
 **Target OS:** Windows 10/11
 **Language:** Rust
 
@@ -35,12 +35,15 @@ We utilize **Rust** for its memory safety, zero-dependency compilation (static b
 ## 3. Workflow & UX Strategy
 
 ### A. First-Run GUI Setup
-On initial launch (or when using the `--setup` flag), ShadowPrompt launches a visible configuration wizard.
-1. **Welcome**: Warns that setup runs only once.
-2. **API Config**: Configures the primary LLM provider and API keys.
-3. **Hotkeys**: Records user-preferred keybinds.
-4. **Resources**: Downloads essential `fastembed` models to `data/models`.
-5. **Re-exec Logic**: Spawns the stealth background process and exits the wizard.
+On initial launch (or when using the `--setup` flag), ShadowPrompt launches an 8-page configuration wizard.
+1. **Welcome**: Introduction and getting started.
+2. **Terms of Service**: Legal agreement and disclaimer.
+3. **LLM Provider**: Configure API keys for Groq, OpenRouter, or Ollama.
+4. **Features**: Overview of capabilities including Local RAG and Auto-LLM fallback.
+5. **Hotkeys**: Record custom keybinds with intuitive key combination capture.
+6. **Visuals**: Customize pixel colors and positions.
+7. **Downloads**: Fetches required FastEmbed models to `data/models`.
+8. **Credits**: Acknowledgments and completion.
 
 ### B. The "Stealth" Loop (Startup)
 1. **User Action:** Plug in USB, run `shadow_prompt.exe`.

@@ -11,31 +11,68 @@ impl LlmClient {
         
         match config.models.provider.as_str() {
             "groq" => Self::query_groq(&client, prompt, config).await,
-            "auto" => {
-                // Priority: Groq -> OpenRouter
-                if let Some(groq) = &config.models.groq {
-                    if !groq.api_key.is_empty() && groq.api_key != "your_groq_api_key_here" {
-                         match Self::query_groq(&client, prompt, config).await {
-                             Ok(res) => return Ok(res),
-                             Err(e) => error!("Auto-Groq failed: {}. Falling back...", e),
-                         }
-                    }
-                }
-                
-                if let Some(or) = &config.models.openrouter {
-                    if !or.api_key.is_empty() && or.api_key != "your_openrouter_api_key_here" {
-                        return Self::query_openrouter(&client, prompt, config).await;
-                    }
-                }
-                
-                anyhow::bail!("Auto-Provider: No valid API keys found for Groq or OpenRouter. Please configure them in Setup or config.toml.")
-            },
-
             "openrouter" => Self::query_openrouter(&client, prompt, config).await,
             "ollama" => Self::query_ollama(&client, prompt, config).await,
+            "auto" => Self::query_with_fallback(&client, prompt, config).await,
             "github_copilot" => anyhow::bail!("GitHub Copilot provider not fully implemented yet"),
             _ => anyhow::bail!("Unknown provider: {}", config.models.provider),
         }
+    }
+
+    /// Auto-LLM Selection with fallback chain: Groq -> OpenRouter -> Ollama
+    async fn query_with_fallback(client: &Client, prompt: &str, config: &Config) -> Result<String> {
+        // Priority 1: Groq (fastest, free tier)
+        if let Some(groq) = &config.models.groq {
+            if !groq.api_key.is_empty() && groq.api_key != "your_groq_api_key_here" {
+                match Self::query_groq(client, prompt, config).await {
+                    Ok(res) => return Ok(res),
+                    Err(e) => {
+                        if Self::is_rate_limit_error(&e) {
+                            warn!("Groq rate limited, falling back to next provider...");
+                        } else {
+                            error!("Groq failed: {}. Trying next provider...", e);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Priority 2: OpenRouter (wider model selection)
+        if let Some(or) = &config.models.openrouter {
+            if !or.api_key.is_empty() && or.api_key != "your_openrouter_api_key_here" {
+                match Self::query_openrouter(client, prompt, config).await {
+                    Ok(res) => return Ok(res),
+                    Err(e) => {
+                        if Self::is_rate_limit_error(&e) {
+                            warn!("OpenRouter rate limited, falling back to Ollama...");
+                        } else {
+                            error!("OpenRouter failed: {}. Trying Ollama...", e);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Priority 3: Ollama (local, no rate limits)
+        if config.models.ollama.is_some() {
+            match Self::query_ollama(client, prompt, config).await {
+                Ok(res) => return Ok(res),
+                Err(e) => {
+                    error!("Ollama failed: {}", e);
+                }
+            }
+        }
+        
+        anyhow::bail!("All providers failed. Please check your API keys and network connection.")
+    }
+
+    /// Check if an error is a rate limit (429) error
+    fn is_rate_limit_error(error: &anyhow::Error) -> bool {
+        let error_str = error.to_string().to_lowercase();
+        error_str.contains("429") 
+            || error_str.contains("rate limit")
+            || error_str.contains("too many requests")
+            || error_str.contains("quota exceeded")
     }
 
     async fn query_groq(client: &Client, prompt: &str, config: &Config) -> Result<String> {

@@ -8,9 +8,22 @@ echo.
 
 cd /d "%~dp0shadow_prompt"
 
+:: Extract version from Cargo.toml
+for /f "tokens=3 delims= " %%v in ('findstr /r "^version" Cargo.toml') do (
+    set "RAW_VERSION=%%v"
+)
+:: Remove quotes from version string
+set "VERSION=%RAW_VERSION:"=%"
+echo [*] Building version: v%VERSION%
+echo.
+
 :: Set PROTOC path for build
 set "PROTOC=%CD%\tools\protoc\bin\protoc.exe"
 echo [*] PROTOC Path: %PROTOC%
+
+:: Clean previous build artifacts
+echo [*] Cleaning previous build...
+cargo clean --release 2>nul
 
 :: Build release binary
 echo [*] Building release binary...
@@ -30,7 +43,7 @@ mkdir "%RELEASE_DIR%"
 
 :: Copy executable
 echo [*] Copying executable...
-copy "target\release\shadow_prompt.exe" "%RELEASE_DIR%\" >nul
+copy "target\release\Shadow_Prompt.exe" "%RELEASE_DIR%\" >nul
 
 :: Copy required DLLs
 echo [*] Copying DLLs...
@@ -54,7 +67,7 @@ if exist "config\system_prompt.txt" (
 :: Create README for users
 echo [*] Creating README...
 (
-echo ShadowPrompt - Portable AI Assistant
+echo ShadowPrompt v%VERSION% - Portable AI Assistant
 echo =====================================
 echo.
 echo QUICK START:
@@ -82,14 +95,16 @@ echo.
 dir "%RELEASE_DIR%" /s /b
 echo.
 
-:: Create zip (requires PowerShell)
-set "ZIP_FILE=%~dp0release\ShadowPrompt-windows-x64.zip"
+:: Create versioned zip (requires PowerShell)
+set "ZIP_FILE=%~dp0release\ShadowPrompt-v%VERSION%-windows-x64.zip"
 if exist "%ZIP_FILE%" del "%ZIP_FILE%"
-echo [*] Creating ZIP archive...
+echo [*] Creating ZIP archive: ShadowPrompt-v%VERSION%-windows-x64.zip
 powershell -Command "Compress-Archive -Path '%RELEASE_DIR%' -DestinationPath '%ZIP_FILE%' -Force"
 
 if exist "%ZIP_FILE%" (
     echo [+] ZIP created: %ZIP_FILE%
+    echo.
+    echo Ready for release!
 ) else (
     echo [!] Failed to create ZIP
 )

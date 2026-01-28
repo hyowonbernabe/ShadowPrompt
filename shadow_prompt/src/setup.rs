@@ -1,55 +1,125 @@
 use std::sync::mpsc::{self, Receiver};
 use eframe::egui;
 use crate::config::Config;
+use crate::tos_text::{TOS_TEXT, TOS_VERSION};
+use crate::hotkey_recorder::{HotkeyRecorder, hotkey_field, validate_hotkeys};
+use crate::color_picker::{color_picker, color_picker_compact};
 use std::path::Path;
-#[derive(PartialEq)]
+
+// --- Page Enum ---
+
+#[derive(PartialEq, Clone, Copy)]
 enum SetupPage {
-    Welcome,
-    ApiConfig,
+    Landing,
+    TermsOfService,
+    LLMProvider,
+    Features,
     Hotkeys,
     Visuals,
     Downloads,
-    Finish,
+    Credits,
 }
 
 impl SetupPage {
-    #[allow(dead_code)]
-    fn dark() -> egui::Visuals {
-        egui::Visuals::dark()
+    fn index(&self) -> usize {
+        match self {
+            SetupPage::Landing => 1,
+            SetupPage::TermsOfService => 2,
+            SetupPage::LLMProvider => 3,
+            SetupPage::Features => 4,
+            SetupPage::Hotkeys => 5,
+            SetupPage::Visuals => 6,
+            SetupPage::Downloads => 7,
+            SetupPage::Credits => 8,
+        }
+    }
+
+    fn total() -> usize { 8 }
+
+    fn title(&self) -> &'static str {
+        match self {
+            SetupPage::Landing => "Welcome",
+            SetupPage::TermsOfService => "Terms of Service",
+            SetupPage::LLMProvider => "LLM Provider",
+            SetupPage::Features => "Features",
+            SetupPage::Hotkeys => "Hotkey Configuration",
+            SetupPage::Visuals => "Visual Preferences",
+            SetupPage::Downloads => "Modules & Models",
+            SetupPage::Credits => "Credits",
+        }
     }
 }
 
-// ... (skipping to update) ...
+// --- Provider State ---
 
-// Later in the file
-// ui.add(egui::Image::new(egui::include_image!("../assets/logo_512.png")).max_width(128.0));
+#[derive(Default)]
+struct ProviderState {
+    groq_enabled: bool,
+    openrouter_enabled: bool,
+    ollama_enabled: bool,
+}
+
+impl ProviderState {
+    fn from_config(config: &Config) -> Self {
+        Self {
+            groq_enabled: config.models.groq.as_ref().map(|g| !g.api_key.is_empty()).unwrap_or(false),
+            openrouter_enabled: config.models.openrouter.as_ref().map(|o| !o.api_key.is_empty()).unwrap_or(false),
+            ollama_enabled: config.models.ollama.is_some(),
+        }
+    }
+
+    fn has_at_least_one(&self) -> bool {
+        self.groq_enabled || self.openrouter_enabled || self.ollama_enabled
+    }
+}
+
+// --- Main Wizard Struct ---
 
 pub struct SetupWizard {
     current_page: SetupPage,
     config: Config,
+
+    // TOS
+    tos_accepted: bool,
+
+    // Provider
+    provider_state: ProviderState,
+
+    // Hotkeys
+    wake_recorder: HotkeyRecorder,
+    model_recorder: HotkeyRecorder,
+    panic_recorder: HotkeyRecorder,
+    hotkey_error: Option<String>,
+
+    // Downloads
     downloading: bool,
-    download_progress: f32, // 0.0 to 1.0 (indeterminate if 0)
+    download_progress: f32,
     download_status: String,
-    download_rx: Option<Receiver<(f32, String)>>, // Channel for status updates
+    download_rx: Option<Receiver<(f32, String)>>,
     download_success: bool,
-    dll_missing: bool,
+
     finished: bool,
 }
 
 impl SetupWizard {
     pub fn new() -> Self {
         let config = Config::load().unwrap_or_default();
-        let dll_missing = !Path::new("bin/onnxruntime.dll").exists() && !Path::new("onnxruntime.dll").exists();
-        
+        let provider_state = ProviderState::from_config(&config);
+
         Self {
-            current_page: SetupPage::Welcome,
+            current_page: SetupPage::Landing,
             config,
+            tos_accepted: false,
+            provider_state,
+            wake_recorder: HotkeyRecorder::new(),
+            model_recorder: HotkeyRecorder::new(),
+            panic_recorder: HotkeyRecorder::new(),
+            hotkey_error: None,
             downloading: false,
             download_progress: 0.0,
-            download_status: "Ready to download models.".to_string(),
+            download_status: "Ready to download.".to_string(),
             download_rx: None,
             download_success: false,
-            dll_missing,
             finished: false,
         }
     }
@@ -57,9 +127,10 @@ impl SetupWizard {
     pub fn show(self) -> bool {
         let options = eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
-                .with_inner_size([600.0, 550.0])
+                .with_inner_size([520.0, 680.0])
+                .with_min_inner_size([450.0, 500.0])
                 .with_title("ShadowPrompt Setup")
-                .with_resizable(false),
+                .with_resizable(true),
             ..Default::default()
         };
 
@@ -67,21 +138,71 @@ impl SetupWizard {
             "ShadowPrompt Setup",
             options,
             Box::new(|cc| {
-                // Install image loaders for PNG
                 egui_extras::install_image_loaders(&cc.egui_ctx);
-                
-                // Set Dark visual style
                 cc.egui_ctx.set_visuals(egui::Visuals::dark());
-                
                 Ok(Box::new(self))
             }),
         );
-        
-        // After GUI closes, determine if we should exit main entirely (if we re-execed)
-        // or just return to main. Actually, re-exec handles the exit.
+
         std::path::Path::new("config/.setup_complete").exists()
     }
+
+    // --- Navigation ---
+
+    fn can_go_next(&self) -> bool {
+        match self.current_page {
+            SetupPage::Landing => true,
+            SetupPage::TermsOfService => self.tos_accepted,
+            SetupPage::LLMProvider => self.provider_state.has_at_least_one(),
+            SetupPage::Features => true,
+            SetupPage::Hotkeys => self.hotkey_error.is_none(),
+            SetupPage::Visuals => true,
+            SetupPage::Downloads => self.download_success,
+            SetupPage::Credits => true,
+        }
+    }
+
+    fn next_page(&mut self) {
+        // Validate before advancing
+        if self.current_page == SetupPage::Hotkeys {
+            if let Err(e) = validate_hotkeys(
+                &self.config.general.wake_key,
+                &self.config.general.model_key,
+                &self.config.general.panic_key,
+            ) {
+                self.hotkey_error = Some(e);
+                return;
+            }
+            self.hotkey_error = None;
+        }
+
+        self.current_page = match self.current_page {
+            SetupPage::Landing => SetupPage::TermsOfService,
+            SetupPage::TermsOfService => SetupPage::LLMProvider,
+            SetupPage::LLMProvider => SetupPage::Features,
+            SetupPage::Features => SetupPage::Hotkeys,
+            SetupPage::Hotkeys => SetupPage::Visuals,
+            SetupPage::Visuals => SetupPage::Downloads,
+            SetupPage::Downloads => SetupPage::Credits,
+            SetupPage::Credits => SetupPage::Credits,
+        };
+    }
+
+    fn prev_page(&mut self) {
+        self.current_page = match self.current_page {
+            SetupPage::Landing => SetupPage::Landing,
+            SetupPage::TermsOfService => SetupPage::Landing,
+            SetupPage::LLMProvider => SetupPage::TermsOfService,
+            SetupPage::Features => SetupPage::LLMProvider,
+            SetupPage::Hotkeys => SetupPage::Features,
+            SetupPage::Visuals => SetupPage::Hotkeys,
+            SetupPage::Downloads => SetupPage::Visuals,
+            SetupPage::Credits => SetupPage::Downloads,
+        };
+    }
 }
+
+// --- eframe App Implementation ---
 
 impl eframe::App for SetupWizard {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -93,7 +214,6 @@ impl eframe::App for SetupWizard {
                 if self.download_progress >= 1.0 {
                     self.downloading = false;
                     self.download_success = true;
-                    // Auto-advance or let user click Next
                 }
                 if self.download_status.starts_with("Error") {
                     self.downloading = false;
@@ -103,140 +223,327 @@ impl eframe::App for SetupWizard {
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            // --- Header ---
             ui.vertical_centered(|ui| {
-                // Logo
-                ui.add(egui::Image::new(egui::include_image!("../assets/logo_512.png")).max_width(128.0));
+                ui.add(egui::Image::new(egui::include_image!("../assets/logo_512.png")).max_width(80.0));
+                ui.add_space(4.0);
                 ui.heading("ShadowPrompt Setup");
-                ui.add_space(10.0);
             });
 
+            // --- Step Indicator ---
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let step_text = format!(
+                    "Step {} of {} — {}",
+                    self.current_page.index(),
+                    SetupPage::total(),
+                    self.current_page.title()
+                );
+                ui.label(egui::RichText::new(step_text).color(egui::Color32::GRAY).size(14.0));
+            });
+
+            // Progress bar
+            let progress = self.current_page.index() as f32 / SetupPage::total() as f32;
+            ui.add(egui::ProgressBar::new(progress).show_percentage().desired_height(16.0));
+
+            ui.add_space(12.0);
             ui.separator();
-            ui.add_space(20.0);
+            ui.add_space(12.0);
 
-            match self.current_page {
-                SetupPage::Welcome => self.show_welcome(ui),
-                SetupPage::ApiConfig => self.show_api_config(ui),
-                SetupPage::Hotkeys => self.show_hotkeys(ui),
-                SetupPage::Visuals => self.show_visuals(ui),
-                SetupPage::Downloads => self.show_downloads(ui),
-                SetupPage::Finish => self.show_finish(ui),
-            }
-
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                ui.add_space(20.0);
-                ui.horizontal(|ui| {
-                    if self.current_page != SetupPage::Welcome 
-                        && self.current_page != SetupPage::Finish 
-                        && !self.downloading 
-                        && ui.button("Back").clicked() 
-                    {
-                        self.prev_page();
+            // --- Page Content ---
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    match self.current_page {
+                        SetupPage::Landing => self.show_landing(ui),
+                        SetupPage::TermsOfService => self.show_tos(ui),
+                        SetupPage::LLMProvider => self.show_llm_provider(ui),
+                        SetupPage::Features => self.show_features(ui),
+                        SetupPage::Hotkeys => self.show_hotkeys(ui),
+                        SetupPage::Visuals => self.show_visuals(ui),
+                        SetupPage::Downloads => self.show_downloads(ui),
+                        SetupPage::Credits => self.show_credits(ui),
                     }
+                });
 
-                    if self.current_page != SetupPage::Finish {
-                        let label = "Next";
-                        let enabled = if self.current_page == SetupPage::Downloads { self.download_success } else { true };
-                        
-                        if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+            // --- Footer Navigation ---
+            ui.add_space(16.0);
+            ui.separator();
+            ui.add_space(8.0);
+
+            ui.horizontal(|ui| {
+                // Back button
+                let show_back = self.current_page != SetupPage::Landing
+                    && self.current_page != SetupPage::Credits
+                    && !self.downloading;
+
+                if show_back && ui.button("← Back").clicked() {
+                    self.prev_page();
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if self.current_page == SetupPage::Credits {
+                        if ui.button("Start ShadowPrompt →").clicked() {
+                            let _ = self.config.save();
+                            let _ = Config::mark_setup_complete();
+                            self.finished = true;
+                            self.spawn_app_and_exit();
+                        }
+                    } else if self.current_page == SetupPage::TermsOfService && !self.tos_accepted {
+                        if ui.button("I Decline").clicked() {
+                            std::process::exit(0);
+                        }
+                        if ui.button("I Accept").clicked() {
+                            self.tos_accepted = true;
+                            self.config.general.tos_accepted = true;
+                            self.config.general.tos_accepted_version = TOS_VERSION.to_string();
                             self.next_page();
                         }
-                    } else if ui.button("Start ShadowPrompt").clicked() {
-                        let _ = self.config.save();
-                        let _ = Config::mark_setup_complete();
-                        self.finished = true;
-                        
-                        // 1. Spawn a clean instance of the app in background
-                        self.spawn_app_and_exit();
+                    } else {
+                        let enabled = self.can_go_next() && !self.downloading;
+                        if ui.add_enabled(enabled, egui::Button::new("Next →")).clicked() {
+                            self.next_page();
+                        }
                     }
-                    
-                    // Removed "Skip Setup" button as downloads are now mandatory
                 });
             });
         });
+
+        // Request repaint for animations
+        if self.downloading || self.wake_recorder.is_recording()
+            || self.model_recorder.is_recording() || self.panic_recorder.is_recording()
+        {
+            ctx.request_repaint();
+        }
     }
 }
 
+// --- Page Implementations ---
+
 impl SetupWizard {
-    fn show_welcome(&mut self, ui: &mut egui::Ui) {
-        ui.label("Welcome to ShadowPrompt! This wizard will help you configure your portable AI assistant.");
-        ui.add_space(10.0);
-        ui.colored_label(egui::Color32::YELLOW, "IMPORTANT: This setup runs only ONCE.");
-        ui.label("After this, the app will run invisibly in the background. To change settings later, you must edit config/config.toml manually.");
+    fn show_landing(&mut self, ui: &mut egui::Ui) {
+        ui.label("Welcome to ShadowPrompt!");
+        ui.add_space(8.0);
+
+        ui.label("This wizard will guide you through the initial setup of your portable AI assistant.");
+        ui.add_space(12.0);
+
+        ui.colored_label(
+            egui::Color32::YELLOW,
+            egui::RichText::new("⚠ IMPORTANT: This setup runs only ONCE.")
+                .strong()
+        );
+        ui.add_space(4.0);
+
+        ui.label("After completing setup, ShadowPrompt will run invisibly in the background. There is no GUI by design.");
+        ui.add_space(8.0);
+
+        ui.label("To modify settings later, edit the ");
+        ui.code("config/config.toml");
+        ui.label(" file directly.");
+        ui.add_space(12.0);
+
+        ui.separator();
+        ui.add_space(8.0);
+
+        ui.label(egui::RichText::new("Portable Design").strong());
+        ui.label("ShadowPrompt is designed to be fully contained. After setup, you can place the entire folder on a USB drive and run it on any Windows 10/11 computer.");
     }
 
-    fn show_api_config(&mut self, ui: &mut egui::Ui) {
-        ui.heading("LLM Provider Configuration");
-        ui.add_space(10.0);
+    fn show_tos(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new("Please read and accept the Terms of Service to continue.").strong());
+        ui.add_space(8.0);
 
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.config.models.provider, "auto".to_string(), "Auto (Best Available)");
-            ui.selectable_value(&mut self.config.models.provider, "groq".to_string(), "Groq (Cloud)");
-            ui.selectable_value(&mut self.config.models.provider, "openrouter".to_string(), "OpenRouter (Cloud)");
-            ui.selectable_value(&mut self.config.models.provider, "ollama".to_string(), "Ollama (Requires Local Server)");
-        });
+        // Scrollable TOS text
+        egui::ScrollArea::vertical()
+            .max_height(280.0)
+            .show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(&mut TOS_TEXT.to_string())
+                        .desired_width(f32::INFINITY)
+                        .interactive(false)
+                        .font(egui::TextStyle::Monospace)
+                );
+            });
 
-        ui.add_space(10.0);
+        ui.add_space(8.0);
 
-        match self.config.models.provider.as_str() {
-            "groq" => {
-                let groq = self.config.models.groq.get_or_insert_with(Default::default);
-                ui.label("Groq API Key:");
-                ui.text_edit_singleline(&mut groq.api_key);
-                ui.label("Model ID:");
-                ui.text_edit_singleline(&mut groq.model_id);
-            }
-            "openrouter" => {
-                let or = self.config.models.openrouter.get_or_insert_with(Default::default);
-                ui.label("OpenRouter API Key:");
-                ui.text_edit_singleline(&mut or.api_key);
-                ui.label("Model ID:");
-                ui.text_edit_singleline(&mut or.model_id);
-            }
-            "ollama" => {
-                let ol = self.config.models.ollama.get_or_insert_with(Default::default);
-                ui.label("Base URL:");
-                ui.text_edit_singleline(&mut ol.base_url);
-                ui.label("Model ID:");
-                ui.text_edit_singleline(&mut ol.model_id);
-            }
-            _ => {}
+        if self.tos_accepted {
+            ui.colored_label(egui::Color32::GREEN, "✓ Terms accepted");
         }
     }
 
-    fn show_hotkeys(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Global Hotkeys");
-        ui.add_space(10.0);
+    fn show_llm_provider(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new("Configure at least one LLM provider to continue.").strong());
+        ui.add_space(4.0);
+        ui.label("You can configure multiple providers. ShadowPrompt will automatically fall back to the next available provider if one fails.");
+        ui.add_space(12.0);
 
-        egui::Grid::new("hotkeys_grid")
-            .num_columns(2)
-            .spacing([20.0, 10.0])
-            .min_col_width(150.0)
-            .show(ui, |ui| {
-                ui.label("Wake (OCR):");
-                ui.add(egui::TextEdit::singleline(&mut self.config.general.wake_key).desired_width(300.0));
-                ui.end_row();
-
-                ui.label("Model Query:");
-                ui.add(egui::TextEdit::singleline(&mut self.config.general.model_key).desired_width(300.0));
-                ui.end_row();
-
-                ui.label("Panic (Exit):");
-                ui.add(egui::TextEdit::singleline(&mut self.config.general.panic_key).desired_width(300.0));
-                ui.end_row();
+        // --- Groq ---
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.provider_state.groq_enabled, "");
+                ui.label(egui::RichText::new("Groq").strong());
+                ui.label(egui::RichText::new("(Recommended)").color(egui::Color32::GREEN).small());
             });
-        
-        ui.add_space(10.0);
-        ui.label("Format: Ctrl+Shift+Key, Alt+Space, etc.");
+            ui.label("Ultra-fast inference with a generous free tier.");
+
+            if self.provider_state.groq_enabled {
+                let groq = self.config.models.groq.get_or_insert_with(Default::default);
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label("API Key:");
+                    ui.add(egui::TextEdit::singleline(&mut groq.api_key).desired_width(250.0).password(true));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Model:");
+                    ui.add(egui::TextEdit::singleline(&mut groq.model_id).desired_width(200.0));
+                });
+            }
+        });
+
+        ui.add_space(8.0);
+
+        // --- OpenRouter ---
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.provider_state.openrouter_enabled, "");
+                ui.label(egui::RichText::new("OpenRouter").strong());
+            });
+            ui.label("Wide selection of models from various providers.");
+
+            if self.provider_state.openrouter_enabled {
+                let or = self.config.models.openrouter.get_or_insert_with(Default::default);
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label("API Key:");
+                    ui.add(egui::TextEdit::singleline(&mut or.api_key).desired_width(250.0).password(true));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Model:");
+                    ui.add(egui::TextEdit::singleline(&mut or.model_id).desired_width(200.0));
+                });
+            }
+        });
+
+        ui.add_space(8.0);
+
+        // --- Ollama ---
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.provider_state.ollama_enabled, "");
+                ui.label(egui::RichText::new("Ollama").strong());
+                ui.label(egui::RichText::new("⚠ Developer Only").color(egui::Color32::YELLOW).small());
+            });
+            ui.label("Local models. Requires Ollama server running separately.");
+
+            if self.provider_state.ollama_enabled {
+                let ol = self.config.models.ollama.get_or_insert_with(Default::default);
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label("Base URL:");
+                    ui.add(egui::TextEdit::singleline(&mut ol.base_url).desired_width(200.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Model:");
+                    ui.add(egui::TextEdit::singleline(&mut ol.model_id).desired_width(150.0));
+                });
+            }
+        });
+
+        ui.add_space(12.0);
+
+        if !self.provider_state.has_at_least_one() {
+            ui.colored_label(egui::Color32::RED, "⚠ Please enable and configure at least one provider.");
+        }
+    }
+
+    fn show_features(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new("ShadowPrompt includes the following features:").strong());
+        ui.add_space(12.0);
+
+        // Web Search
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("🔍 Web Search").strong());
+            ui.label("LLM models can search the web via DuckDuckGo, significantly improving accuracy for current information.");
+        });
+
+        ui.add_space(8.0);
+
+        // Local RAG
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("📚 Local RAG").strong());
+            ui.label("Place documents in the knowledge/ folder. The AI can retrieve relevant context from your local files.");
+            ui.colored_label(egui::Color32::YELLOW, "⚠ Too many documents may slow down responses.");
+            ui.add_space(4.0);
+            if ui.button("📂 View Folder").clicked() {
+                let knowledge_path = crate::config::get_exe_dir().join("knowledge");
+                let _ = std::fs::create_dir_all(&knowledge_path);
+                let _ = open::that(&knowledge_path);
+            }
+        });
+
+        ui.add_space(8.0);
+
+        // Auto LLM Selection
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("🔄 Auto-LLM Fallback").strong());
+            ui.label("If your primary provider hits rate limits, ShadowPrompt automatically switches to the next available provider.");
+            ui.label(egui::RichText::new("Priority: Groq → OpenRouter → Ollama").color(egui::Color32::GRAY).small());
+        });
+
+        ui.add_space(8.0);
+
+        // Hallucinations Warning
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("⚠ AI Limitations").strong().color(egui::Color32::YELLOW));
+            ui.label("LLMs can produce incorrect or fabricated information (hallucinations). This is inherent to AI technology.");
+            ui.label("For better accuracy, use smarter models and enable Web Search.");
+        });
+    }
+
+    fn show_hotkeys(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new("Configure your global hotkeys.").strong());
+        ui.add_space(4.0);
+        ui.label("Click 'Record' and press your desired key combination within 5 seconds.");
+        ui.add_space(12.0);
+
+        // Hotkey fields
+        hotkey_field(ui, "Wake (OCR):", &mut self.config.general.wake_key, &mut self.wake_recorder, "wake");
+        ui.add_space(8.0);
+
+        hotkey_field(ui, "Model Query:", &mut self.config.general.model_key, &mut self.model_recorder, "model");
+        ui.add_space(8.0);
+
+        hotkey_field(ui, "Panic (Exit):", &mut self.config.general.panic_key, &mut self.panic_recorder, "panic");
+        ui.add_space(12.0);
+
+        // Validation error
+        if let Some(ref error) = self.hotkey_error {
+            ui.colored_label(egui::Color32::RED, format!("⚠ {}", error));
+        }
+
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(8.0);
+
+        ui.label(egui::RichText::new("Hotkey Tips:").strong());
+        ui.label("• Use combinations like Ctrl+Shift+Space");
+        ui.label("• Avoid common shortcuts (Ctrl+C, Ctrl+V)");
+        ui.label("• Each hotkey must be unique");
     }
 
     fn show_visuals(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Visual Preferences");
-        ui.add_space(10.0);
+        ui.label(egui::RichText::new("Customize the visual indicator.").strong());
+        ui.add_space(4.0);
+        ui.label("ShadowPrompt displays a small pixel indicator to show its status.");
+        ui.add_space(12.0);
 
+        // Position
         ui.horizontal(|ui| {
             ui.label("Indicator Position:");
             egui::ComboBox::from_label("")
-                .selected_text(self.config.visuals.position.clone())
+                .selected_text(&self.config.visuals.position)
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut self.config.visuals.position, "top-right".to_string(), "Top Right");
                     ui.selectable_value(&mut self.config.visuals.position, "top-left".to_string(), "Top Left");
@@ -245,124 +552,197 @@ impl SetupWizard {
                 });
         });
 
-        ui.add_space(10.0);
-        
-        ui.horizontal(|ui| {
-            ui.label("Ready Color (Hex):");
-            ui.text_edit_singleline(&mut self.config.visuals.ready_color);
-        });
+        ui.add_space(12.0);
+
+        // Status Colors
+        ui.label(egui::RichText::new("Status Colors").strong());
+        ui.add_space(4.0);
+
+        color_picker(ui, "Ready:", &mut self.config.visuals.ready_color);
+        ui.add_space(4.0);
+        color_picker(ui, "Processing:", &mut self.config.visuals.color_processing);
+
+        ui.add_space(16.0);
+
+        // MCQ Colors
+        ui.label(egui::RichText::new("Multiple Choice Indicator Colors").strong());
+        ui.add_space(4.0);
 
         ui.horizontal(|ui| {
-            ui.label("Processing Color (Hex):");
-            ui.text_edit_singleline(&mut self.config.visuals.color_processing);
+            color_picker_compact(ui, "A:", &mut self.config.visuals.color_mcq_a);
+            ui.add_space(16.0);
+            color_picker_compact(ui, "B:", &mut self.config.visuals.color_mcq_b);
+        });
+
+        ui.add_space(4.0);
+
+        ui.horizontal(|ui| {
+            color_picker_compact(ui, "C:", &mut self.config.visuals.color_mcq_c);
+            ui.add_space(16.0);
+            color_picker_compact(ui, "D:", &mut self.config.visuals.color_mcq_d);
         });
     }
 
     fn show_downloads(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Modules & Models");
-        ui.add_space(10.0);
+        ui.label(egui::RichText::new("Required Downloads").strong());
+        ui.add_space(4.0);
+        ui.label("ShadowPrompt needs to download embedding models for local RAG functionality.");
+        ui.add_space(12.0);
 
-        if self.dll_missing {
-            ui.colored_label(egui::Color32::RED, "⚠ Warning: bin/onnxruntime.dll not found.");
-            ui.label("The app might not run correctly on guest PCs without this DLL.");
-            if ui.button("Continue Anyway").clicked() {
-                self.dll_missing = false;
-            }
-        }
-
-        ui.label("Status: ");
-        ui.label(&self.download_status);
+        ui.label(format!("Status: {}", self.download_status));
+        ui.add_space(8.0);
 
         if self.downloading {
-            ui.add(egui::ProgressBar::new(self.download_progress).show_percentage());
-            ui.add_space(5.0);
+            ui.add(egui::ProgressBar::new(self.download_progress).show_percentage().animate(true));
+            ui.add_space(8.0);
             ui.spinner();
         } else if self.download_success {
-             ui.colored_label(egui::Color32::GREEN, "✔ Success: Models downloaded.");
+            ui.colored_label(egui::Color32::GREEN, "✓ Downloads complete! You may proceed.");
         } else {
-            // Show start or retry
-            let label = if self.download_status.starts_with("Error") { "Retry Download" } else { "Download & Initialize Models" };
-            if ui.button(label).clicked() {
+            let button_label = if self.download_status.starts_with("Error") {
+                "Retry Download"
+            } else {
+                "Download Models"
+            };
+
+            if ui.button(button_label).clicked() {
                 self.start_download();
             }
+
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("This download is required to complete setup.").color(egui::Color32::GRAY).small());
         }
     }
 
-    fn show_finish(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Setup Complete!");
-        ui.add_space(10.0);
-        ui.label("ShadowPrompt is ready to go.");
-        ui.add_space(10.0);
-        ui.colored_label(egui::Color32::YELLOW, "Reminder: This GUI will NEVER appear again.");
-        ui.label("Use your Hotkeys to interact with the assistant.");
+    fn show_credits(&mut self, ui: &mut egui::Ui) {
+        ui.vertical_centered(|ui| {
+            ui.label(egui::RichText::new("Thank You!").strong().size(20.0));
+            ui.add_space(8.0);
+            ui.label("ShadowPrompt setup is complete.");
+        });
+
+        ui.add_space(16.0);
+
+        // Quick Start Summary
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("📋 Quick Start Summary").strong());
+            ui.add_space(8.0);
+
+            egui::Grid::new("hotkey_summary")
+                .num_columns(2)
+                .spacing([20.0, 4.0])
+                .show(ui, |ui| {
+                    ui.label("Wake (OCR):");
+                    ui.code(&self.config.general.wake_key);
+                    ui.end_row();
+
+                    ui.label("Model Query:");
+                    ui.code(&self.config.general.model_key);
+                    ui.end_row();
+
+                    ui.label("Panic (Exit):");
+                    ui.code(&self.config.general.panic_key);
+                    ui.end_row();
+                });
+        });
+
+        ui.add_space(16.0);
+
+        // Credits
+        ui.separator();
+        ui.add_space(8.0);
+
+        ui.vertical_centered(|ui| {
+            ui.label("Developed by");
+            ui.label(egui::RichText::new("Hyowon Bernabe").strong());
+            ui.add_space(4.0);
+            ui.hyperlink_to("www.hyowonbernabe.me", "https://www.hyowonbernabe.me");
+            ui.add_space(8.0);
+            ui.hyperlink_to("GitHub Repository", "https://github.com/hyowonbernabe/ShadowPrompt");
+        });
     }
 
-    fn next_page(&mut self) {
-        match self.current_page {
-            SetupPage::Welcome => self.current_page = SetupPage::ApiConfig,
-            SetupPage::ApiConfig => self.current_page = SetupPage::Hotkeys,
-            SetupPage::Hotkeys => self.current_page = SetupPage::Visuals,
-            SetupPage::Visuals => self.current_page = SetupPage::Downloads,
-            SetupPage::Downloads => self.current_page = SetupPage::Finish,
-            SetupPage::Finish => {}
-        }
-    }
-
-    fn prev_page(&mut self) {
-        match self.current_page {
-            SetupPage::Welcome => {}
-            SetupPage::ApiConfig => self.current_page = SetupPage::Welcome,
-            SetupPage::Hotkeys => self.current_page = SetupPage::ApiConfig,
-            SetupPage::Visuals => self.current_page = SetupPage::Hotkeys,
-            SetupPage::Downloads => self.current_page = SetupPage::Visuals,
-            SetupPage::Finish => self.current_page = SetupPage::Downloads,
-        }
-    }
+    // --- Download Logic ---
 
     fn start_download(&mut self) {
         if self.downloading { return; }
-        
-        // Reset status
+
         self.downloading = true;
-        self.download_status = "Initializing download...".to_string();
+        self.download_status = "Initializing...".to_string();
         self.download_progress = 0.0;
         self.download_success = false;
-        
+
         let (tx, rx) = mpsc::channel();
         self.download_rx = Some(rx);
-        
+
         let config_clone = self.config.clone();
-        
-        // Spawn thread
+
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
-                let _ = tx.send((0.1f32, "Starting FastEmbed download...".to_string()));
-                
-                // We'll simulate progress updates since FastEmbed doesn't expose it easily
-                let _ = tx.send((0.2f32, "Downloading model files...".to_string()));
-                
+                // Step 1: Check and download onnxruntime.dll
+                let dll_path = Path::new("onnxruntime.dll");
+                let bin_dll_path = Path::new("bin/onnxruntime.dll");
+
+                if !dll_path.exists() && !bin_dll_path.exists() {
+                    let _ = tx.send((0.1, "Downloading ONNX Runtime DLL...".to_string()));
+
+                    if let Err(e) = download_onnx_dll().await {
+                        let _ = tx.send((0.0, format!("Error downloading DLL: {}", e)));
+                        return;
+                    }
+                }
+
+                // Step 2: Initialize FastEmbed models
+                let _ = tx.send((0.4, "Downloading embedding models...".to_string()));
+
                 match crate::knowledge::rag::RagSystem::new(&config_clone).await {
                     Ok(_) => {
-                        let _ = tx.send((1.0f32, "Download Complete!".to_string()));
+                        let _ = tx.send((1.0, "Download complete!".to_string()));
                     }
                     Err(e) => {
-                        let _ = tx.send((0.0f32, format!("Error: {}", e)));
+                        let _ = tx.send((0.0, format!("Error: {}", e)));
                     }
                 }
             });
         });
-    }    
-
+    }
 
     fn spawn_app_and_exit(&self) {
         let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("shadow_prompt.exe"));
-        
-        // Spawn the same executable but WITHOUT the --setup flag
-        let _ = std::process::Command::new(exe)
-            .spawn();
-        
-        // Exit the current wizard process immediately to avoid "Not Responding" hangs
+
+        let _ = std::process::Command::new(exe).spawn();
+
         std::process::exit(0);
     }
+}
+
+// --- Download Helper ---
+
+async fn download_onnx_dll() -> anyhow::Result<()> {
+    use std::io::Write;
+
+    // ONNX Runtime 1.16.3 Windows x64
+    let url = "https://github.com/microsoft/onnxruntime/releases/download/v1.16.3/onnxruntime-win-x64-1.16.3.zip";
+
+    let response = reqwest::get(url).await?;
+    let bytes = response.bytes().await?;
+
+    // Extract DLL from zip
+    let cursor = std::io::Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor)?;
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        let name = file.name();
+
+        if name.ends_with("onnxruntime.dll") {
+            let mut out = std::fs::File::create("onnxruntime.dll")?;
+            std::io::copy(&mut file, &mut out)?;
+            out.flush()?;
+            break;
+        }
+    }
+
+    Ok(())
 }

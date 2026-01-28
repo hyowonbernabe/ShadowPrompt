@@ -35,7 +35,7 @@ ShadowPrompt was born from the need for a **Discrete Academic Interface**—a to
 - **📋 Clipboard Injection**: Copy question → trigger → answer appears in clipboard
 - **👁️ OCR Region Capture**: Extract text from images or locked PDFs with invisible selection
 - **📚 Local RAG**: Index your `.md`/`.txt` notes for project-specific AI context
-- **🔄 Multi-Provider**: Switch between **Groq**, **OpenRouter**, or **Ollama** (local)
+- **🔄 Auto-LLM Fallback**: Automatically switches providers if rate limits hit (Groq → OpenRouter → Ollama)
 - **🎯 MCQ Detection**: Automatic color-coded pixel for multiple choice answers
 
 ---

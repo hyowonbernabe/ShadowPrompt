@@ -42,6 +42,10 @@ pub struct GeneralConfig {
     pub use_rag: bool,
     #[serde(default)]
     pub debug: bool,
+    #[serde(default)]
+    pub tos_accepted: bool,
+    #[serde(default)]
+    pub tos_accepted_version: String,
 }
 
 impl Default for GeneralConfig {
@@ -53,6 +57,8 @@ impl Default for GeneralConfig {
             panic_key: "Ctrl+Shift+F12".to_string(),
             use_rag: true,
             debug: false,
+            tos_accepted: false,
+            tos_accepted_version: String::new(),
         }
     }
 }

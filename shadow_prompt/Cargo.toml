@@ -1,7 +1,11 @@
 [package]
 name = "shadow_prompt"
-version = "0.1.0"
+version = "1.0.5"
 edition = "2021"
+
+[[bin]]
+name = "Shadow_Prompt"
+path = "src/main.rs"
 
 [features]
 default = []
@@ -63,6 +67,10 @@ uuid = { version = "1", features = ["v4"] }
 log = "0.4"
 simplelog = "0.12"
 chrono = "0.4"
+zip = "2.1"
+
+[build-dependencies]
+embed-resource = "2"
 
 [profile.release]
 opt-level = 3

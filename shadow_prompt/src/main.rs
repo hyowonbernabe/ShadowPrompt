@@ -10,6 +10,9 @@ mod knowledge;
 mod utils;
 mod setup;
 mod logger;
+mod tos_text;
+mod hotkey_recorder;
+mod color_picker;
 
 #[macro_use]
 extern crate log;
