@@ -22,7 +22,7 @@ pub async fn perform_search(query: &str, max_results: usize) -> Result<String> {
     let re_tags = Regex::new(r"<[^>]*>")?; // To strip internal tags
 
     let mut results = String::new();
-    let mut count = 0;
+
 
     // We iterate manually to match title/snippet pairs (rough heuristic)
     // Actually, splitting by result__body might be safer, but let's try simple capture first.
@@ -31,7 +31,7 @@ pub async fn perform_search(query: &str, max_results: usize) -> Result<String> {
     // Better Regex: Capture the whole block? No, streams are hard.
     // Let's just grab snippets. The snippet usually contains the answer context.
     
-    for cap in re_snippet.captures_iter(&res) {
+    for (count, cap) in re_snippet.captures_iter(&res).enumerate() {
         if count >= max_results { break; }
         
         let raw_snippet = &cap[1];
@@ -47,7 +47,6 @@ pub async fn perform_search(query: &str, max_results: usize) -> Result<String> {
             .replace("&#39;", "'");
 
         results.push_str(&format!("- {}\n", final_text));
-        count += 1;
     }
 
     if results.is_empty() {

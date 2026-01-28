@@ -27,7 +27,7 @@ impl ClipboardManager {
     pub fn write(text: &str) -> Result<()> {
         for _ in 0..3 {
             if let Ok(mut clipboard) = Clipboard::new() {
-                if let Ok(_) = clipboard.set_text(text) {
+                if clipboard.set_text(text).is_ok() {
                     return Ok(());
                 }
             }

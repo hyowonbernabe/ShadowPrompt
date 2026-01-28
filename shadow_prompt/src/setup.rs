@@ -125,10 +125,12 @@ impl eframe::App for SetupWizard {
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                 ui.add_space(20.0);
                 ui.horizontal(|ui| {
-                    if self.current_page != SetupPage::Welcome && self.current_page != SetupPage::Finish {
-                        if !self.downloading && ui.button("Back").clicked() {
-                            self.prev_page();
-                        }
+                    if self.current_page != SetupPage::Welcome 
+                        && self.current_page != SetupPage::Finish 
+                        && !self.downloading 
+                        && ui.button("Back").clicked() 
+                    {
+                        self.prev_page();
                     }
 
                     if self.current_page != SetupPage::Finish {
@@ -138,15 +140,13 @@ impl eframe::App for SetupWizard {
                         if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
                             self.next_page();
                         }
-                    } else {
-                        if ui.button("Start ShadowPrompt").clicked() {
-                            let _ = self.config.save();
-                            let _ = Config::mark_setup_complete();
-                            self.finished = true;
-                            
-                            // 1. Spawn a clean instance of the app in background
-                            self.spawn_app_and_exit();
-                        }
+                    } else if ui.button("Start ShadowPrompt").clicked() {
+                        let _ = self.config.save();
+                        let _ = Config::mark_setup_complete();
+                        self.finished = true;
+                        
+                        // 1. Spawn a clean instance of the app in background
+                        self.spawn_app_and_exit();
                     }
                     
                     // Removed "Skip Setup" button as downloads are now mandatory

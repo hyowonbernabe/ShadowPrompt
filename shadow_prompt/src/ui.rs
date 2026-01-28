@@ -16,7 +16,7 @@ use windows::Win32::Graphics::Gdi::{
 use std::sync::mpsc::Receiver;
 use std::thread;
 
-const HWND_TOPMOST: HWND = HWND(-1 as isize as *mut std::ffi::c_void);
+const HWND_TOPMOST: HWND = HWND(-1_isize as *mut std::ffi::c_void);
 
 #[allow(dead_code)]
 pub enum UICommand {
@@ -87,10 +87,10 @@ impl UIManager {
                 let user_y = config.y_axis;
                 
                 let (mut x, mut y) = match config.position.as_str() {
-                    "top-left" => (0 + offset, 0 + offset),
-                    "bottom-left" => (0 + offset, screen_h - size - offset),
+                    "top-left" => (offset, offset),
+                    "bottom-left" => (offset, screen_h - size - offset),
                     "bottom-right" => (screen_w - size - offset, screen_h - size - offset),
-                    _ => (screen_w - size - offset, 0 + offset), // Default top-right
+                    _ => (screen_w - size - offset, offset), // Default top-right
                 };
 
                 // Apply User Axis Overrides

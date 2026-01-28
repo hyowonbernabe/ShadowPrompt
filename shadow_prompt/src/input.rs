@@ -94,7 +94,7 @@ impl InputManager {
     }
 }
 
-fn check_combo(pressed: &HashSet<Key>, target: &Vec<Key>) -> bool {
+fn check_combo(pressed: &HashSet<Key>, target: &[Key]) -> bool {
     if target.is_empty() { return false; }
     target.iter().all(|k| pressed.contains(k))
 }
