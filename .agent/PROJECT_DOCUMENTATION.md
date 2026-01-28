@@ -96,29 +96,27 @@ ShadowPrompt automatically detects if the answer is a multiple choice option (A,
 ---
 
 ## 4. Directory Structure (USB Layout)
-The application assumes relative paths. The USB drive letter can change without breaking functionality.
+The application uses exe-relative paths via `get_exe_dir()`. The USB drive letter can change without breaking functionality.
 
 ```text
-/ShadowPrompt
-├── bin/
-│   ├── shadow_prompt.exe       # Main executable
-│   ├── onnxruntime.dll         # Required for Portability
-│   └── ... (other DLLs)
+/ShadowPrompt                     # Release folder (from ZIP)
+├── shadow_prompt.exe             # Main executable (run this!)
+├── onnxruntime.dll               # Required for ONNX embeddings
 ├── config/
-│   ├── config.toml             # Keys, Model IDs, Prompts
-│   └── system_prompt.txt       # "You are a concise assistant..."
+│   ├── config.toml               # Created by Setup Wizard (API keys, hotkeys)
+│   ├── .setup_complete           # Marker file indicating setup is done
+│   └── system_prompt.txt         # Optional: Custom system prompt
 ├── data/
-│   ├── rag_index/              # JSON index + logs
-│   └── logs/
-├── knowledge/                  # RAG Source (Drop .md/.txt files here)
-│   ├── documentation.md
-│   └── secure_notes.txt
-├── tools/                      # Build Tools
-│   └── protoc/                 # Portable Protobuf Compiler (Required for Build)
-└── Launcher.bat                # Portable Launcher (Sets up env vars)
-└── models/
-    └── embedding_model.onnx    # Local quantization model
+│   ├── models/                   # FastEmbed models (downloaded on first run)
+│   └── rag_index/                # JSON index for RAG
+└── knowledge/                    # Drop .md/.txt files here for local RAG
+    └── (your files)
 ```
+
+### Distribution
+- **GitHub Releases**: Pre-built `ShadowPrompt-windows-x64.zip` is created by GitHub Actions on version tags
+- **Local Build**: Use `build_release.bat` at repo root to create release locally
+
 
 ---
 
