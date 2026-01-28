@@ -54,6 +54,10 @@ fastembed = "4"
 # File Scanning & Text Processing
 glob = "0.3"
 text-splitter = { version = "0.16", features = ["markdown"] }
-uuid = { version = "1", features = ["v4"] } # For ID generation
+uuid = { version = "1", features = ["v4"] }
 
-
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

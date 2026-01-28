@@ -78,6 +78,11 @@ jobs:
             Copy-Item shadow_prompt/config/system_prompt.txt release/ShadowPrompt/config/
           }
           
+          # Copy example config
+          if (Test-Path shadow_prompt/config/config.example.toml) {
+            Copy-Item shadow_prompt/config/config.example.toml release/ShadowPrompt/config/
+          }
+          
           # Create README
           @"
           ShadowPrompt - Portable AI Assistant

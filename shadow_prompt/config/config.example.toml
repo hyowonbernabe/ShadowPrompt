@@ -1,44 +1,56 @@
+# ShadowPrompt Configuration Example
+# Copy this file to config.toml and fill in your API keys
+# Or run the Setup Wizard which will create config.toml for you
+
 [general]
-mode = "active" # "active" or "background"
-wake_key = "ctrl+space" # Global hotkey to trigger OCR/Input
-model_key = "ctrl+alt+space" # Global hotkey to trigger AI from clipboard
-panic_key = "f9" # Kill switch
+mode = "stealth"
+wake_key = "Ctrl+Shift+Space"    # OCR capture mode
+model_key = "Ctrl+Shift+V"       # Send clipboard to AI
+panic_key = "Ctrl+Shift+F12"     # Emergency exit
 use_rag = true
 
 [visuals]
-indicator_color = "#FF0000" # Processing
-ready_color = "#00FF00"     # Ready
+indicator_color = "#FF0000"
+ready_color = "#00FF00"
+position = "top-right"
+size = 5
+offset = 0
+x_axis = 0
+y_axis = 0
+color_mcq_a = "#00FFFF"          # Cyan - Answer A
+color_mcq_b = "#FF00FF"          # Magenta - Answer B
+color_mcq_c = "#FFFF00"          # Yellow - Answer C
+color_mcq_d = "#000000"          # Black - Answer D
+color_mcq_none = "#FFFFFF"       # White - No MCQ detected
+color_processing = "#FF0000"
 cursor_change = false
 
-# New Configurable Options
-position = "top-right" 
-size = 5               
-offset = 0             
-x_axis = 0            
-y_axis = 0            
-
-# MCQ Colors
-color_mcq_a = "#00FFFF" 
-color_mcq_b = "#FF00FF" 
-color_mcq_c = "#FFFF00" 
-color_mcq_d = "#000000" 
-color_processing = "#FF0000"
-
 [models]
-provider = "ollama" # or "openrouter", "openai", etc.
+# Options: "groq", "openrouter", "ollama"
+provider = "groq"
+
+[models.groq]
+api_key = "YOUR_GROQ_API_KEY_HERE"
+model_id = "llama-3.1-8b-instant"
+
+[models.openrouter]
+api_key = "YOUR_OPENROUTER_API_KEY_HERE"
+model_id = "google/gemma-3-27b-it:free"
 
 [models.ollama]
 base_url = "http://localhost:11434"
 model_id = "llama3"
 
-
 [search]
 enabled = true
-max_results = 5
+max_results = 3
 
 [rag]
-chunk_size = 500
-overlap = 50
+enabled = true
+knowledge_path = "knowledge"
+index_path = "data/rag_index"
+max_results = 3
+min_score = 0.5
 
 [safety]
-daily_spend_limit_usd = 1.0
+daily_spend_limit_usd = 0.5
