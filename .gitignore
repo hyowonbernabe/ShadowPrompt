@@ -21,8 +21,12 @@ config/usage.json
 
 # Local Config & Secrets
 shadow_prompt/config/config.toml
+shadow_prompt/config/*.toml
+!shadow_prompt/config/config.example.toml
 shadow_prompt/auth.json
 auth.json
+*.key
+*.secret
 
 # Local Data (Models, Indices)
 shadow_prompt/data/
