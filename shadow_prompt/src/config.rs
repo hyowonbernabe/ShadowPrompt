@@ -217,13 +217,10 @@ impl Default for SafetyConfig {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        // Try to read config.toml from the /config directory relative to the executable
-        // Or for dev, relative to the crate root.
-        let config_path = "config/config.toml";
+        let config_path = get_config_path();
         
-        let content = fs::read_to_string(config_path)
-            .or_else(|_| fs::read_to_string("../config/config.toml")) // Try parent if in bin
-            .context("Failed to read config.toml. Ensure 'config/config.toml' exists.")?;
+        let content = fs::read_to_string(&config_path)
+            .context(format!("Failed to read config.toml at {:?}", config_path))?;
 
         let config: Config = toml::from_str(&content)
             .context("Failed to parse config.toml")?;
@@ -231,27 +228,88 @@ impl Config {
         Ok(config)
     }
 
+    pub fn try_load() -> Option<Self> {
+        let config_path = get_config_path();
+        if !config_path.exists() {
+            return None;
+        }
+        Self::load().ok()
+    }
+
     pub fn save(&self) -> Result<()> {
-        let config_path = "config/config.toml";
+        let config_path = get_config_path();
         let content = toml::to_string_pretty(self)
             .context("Failed to serialize config")?;
         
-        if let Some(parent) = std::path::Path::new(config_path).parent() {
+        if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent)?;
         }
         
-        fs::write(config_path, content)
+        fs::write(&config_path, content)
             .context("Failed to write config.toml")?;
         
         Ok(())
     }
 
     pub fn mark_setup_complete() -> Result<()> {
-        fs::write("config/.setup_complete", "done")?;
+        let marker_path = get_exe_dir().join("config").join(".setup_complete");
+        if let Some(parent) = marker_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(marker_path, "done")?;
         Ok(())
     }
 
     pub fn is_setup_complete() -> bool {
-        std::path::Path::new("config/.setup_complete").exists()
+        get_exe_dir().join("config").join(".setup_complete").exists()
     }
 }
+
+pub fn get_exe_dir() -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
+pub fn get_config_path() -> std::path::PathBuf {
+    let exe_dir = get_exe_dir();
+    let config_path = exe_dir.join("config").join("config.toml");
+    
+    if config_path.exists() {
+        return config_path;
+    }
+    
+    let cwd_config = std::path::PathBuf::from("config/config.toml");
+    if cwd_config.exists() {
+        return cwd_config;
+    }
+    
+    config_path
+}
+
+pub fn ensure_directories() -> Result<()> {
+    let exe_dir = get_exe_dir();
+    
+    let knowledge_dir = exe_dir.join("knowledge");
+    if !knowledge_dir.exists() {
+        fs::create_dir_all(&knowledge_dir)
+            .context("Failed to create knowledge directory")?;
+        println!("[*] Created knowledge directory: {:?}", knowledge_dir);
+    }
+    
+    let config_dir = exe_dir.join("config");
+    if !config_dir.exists() {
+        fs::create_dir_all(&config_dir)
+            .context("Failed to create config directory")?;
+    }
+    
+    let data_dir = exe_dir.join("data");
+    if !data_dir.exists() {
+        fs::create_dir_all(&data_dir)
+            .context("Failed to create data directory")?;
+    }
+    
+    Ok(())
+}
+

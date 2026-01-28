@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use glob::glob;
 use fastembed::{TextEmbedding, InitOptions, EmbeddingModel};
 use serde::{Deserialize, Serialize};
-use crate::config::Config;
+use crate::config::{Config, get_exe_dir};
 
 // Simple Document struct for In-Memory/JSON Storage
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -32,7 +32,7 @@ impl RagSystem {
         let mut options = InitOptions::default();
         options.model_name = EmbeddingModel::BGESmallENV15;
         options.show_download_progress = true;
-        options.cache_dir = PathBuf::from("data/models");
+        options.cache_dir = get_exe_dir().join("data").join("models");
 
         let model = TextEmbedding::try_new(options).context("Failed to initialize FastEmbed")?;
 
@@ -47,36 +47,34 @@ impl RagSystem {
              return Ok(0);
         }
 
-        let root_path = &self.config.rag.knowledge_path;
-        let index_path = &self.config.rag.index_path; // We'll treat this as a file path now or dir containing a json
+        let exe_dir = get_exe_dir();
+        let root_path = exe_dir.join(&self.config.rag.knowledge_path);
+        let index_base = exe_dir.join(&self.config.rag.index_path);
         
-        let knowledge_dir = Path::new(root_path);
-        if !knowledge_dir.exists() {
-            fs::create_dir_all(knowledge_dir).context("Failed to create knowledge directory")?;
-             // Create a sample file if empty? No, better to leave empty.
+        if !root_path.exists() {
+            fs::create_dir_all(&root_path).context("Failed to create knowledge directory")?;
             return Ok(0);
         }
 
-        // Ensure data dir exists
-        let index_file_path = if index_path.ends_with(".json") {
-            PathBuf::from(index_path)
+        let index_file_path = if self.config.rag.index_path.ends_with(".json") {
+            index_base.clone()
         } else {
-            PathBuf::from(index_path).join("index.json")
+            index_base.join("index.json")
         };
-        
+
         if let Some(parent) = index_file_path.parent() {
             fs::create_dir_all(parent)?;
         }
 
-
-        println!("[RAG] Scanning knowledge folder: {}", root_path);
+        let root_path_str = root_path.display().to_string();
+        println!("[RAG] Scanning knowledge folder: {}", root_path_str);
 
         let mut new_docs = Vec::new();
         let patterns = vec![
-            format!("{}/*.md", root_path),
-            format!("{}/*.txt", root_path),
-            format!("{}/**/*.md", root_path),
-            format!("{}/**/*.txt", root_path),
+            format!("{}/*.md", root_path_str),
+            format!("{}/*.txt", root_path_str),
+            format!("{}/**/*.md", root_path_str),
+            format!("{}/**/*.txt", root_path_str),
         ];
 
         for pattern in patterns {
@@ -132,11 +130,12 @@ impl RagSystem {
              return Ok(vec![]);
         }
 
-        let index_path = &self.config.rag.index_path;
-        let index_file_path = if index_path.ends_with(".json") {
-            PathBuf::from(index_path)
+        let exe_dir = get_exe_dir();
+        let index_base = exe_dir.join(&self.config.rag.index_path);
+        let index_file_path = if self.config.rag.index_path.ends_with(".json") {
+            index_base
         } else {
-             PathBuf::from(index_path).join("index.json")
+            index_base.join("index.json")
         };
 
         if !index_file_path.exists() {

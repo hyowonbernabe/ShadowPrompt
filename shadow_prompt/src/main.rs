@@ -19,6 +19,9 @@ use crate::utils::{parse_mcq_answer, McqAnswer, parse_hex_color, parse_keys};
 use std::sync::mpsc;
 
 fn main() -> anyhow::Result<()> {
+    // 0. Ensure required directories exist
+    crate::config::ensure_directories()?;
+    
     // 1. Setup Wizard (First Run or --setup)
     let args: Vec<String> = std::env::args().collect();
     let force_setup = args.contains(&"--setup".to_string()) || args.contains(&"--reset-setup".to_string());

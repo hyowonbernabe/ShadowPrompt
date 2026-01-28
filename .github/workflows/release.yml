@@ -1,0 +1,127 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create a GitHub release'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      
+      - name: Setup Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "25.x"
+      
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            shadow_prompt/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      
+      - name: Build Release
+        working-directory: shadow_prompt
+        run: cargo build --release
+      
+      - name: Prepare Release Package
+        shell: pwsh
+        run: |
+          # Create release directory
+          New-Item -ItemType Directory -Force -Path release/ShadowPrompt
+          
+          # Copy executable
+          Copy-Item shadow_prompt/target/release/shadow_prompt.exe release/ShadowPrompt/
+          
+          # Copy all DLLs from target directory
+          $dlls = Get-ChildItem shadow_prompt/target/release/*.dll -ErrorAction SilentlyContinue
+          if ($dlls) {
+            foreach ($dll in $dlls) {
+              Write-Host "Copying DLL: $($dll.Name)"
+              Copy-Item $dll.FullName release/ShadowPrompt/
+            }
+          }
+          
+          # Create directories
+          New-Item -ItemType Directory -Force -Path release/ShadowPrompt/config
+          New-Item -ItemType Directory -Force -Path release/ShadowPrompt/knowledge
+          New-Item -ItemType Directory -Force -Path release/ShadowPrompt/data
+          
+          # Copy system prompt if exists
+          if (Test-Path shadow_prompt/config/system_prompt.txt) {
+            Copy-Item shadow_prompt/config/system_prompt.txt release/ShadowPrompt/config/
+          }
+          
+          # Create README
+          @"
+          ShadowPrompt - Portable AI Assistant
+          =====================================
+          
+          QUICK START:
+            1. Run shadow_prompt.exe
+            2. Complete the Setup Wizard (configure API keys and hotkeys)
+            3. Place your documents in the 'knowledge' folder for RAG
+            4. Use your configured hotkeys to interact
+          
+          HOTKEYS (Default):
+            - Ctrl+Shift+Space: OCR Mode (screen capture)
+            - Ctrl+Shift+V: Query AI with clipboard content
+            - Ctrl+Shift+F12: Panic (exit immediately)
+          
+          For more info: https://github.com/hyowonbernabe/ShadowPrompt
+          "@ | Out-File -FilePath release/ShadowPrompt/README.txt -Encoding utf8
+          
+          # List contents for verification
+          Write-Host "`nRelease contents:"
+          Get-ChildItem release/ShadowPrompt -Recurse | ForEach-Object {
+            Write-Host "  $($_.FullName.Replace((Get-Location).Path + '\release\ShadowPrompt\', ''))"
+          }
+          
+          # Create zip
+          Compress-Archive -Path release/ShadowPrompt/* -DestinationPath release/ShadowPrompt-windows-x64.zip -Force
+          
+          Write-Host "`nZIP created: release/ShadowPrompt-windows-x64.zip"
+          Write-Host "ZIP size: $((Get-Item release/ShadowPrompt-windows-x64.zip).Length / 1MB) MB"
+      
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShadowPrompt-windows-x64
+          path: release/ShadowPrompt-windows-x64.zip
+          retention-days: 30
+      
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/ShadowPrompt-windows-x64.zip
+          generate_release_notes: true
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

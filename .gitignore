@@ -32,3 +32,6 @@ auth.json
 shadow_prompt/data/
 shadow_prompt/tools/protoc/bin/
 shadow_prompt/tools/protoc/include/
+
+# Release Builds
+release/

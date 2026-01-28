@@ -54,21 +54,44 @@ ShadowPrompt was born from the need for a **Discrete Academic Interface**—a to
 
 ---
 
-## 🚀 Installation & Setup (The "Happy Path")
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/hyowonbernabe/ShadowPrompt.git
-   ```
-2. **Transfer to USB**:
-   Copy the `ShadowPrompt` folder to your USB drive.
-3. **Initialize**:
-   Run `Launcher.bat`. On the first launch, the **Stealth Setup Wizard** will appear.
+## 🚀 Installation & Setup
+
+### Download (Recommended)
+1. **Get the Release**:
+   Go to [Releases](https://github.com/hyowonbernabe/ShadowPrompt/releases) and download `ShadowPrompt-windows-x64.zip`.
+
+2. **Extract to USB**:
+   Unzip the contents to your USB drive.
+
+3. **Run**:
+   Double-click `shadow_prompt.exe`. On the first launch, the **Setup Wizard** will appear.
+
 4. **Configure**:
    - Enter your **Groq** or **OpenRouter** API key.
    - Set your preferred hotkeys.
-   - Wait for the embedding models to download to `data/models`.
-5. **Finalize**:
+   - Wait for the embedding models to download.
+
+5. **Ready**:
    The Wizard will close and spawn the background daemon. Look for the **Green Pixel** in the top-right corner.
+
+### Build from Source (Development)
+<details>
+<summary>Click to expand build instructions</summary>
+
+**Prerequisites:**
+- Rust toolchain (stable)
+- Visual Studio Build Tools with C++ workload
+- Protobuf compiler
+
+**Steps:**
+```bash
+git clone https://github.com/hyowonbernabe/ShadowPrompt.git
+cd ShadowPrompt
+.\build_release.bat
+```
+
+The release will be created in the `release/` folder.
+</details>
 
 ---
 
