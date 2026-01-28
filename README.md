@@ -6,7 +6,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/hyowonbernabe/ShadowPrompt?include_prereleases)](https://github.com/hyowonbernabe/ShadowPrompt/releases)
-[![Build](https://github.com/hyowonbernabe/ShadowPrompt/actions/workflows/release.yml/badge.svg)](https://github.com/hyowonbernabe/ShadowPrompt/actions/workflows/release.yml)
+[![Automated Checks](https://github.com/hyowonbernabe/ShadowPrompt/actions/workflows/check.yml/badge.svg)](https://github.com/hyowonbernabe/ShadowPrompt/actions/workflows/check.yml)
 [![Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6?logo=windows)](https://github.com/hyowonbernabe/ShadowPrompt/releases)
 
 ShadowPrompt is a lightweight, stealthy AI assistant designed for high-stakes environments where focus and discretion are paramount. Built with Rust and designed to run entirely from a **USB Drive**, it provides real-time knowledge synthesis without leaving a footprint on the host machine.
