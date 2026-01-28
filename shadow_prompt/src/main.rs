@@ -125,8 +125,7 @@ async fn run_app() -> anyhow::Result<()> {
                 },
                 InputEvent::OCRRect(x, y, w, h) => {
                     println!("[*] OCR Region Captured: x={}, y={}, w={}, h={}", x, y, w, h);
-                    let _ = ui_tx.send(UICommand::SetColor(0x0000FFFF)); // Yellow (BGR: FF FF 00)
-                    let _ = ui_tx.send(UICommand::DrawDebugRect(x, y, w, h));
+                    let _ = ui_tx.send(UICommand::SetColor(0x0000FFFF));
 
                     let ui_tx_clone = ui_tx.clone();
                     let ready_color = parse_hex_color(&config.visuals.ready_color);
@@ -146,16 +145,15 @@ async fn run_app() -> anyhow::Result<()> {
                             }
                         }
                         
-                        // Cleanup
-                        let _ = ui_tx_clone.send(UICommand::ClearDebugRect);
-                        let _ = ui_tx_clone.send(UICommand::SetColor(ready_color)); // Reset Green
+                        let _ = ui_tx_clone.send(UICommand::SetColor(ready_color));
                     });
                 },
                 InputEvent::Model => {
                     println!("[!] EVENT: Model Key Pressed (Clipboard Trigger)");
                     let processing_color = parse_hex_color(&config.visuals.color_processing);
+                    let mcq_none_color = parse_hex_color(&config.visuals.color_mcq_none);
                     let _ = ui_tx.send(UICommand::SetColor(processing_color)); 
-                    let _ = ui_tx.send(UICommand::SetSecondaryColor(0x00000000)); // Reset Secondary
+                    let _ = ui_tx.send(UICommand::SetSecondaryColor(mcq_none_color));
                     
                     let config_clone = config.clone();
                     let ui_tx_clone = ui_tx.clone();
@@ -203,7 +201,7 @@ async fn run_app() -> anyhow::Result<()> {
                         };
 
                         // 4. Check for MCQ Answer (with context from original input)
-                        if let Some(ans) = parse_mcq_with_context(&prompt, &response) {
+                        let mcq_color = if let Some(ans) = parse_mcq_with_context(&prompt, &response) {
                              let hex = match ans {
                                  McqAnswer::A => &config_clone.visuals.color_mcq_a,
                                  McqAnswer::B => &config_clone.visuals.color_mcq_b,
@@ -212,8 +210,11 @@ async fn run_app() -> anyhow::Result<()> {
                              };
                              let color = parse_hex_color(hex);
                              println!("[+] MCQ Detected: {:?} -> Color: {:08X}", ans, color);
-                             let _ = ui_tx_clone.send(UICommand::SetSecondaryColor(color));
-                        }
+                             color
+                        } else {
+                             parse_hex_color(&config_clone.visuals.color_mcq_none)
+                        };
+                        let _ = ui_tx_clone.send(UICommand::SetSecondaryColor(mcq_color));
 
                         // 5. Write Clipboard (Always)
                         if let Err(e) = ClipboardManager::write(&response) {

@@ -81,6 +81,8 @@ pub struct VisualsConfig {
     pub color_mcq_c: String,
     #[serde(default = "default_mcq_d")]
     pub color_mcq_d: String,
+    #[serde(default = "default_mcq_none")]
+    pub color_mcq_none: String,
     
     #[serde(default = "default_processing")]
     pub color_processing: String,
@@ -102,6 +104,7 @@ impl Default for VisualsConfig {
             color_mcq_b: default_mcq_b(),
             color_mcq_c: default_mcq_c(),
             color_mcq_d: default_mcq_d(),
+            color_mcq_none: default_mcq_none(),
             color_processing: default_processing(),
             cursor_change: false,
         }
@@ -113,8 +116,9 @@ fn default_size() -> i32 { 5 }
 fn default_mcq_a() -> String { "#00FFFF".to_string() } // Cyan
 fn default_mcq_b() -> String { "#FF00FF".to_string() } // Magenta
 fn default_mcq_c() -> String { "#FFFF00".to_string() } // Yellow
-fn default_mcq_d() -> String { "#000000".to_string() } // Black
-fn default_processing() -> String { "#FF0000".to_string() } // Red
+fn default_mcq_d() -> String { "#000000".to_string() }
+fn default_mcq_none() -> String { "#FFFFFF".to_string() }
+fn default_processing() -> String { "#FF0000".to_string() }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[allow(dead_code)]
