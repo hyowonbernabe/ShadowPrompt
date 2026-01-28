@@ -40,6 +40,8 @@ pub struct GeneralConfig {
     pub model_key: String,
     pub panic_key: String,
     pub use_rag: bool,
+    #[serde(default)]
+    pub debug: bool,
 }
 
 impl Default for GeneralConfig {
@@ -50,6 +52,7 @@ impl Default for GeneralConfig {
             model_key: "Ctrl+Shift+V".to_string(),
             panic_key: "Ctrl+Shift+F12".to_string(),
             use_rag: true,
+            debug: false,
         }
     }
 }
@@ -133,7 +136,7 @@ pub struct ModelConfig {
 impl Default for ModelConfig {
     fn default() -> Self {
         Self {
-            provider: "groq".to_string(),
+            provider: "auto".to_string(),
             openrouter: None,
             github_copilot: None,
             ollama: None,
@@ -232,6 +235,7 @@ impl Config {
         Ok(config)
     }
 
+    #[allow(dead_code)]
     pub fn try_load() -> Option<Self> {
         let config_path = get_config_path();
         if !config_path.exists() {

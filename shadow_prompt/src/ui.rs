@@ -18,6 +18,7 @@ use std::thread;
 
 const HWND_TOPMOST: HWND = HWND(-1 as isize as *mut std::ffi::c_void);
 
+#[allow(dead_code)]
 pub enum UICommand {
     SetColor(u32), 
     SetSecondaryColor(u32),

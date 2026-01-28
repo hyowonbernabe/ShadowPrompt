@@ -1,7 +1,7 @@
+use std::sync::mpsc::{self, Receiver};
 use eframe::egui;
 use crate::config::Config;
 use std::path::Path;
-
 #[derive(PartialEq)]
 enum SetupPage {
     Welcome,
@@ -12,12 +12,26 @@ enum SetupPage {
     Finish,
 }
 
+impl SetupPage {
+    #[allow(dead_code)]
+    fn dark() -> egui::Visuals {
+        egui::Visuals::dark()
+    }
+}
+
+// ... (skipping to update) ...
+
+// Later in the file
+// ui.add(egui::Image::new(egui::include_image!("../assets/logo_512.png")).max_width(128.0));
+
 pub struct SetupWizard {
     current_page: SetupPage,
     config: Config,
     downloading: bool,
-    download_progress: f32,
+    download_progress: f32, // 0.0 to 1.0 (indeterminate if 0)
     download_status: String,
+    download_rx: Option<Receiver<(f32, String)>>, // Channel for status updates
+    download_success: bool,
     dll_missing: bool,
     finished: bool,
 }
@@ -32,7 +46,9 @@ impl SetupWizard {
             config,
             downloading: false,
             download_progress: 0.0,
-            download_status: "Ready".to_string(),
+            download_status: "Ready to download models.".to_string(),
+            download_rx: None,
+            download_success: false,
             dll_missing,
             finished: false,
         }
@@ -69,10 +85,27 @@ impl SetupWizard {
 
 impl eframe::App for SetupWizard {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Poll download status
+        if let Some(rx) = &self.download_rx {
+            while let Ok((prog, status)) = rx.try_recv() {
+                self.download_progress = prog;
+                self.download_status = status;
+                if self.download_progress >= 1.0 {
+                    self.downloading = false;
+                    self.download_success = true;
+                    // Auto-advance or let user click Next
+                }
+                if self.download_status.starts_with("Error") {
+                    self.downloading = false;
+                    self.download_success = false;
+                }
+            }
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 // Logo
-                ui.add(egui::Image::new(egui::include_image!("assets/logo_512.png")).max_width(128.0));
+                ui.add(egui::Image::new(egui::include_image!("../assets/logo_512.png")).max_width(128.0));
                 ui.heading("ShadowPrompt Setup");
                 ui.add_space(10.0);
             });
@@ -93,13 +126,16 @@ impl eframe::App for SetupWizard {
                 ui.add_space(20.0);
                 ui.horizontal(|ui| {
                     if self.current_page != SetupPage::Welcome && self.current_page != SetupPage::Finish {
-                        if ui.button("Back").clicked() {
+                        if !self.downloading && ui.button("Back").clicked() {
                             self.prev_page();
                         }
                     }
 
                     if self.current_page != SetupPage::Finish {
-                        if ui.button(if self.current_page == SetupPage::Downloads { "Next" } else { "Continue" }).clicked() {
+                        let label = "Next";
+                        let enabled = if self.current_page == SetupPage::Downloads { self.download_success } else { true };
+                        
+                        if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
                             self.next_page();
                         }
                     } else {
@@ -112,13 +148,8 @@ impl eframe::App for SetupWizard {
                             self.spawn_app_and_exit();
                         }
                     }
-
-                    if self.current_page != SetupPage::Finish && self.current_page != SetupPage::Downloads {
-                        if ui.button("Skip Setup").clicked() {
-                             let _ = Config::mark_setup_complete();
-                             self.spawn_app_and_exit();
-                        }
-                    }
+                    
+                    // Removed "Skip Setup" button as downloads are now mandatory
                 });
             });
         });
@@ -138,10 +169,10 @@ impl SetupWizard {
         ui.add_space(10.0);
 
         ui.horizontal(|ui| {
-            ui.label("Active Provider:");
-            ui.selectable_value(&mut self.config.models.provider, "groq".to_string(), "Groq");
-            ui.selectable_value(&mut self.config.models.provider, "openrouter".to_string(), "OpenRouter");
-            ui.selectable_value(&mut self.config.models.provider, "ollama".to_string(), "Ollama (Local)");
+            ui.selectable_value(&mut self.config.models.provider, "auto".to_string(), "Auto (Best Available)");
+            ui.selectable_value(&mut self.config.models.provider, "groq".to_string(), "Groq (Cloud)");
+            ui.selectable_value(&mut self.config.models.provider, "openrouter".to_string(), "OpenRouter (Cloud)");
+            ui.selectable_value(&mut self.config.models.provider, "ollama".to_string(), "Ollama (Requires Local Server)");
         });
 
         ui.add_space(10.0);
@@ -244,8 +275,14 @@ impl SetupWizard {
 
         if self.downloading {
             ui.add(egui::ProgressBar::new(self.download_progress).show_percentage());
+            ui.add_space(5.0);
+            ui.spinner();
+        } else if self.download_success {
+             ui.colored_label(egui::Color32::GREEN, "✔ Success: Models downloaded.");
         } else {
-            if ui.button("Download & Initialize Models").clicked() {
+            // Show start or retry
+            let label = if self.download_status.starts_with("Error") { "Retry Download" } else { "Download & Initialize Models" };
+            if ui.button(label).clicked() {
                 self.start_download();
             }
         }
@@ -284,34 +321,39 @@ impl SetupWizard {
 
     fn start_download(&mut self) {
         if self.downloading { return; }
+        
+        // Reset status
         self.downloading = true;
-        self.download_status = "Initializing FastEmbed... (This may take a minute)".to_string();
-        self.download_progress = 0.1;
+        self.download_status = "Initializing download...".to_string();
+        self.download_progress = 0.0;
+        self.download_success = false;
+        
+        let (tx, rx) = mpsc::channel();
+        self.download_rx = Some(rx);
         
         let config_clone = self.config.clone();
         
-        // Use a background thread with a tokio runtime to handle the download
+        // Spawn thread
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
-                // Initializing RagSystem triggers the download if models are missing
+                let _ = tx.send((0.1f32, "Starting FastEmbed download...".to_string()));
+                
+                // We'll simulate progress updates since FastEmbed doesn't expose it easily
+                let _ = tx.send((0.2f32, "Downloading model files...".to_string()));
+                
                 match crate::knowledge::rag::RagSystem::new(&config_clone).await {
                     Ok(_) => {
-                        // Success - the models are now in data/models
-                        // We don't have a direct way to push status back yet easily without thread safety,
-                        // but for now let's just finish. 
+                        let _ = tx.send((1.0f32, "Download Complete!".to_string()));
                     }
                     Err(e) => {
-                        eprintln!("[Setup] Download failed: {}", e);
+                        let _ = tx.send((0.0f32, format!("Error: {}", e)));
                     }
                 }
             });
         });
-        
-        // In a real implementation we would poll a status flag.
-        // For MVP, we'll let the user click "Next" once they feel it's done or after a delay.
-        // Actually, let's just make it a "Trigger Download" button that finishes quickly for UX.
-    }
+    }    
+
 
     fn spawn_app_and_exit(&self) {
         let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("shadow_prompt.exe"));

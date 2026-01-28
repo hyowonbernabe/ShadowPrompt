@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="shadow_prompt/src/assets/logo_512.png" width="150" alt="ShadowPrompt Logo">
+  <img src="shadow_prompt/assets/logo_512.png" width="150" alt="ShadowPrompt Logo">
 </p>
 
 # ShadowPrompt: Zero-Install Discrete Academic Interface

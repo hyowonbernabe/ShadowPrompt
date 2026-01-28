@@ -11,6 +11,26 @@ impl LlmClient {
         
         match config.models.provider.as_str() {
             "groq" => Self::query_groq(&client, prompt, config).await,
+            "auto" => {
+                // Priority: Groq -> OpenRouter
+                if let Some(groq) = &config.models.groq {
+                    if !groq.api_key.is_empty() && groq.api_key != "your_groq_api_key_here" {
+                         match Self::query_groq(&client, prompt, config).await {
+                             Ok(res) => return Ok(res),
+                             Err(e) => error!("Auto-Groq failed: {}. Falling back...", e),
+                         }
+                    }
+                }
+                
+                if let Some(or) = &config.models.openrouter {
+                    if !or.api_key.is_empty() && or.api_key != "your_openrouter_api_key_here" {
+                        return Self::query_openrouter(&client, prompt, config).await;
+                    }
+                }
+                
+                anyhow::bail!("Auto-Provider: No valid API keys found for Groq or OpenRouter. Please configure them in Setup or config.toml.")
+            },
+
             "openrouter" => Self::query_openrouter(&client, prompt, config).await,
             "ollama" => Self::query_ollama(&client, prompt, config).await,
             "github_copilot" => anyhow::bail!("GitHub Copilot provider not fully implemented yet"),
@@ -33,7 +53,7 @@ impl LlmClient {
         });
 
         let res = client.post("https://api.groq.com/openai/v1/chat/completions")
-            .header("Authorization", format!("Bearer {}", groq_config.api_key))
+            .header("Authorization", format!("Bearer {}", groq_config.api_key.trim()))
             .json(&body)
             .send()
             .await?;
@@ -73,7 +93,7 @@ impl LlmClient {
         });
 
         let res = client.post("https://openrouter.ai/api/v1/chat/completions")
-            .header("Authorization", format!("Bearer {}", openrouter_config.api_key))
+            .header("Authorization", format!("Bearer {}", openrouter_config.api_key.trim()))
             // .header("HTTP-Referer", "http://localhost:3000") // Optional
             .json(&body)
             .send()

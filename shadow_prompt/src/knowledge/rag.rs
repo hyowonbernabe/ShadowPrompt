@@ -1,6 +1,6 @@
 use anyhow::{Result, Context};
 use std::fs;
-use std::path::{Path, PathBuf};
+
 use glob::glob;
 use fastembed::{TextEmbedding, InitOptions, EmbeddingModel};
 use serde::{Deserialize, Serialize};

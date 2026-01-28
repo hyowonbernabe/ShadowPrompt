@@ -48,6 +48,11 @@ jobs:
       
       - name: Build Release
         working-directory: shadow_prompt
+        timeout-minutes: 30
+        env:
+          CARGO_NET_RETRY: 10
+          CARGO_NET_TIMEOUT: 120
+          CARGO_HTTP_TIMEOUT: 120
         run: cargo build --release
       
       - name: Prepare Release Package

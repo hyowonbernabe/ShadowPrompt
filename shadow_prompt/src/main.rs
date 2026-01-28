@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "debug"), windows_subsystem = "windows")]
+
 mod config;
 mod input;
 mod clipboard;
@@ -7,7 +9,10 @@ mod llm;
 mod knowledge;
 mod utils;
 mod setup;
+mod logger;
 
+#[macro_use]
+extern crate log;
 
 use crate::config::Config;
 use crate::input::{InputManager, InputEvent};
@@ -21,6 +26,23 @@ use std::sync::mpsc;
 fn main() -> anyhow::Result<()> {
     // 0. Ensure required directories exist
     crate::config::ensure_directories()?;
+    
+    // Initialize Logger
+    if let Err(e) = crate::logger::init() {
+        eprintln!("Failed to initialize logger: {}", e);
+    }
+
+    // Check for --debug flag or config setting
+    let args: Vec<String> = std::env::args().collect();
+    let debug_flag = args.contains(&"--debug".to_string());
+    
+    // If debug flag is present, attach console
+    if debug_flag {
+        unsafe {
+            use windows::Win32::System::Console::AllocConsole;
+            let _ = AllocConsole();
+        }
+    }
     
     // 1. Setup Wizard (First Run or --setup)
     let args: Vec<String> = std::env::args().collect();
@@ -179,13 +201,13 @@ async fn run_app() -> anyhow::Result<()> {
                         let context = match kp_arc.gather_context(&prompt, &config_clone).await {
                              Ok(ctx) => ctx,
                              Err(e) => {
-                                 eprintln!("Knowledge Error: {}", e);
+                                 error!("Knowledge Error: {}", e);
                                  String::new() 
                              }
                         };
                         
                         let augmented_prompt = if !context.is_empty() {
-                            println!("[*] Context found. Augmenting prompt.");
+                            info!("[*] Context found. Augmenting prompt.");
                             format!("Context:\n{}\nQuestion:\n{}", context, prompt)
                         } else {
                             prompt.clone()
@@ -195,7 +217,7 @@ async fn run_app() -> anyhow::Result<()> {
                         let response = match LlmClient::query(&augmented_prompt, &config_clone).await {
                              Ok(res) => res,
                              Err(e) => {
-                                 eprintln!("LLM Error: {}", e);
+                                 error!("LLM Error: {}", e);
                                  "Error: Failed to get response from AI.".to_string()
                              }
                         };
