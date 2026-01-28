@@ -1,34 +1,98 @@
-# Project Documentation: ShadowPrompt
+# ShadowPrompt: Portable Stealth AI Architecture
 
-## 1. Technical Overview
-
-ShadowPrompt is a **portable** academic interface built in Rust. It is engineered to operate without installation, making it ideal for use from removable media (USB drives).
-
-### Architecture
-- **Language**: Rust (for memory safety, speed, and zero runtime dependencies).
-- **GUI Framework**: `egui` (used only for the initial setup wizard; the main runtime is headless).
-- **OCR Engine**: Windows.Media.Ocr (Native Windows 10/11 API) - ensures high accuracy with 0MB additional weight.
-- **LLM Client**: `reqwest` based client supporting OpenAI-compatible endpoints (Groq, OpenRouter) and Ollama.
-- **Data Persistence**: All configuration and data are stored in relative paths within the `shadow_prompt` directory.
+**Version:** 1.0.0
+**Target OS:** Windows 10/11
+**Language:** Rust
 
 ---
 
-## 2. Portability Guide
+## 1. Project Overview
+ShadowPrompt is a **Portable** AI assistant designed to run entirely from a USB drive. It prioritizes stealth, portability, and speed. The application runs as a background daemon with no visible window or taskbar icon. It interacts with the user solely through global hotkeys and clipboard manipulation.
 
-ShadowPrompt is "Portable-First". This means it assumes no guarantees about the host filesystem other than the directory it resides in.
+### Core Philosophy
+* **Contained:** All logic, dependencies (DLLs), authentication, and vector indices reside on the USB. No files are written to the host machine.
+  > **Note:** "Local Model" support via Ollama requires an external installation and is technically **NOT** contained. It is provided as a developer/debug option or for users with pre-existing setups (e.g., USB-portable Ollama).
+* **Invisible:** The UI is non-intrusive. Interactions occur via invisible overlays and clipboard injections.
+* **Agnostic:** Capable of reading screen context (OCR) or clipboard content to query generic LLMs or project-specific RAG data.
 
-### Folder Structure
-When placed on a USB drive (e.g., `D:\ShadowPrompt\`), the structure looks like this:
+---
 
-```
-D:\ShadowPrompt\
-├── shadow_prompt.exe          # Main executable
-├── config\
-│   └── config.toml           # User settings (keys, providers)
-├── data\
-│   └── models\               # Local embedding models
-├── knowledge\                # User provided RAG documents (.md, .txt)
-└── logs\                     # (Optional) Troubleshooting logs
+## 2. Technical Stack
+We utilize **Rust** for its memory safety, zero-dependency compilation (static binary), and direct access to Windows APIs.
+
+| Component | Choice | Justification |
+| :--- | :--- | :--- |
+| **Language** | **Rust** | Compiles to a single `.exe`. Extremely performant and lightweight. |
+| **OCR Engine** | **Windows.Media.Ocr** | Native Windows 10/11 API. Adds **0MB** to binary size. Privacy-friendly (local). |
+| **Windowing/GUI** | **Windows API (Win32)** | Required for creating the "invisible" overlay and handling global keyboard hooks. |
+| **Setup Framework** | **eframe (egui)** | Lightweight GUI used exclusively for the First-Run Setup Wizard. |
+| **Vector DB** | **Lightweight (JSON/Memory)** | Simplified RAG using in-memory vectors and JSON storage for maximum portability. |
+| **Embeddings** | **FastEmbed-rs** | Local ONNX-based embedding generation (BGE-Small-EN-v1.5). No API keys required. |
+| **LLM Provider** | **Groq (Primary) / OpenRouter (Secondary) / Ollama** | **Groq**: Ultra-fast, Free (`llama-3.1-8b-instant`). <br> **OpenRouter**: General purpose. <br> **Ollama**: Local dev/debug. |
+
+---
+
+## 3. Workflow & UX Strategy
+
+### A. First-Run GUI Setup
+On initial launch (or when using the `--setup` flag), ShadowPrompt launches a visible configuration wizard.
+1. **Welcome**: Warns that setup runs only once.
+2. **API Config**: Configures the primary LLM provider and API keys.
+3. **Hotkeys**: Records user-preferred keybinds.
+4. **Resources**: Downloads essential `fastembed` models to `data/models`.
+5. **Re-exec Logic**: Spawns the stealth background process and exits the wizard.
+
+### B. The "Stealth" Loop (Startup)
+1. **User Action:** Plug in USB, run `shadow_prompt.exe`.
+2. **State:** Background process starts.
+3. **Visual Feedback:** A single **Green Pixel** appears to indicate "Loaded/Ready".
+4. **Process Persistence:** If USB is removed, the process dies immediately/fails gracefully.
+
+### C. Scenario 1: Clipboard Trigger (The Main Way)
+1. **Action:** User selects text and copies (`Ctrl + C`).
+2. **Trigger:** User presses `Model Key` (e.g., `Ctrl + Shift + V`).
+3. **Visual:** **Red Pixel** (Processing).
+4. **Processing:** App reads clipboard, sends to LLM (Groq/OpenRouter/Ollama).
+5. **Output:** App overwrites system clipboard with the Answer.
+6. **Visual:** Red Pixel disappears.
+7. **User Action:** Paste (`Ctrl + V`) to see the answer.
+
+### D. Scenario 2: OCR Trigger (Fallback)
+1. **Trigger:** User presses `OCR Key` (e.g., `Ctrl + Shift + Space`).
+2. **Visual:** **Red Pixel** (Waiting for Selection).
+3. **Action:** User clicks and drags region. **Invisible Selection** (no border).
+4. **Processing:** `Windows.Media.Ocr` extracts text -> System Clipboard.
+5. **Follow-up:** User proceeds to **Scenario 1** (Trigger Model).
+
+### E. Scenario 3: Multiple Choice Questions (MCQ)
+ShadowPrompt uses **context-aware MCQ detection** to identify answers (e.g., "A", "B", "C", "D").
+1. **Trigger:** Standard Model Query.
+2. **Visual Feedback:** **Secondary Pixel** appears:
+    * **Cyan:** A / 1
+    * **Magenta:** B / 2
+    * **Yellow:** C / 3
+    * **Black:** D / 4
+    * **White:** No MCQ detected
+3. **Clipboard:** Full answer text is still copied.
+
+---
+
+## 4. Directory Structure & Portability
+The application uses exe-relative paths via `get_exe_dir()`. The USB drive letter can change without breaking functionality.
+
+```text
+/ShadowPrompt                     # Release folder
+├── shadow_prompt.exe             # Main executable
+├── onnxruntime.dll               # Required for ONNX embeddings
+├── config/
+│   ├── config.toml               # User settings
+│   ├── .setup_complete           # Marker file
+│   └── system_prompt.txt         # Custom system prompt
+├── data/
+│   ├── models/                   # FastEmbed models
+│   └── rag_index/                # RAG Index
+└── knowledge/                    # Local RAG documents
+    └── (your files)
 ```
 
 ### Best Practices for USB Usage
@@ -38,39 +102,53 @@ D:\ShadowPrompt\
 
 ---
 
-## 3. Stealth Features
+## 5. Security & Safety Mechanisms
 
-ShadowPrompt is designed to be discrete.
+### A. The Panic Button
+* **Keybind:** `Ctrl + Shift + F12`
+* **Behavior:** Terminates process immediately and clears system clipboard.
 
-### Visual Footprint
-- **No Taskbar Icon**: The application does not register a window in the taskbar once the setup wizard is closed.
-- **Pixel Indicators**: A 1x1 or 2x2 pixel overlay (configurable) provides status feedback.
-    - **Position**: Top-Right corner by default.
-    - **Opacity**: High alpha blend to appear as a "stuck pixel" or system glitch rather than a UI element.
-
-### Panic Mode (`Ctrl+Shift+F12`)
-- **Action**: Immediately terminates the `shadow_prompt.exe` process.
-- **Cleanup**: Clears the system clipboard to remove any evidence of AI-generated answers.
+### B. High-Risk Scenarios & Mitigations
+| Risk | Impact | Strategy |
+| :--- | :--- | :--- |
+| **Visual Feedback** | Unsure of state | **Green Pixel** (Ready), **Red Pixel** (Busy). |
+| **Blocked USBs** | App wont run | System-level restriction. Cannot bypass if executables are blocked. |
+| **Network Filtering** | API blocked | Use offline models (Ollama) if possible, though this affects portability. |
+| **Clipboard Collisions** | Data loss | We overwrite. User accepts risk for stealth. |
 
 ---
 
-## 4. Configuration Reference
-
-The `config.toml` file is the brain of the application.
+## 6. Configuration Specification (`config.toml`)
 
 ```toml
 [general]
-wake_key = "Ctrl+Shift+Space"   # trigger OCR capture
-model_key = "Ctrl+Shift+V"      # trigger AI generation from clipboard
-panic_key = "Ctrl+Shift+F12"    # kill switch
-use_rag = true                  # enable/disable local knowledge base
+mode = "default"
+wake_key = "Alt + Space"     # Enter OCR Selection Mode
+model_key = "Ctrl + Space"   # Send Clipboard to Model
+panic_key = "F8"             # Force Exit
 
-[ui]
-pixel_size = 3                  # Size of the indicator pixel
-pixel_position = "TopRight"     # TopRight, TopLeft, BottomRight, BottomLeft
+[rag]
+enabled = true
+knowledge_path = "knowledge"    # Relative path to scan
+index_path = "data/rag_index"   # Internal DB path
+max_results = 3
+min_score = 0.7
+
+[visuals]
+indicator_color = "#FF0000" # Processing Color
+ready_color = "#00FF00"
+position = "top-right"      # top-right, top-left, bottom-right, bottom-left
+size = 5
+offset = 0
+
+# MCQ Colors
+color_mcq_a = "#00FFFF" # Cyan
+color_mcq_b = "#FF00FF" # Magenta
+color_mcq_c = "#FFFF00" # Yellow
+color_mcq_d = "#000000" # Black
 
 [models]
-provider = "groq"               # active provider (groq, openrouter, ollama)
+provider = "groq" # Options: groq, openrouter, ollama
 
 [models.groq]
 api_key = "gsk_..."
@@ -78,19 +156,10 @@ model_id = "llama-3.1-8b-instant"
 
 [models.openrouter]
 api_key = "sk-or-..."
-model_id = "openai/gpt-4o-mini"
-
-[rag]
-enabled = true
-# Relative path to knowledge folder
-knowledge_path = "knowledge"
-# Max results to inject into prompt
-top_k = 3
+model_id = "google/gemma-3-27b-it:free"
 ```
 
----
-
-## 5. Troubleshooting High-Risk Scenarios
-
-- **Blocked USBs**: If an institution blocks USB executables, ShadowPrompt will not run. This is a system-level restriction.
-- **Network Filtering**: If Groq/OpenRouter is blocked on the network, consider using the "Ollama" provider, though this breaks the "Portable" aspect as Ollama usually requires a host installation (unless a portable version of Ollama is used).
+## 7. Build & Deployment
+1. **Build**: Use `Launcher.bat` or `build_release.bat`.
+2. **Run**: Double-click `Launcher.bat`.
+3. **Knowledge**: Add .md/.txt files to `knowledge/`. Restart to index.
