@@ -81,17 +81,18 @@ Used when copy is disabled or text is an image.
 6.  **Follow-up:** User proceeds to **Scenario 1** (Presses `Model Key` to process the now-copied text).
 
 ### D. Scenario 3: Multiple Choice Questions (MCQ)
-ShadowPrompt automatically detects if the answer is a multiple choice option (A, B, C, D or 1, 2, 3, 4) and provides a secondary visual cue.
+ShadowPrompt uses **context-aware MCQ detection** to identify answers even when the model outputs only the value (e.g., "4" instead of "A) 4").
 
 1.  **Trigger:** Standard Model Query (Scenario 1).
-2.  **Detection:** If the LLM response starts with "A", "B", "C", "D" (or equivalent numbers/formats).
+2.  **Detection:** The system prompt enforces MCQ format. Additionally, the parser cross-references answer values with choices from the original question.
 3.  **Visual Feedback:** A **Secondary Pixel** appears just below the main indicator:
     *   **Cyan:** Answer is **A** or **1**
     *   **Magenta:** Answer is **B** or **2**
     *   **Yellow:** Answer is **C** or **3**
     *   **Black:** Answer is **D** or **4**
+    *   **White:** No MCQ detected (default state)
 4.  **Clipboard:** The full answer text is still copied to the clipboard.
-5.  **Reset:** The secondary indicator resets when a new query is started.
+5.  **Reset:** The secondary indicator resets to white when a new query is started.
 
 ---
 
@@ -187,6 +188,7 @@ color_mcq_a = "#00FFFF" # Cyan
 color_mcq_b = "#FF00FF" # Magenta
 color_mcq_c = "#FFFF00" # Yellow
 color_mcq_d = "#000000" # Black
+color_mcq_none = "#FFFFFF" # White (default when no MCQ detected)
 color_processing = "#FF0000" # Red
 
 [models]
@@ -207,7 +209,7 @@ model_id = "llama3"
 
 [models.github_copilot]
 token_path = "config/copilot_token.json"
-token_path = "config/copilot_token.json"
+```
 
 ## 8. Build & Deployment
 To ensure portability across Windows machines:
