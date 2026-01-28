@@ -1,5 +1,5 @@
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum McqAnswer {
     A,
     B,
@@ -69,6 +69,61 @@ fn check_starts_with(text: &str) -> Option<McqAnswer> {
     }
     None
 }
+pub fn parse_mcq_with_context(input: &str, output: &str) -> Option<McqAnswer> {
+    let choices = extract_mcq_choices(input);
+    
+    if !choices.is_empty() {
+        let output_clean = output.trim().to_lowercase();
+        
+        for (letter, value) in &choices {
+            let value_lower = value.to_lowercase();
+            if output_clean == value_lower 
+                || output_clean.starts_with(&value_lower) 
+                || value_lower.starts_with(&output_clean) {
+                return Some(letter.clone());
+            }
+        }
+    }
+    
+    parse_mcq_answer(output)
+}
+
+fn extract_mcq_choices(input: &str) -> Vec<(McqAnswer, String)> {
+    use regex::Regex;
+    
+    let mut choices = Vec::new();
+    
+    let patterns = [
+        r"(?i)\bA[.\)]\s*([^\n\r]+?)(?:\s+B[.\)]|\n|\r|$)",
+        r"(?i)\bB[.\)]\s*([^\n\r]+?)(?:\s+C[.\)]|\n|\r|$)",
+        r"(?i)\bC[.\)]\s*([^\n\r]+?)(?:\s+D[.\)]|\n|\r|$)",
+        r"(?i)\bD[.\)]\s*([^\n\r]+?)(?:\s+E[.\)]|\n|\r|$)",
+        r"(?i)\b1[.\)]\s*([^\n\r]+?)(?:\s+2[.\)]|\n|\r|$)",
+        r"(?i)\b2[.\)]\s*([^\n\r]+?)(?:\s+3[.\)]|\n|\r|$)",
+        r"(?i)\b3[.\)]\s*([^\n\r]+?)(?:\s+4[.\)]|\n|\r|$)",
+        r"(?i)\b4[.\)]\s*([^\n\r]+?)(?:\s+5[.\)]|\n|\r|$)",
+    ];
+    
+    let letter_map = [
+        McqAnswer::A, McqAnswer::B, McqAnswer::C, McqAnswer::D,
+        McqAnswer::A, McqAnswer::B, McqAnswer::C, McqAnswer::D,
+    ];
+    
+    for (i, pattern) in patterns.iter().enumerate() {
+        if let Ok(re) = Regex::new(pattern) {
+            if let Some(caps) = re.captures(input) {
+                if let Some(m) = caps.get(1) {
+                    let value = m.as_str().trim().to_string();
+                    if !value.is_empty() {
+                        choices.push((letter_map[i].clone(), value));
+                    }
+                }
+            }
+        }
+    }
+    
+    choices
+}
 
 #[cfg(test)]
 mod tests {
@@ -82,38 +137,57 @@ mod tests {
         assert_eq!(parse_mcq_answer("4."), Some(McqAnswer::D));
         assert_eq!(parse_mcq_answer("A. This is the answer"), Some(McqAnswer::A));
         assert_eq!(parse_mcq_answer("Answer: B"), Some(McqAnswer::B));
-        assert_eq!(parse_mcq_answer("The answer is C"), None); // Too strict for now, can relax if needed
+        assert_eq!(parse_mcq_answer("The answer is C"), None);
         assert_eq!(parse_mcq_answer("1) Paris"), Some(McqAnswer::A));
     }
 
     #[test]
+    fn test_mcq_with_context() {
+        assert_eq!(
+            parse_mcq_with_context("What is 2+2? A. 4 B. 3 C. 2 D. 1", "4"),
+            Some(McqAnswer::A)
+        );
+        assert_eq!(
+            parse_mcq_with_context("Capital? A) Paris B) London C) Berlin D) Rome", "Paris"),
+            Some(McqAnswer::A)
+        );
+        assert_eq!(
+            parse_mcq_with_context("Q1: 1) Red 2) Blue 3) Green 4) Yellow", "Blue"),
+            Some(McqAnswer::B)
+        );
+        assert_eq!(
+            parse_mcq_with_context("Normal question without choices", "some answer"),
+            None
+        );
+        assert_eq!(
+            parse_mcq_with_context("A. 4 B. 3 C. 2 D. 1", "A) 4"),
+            Some(McqAnswer::A)
+        );
+    }
+
+    #[test]
     fn test_hex_parsing() {
-        assert_eq!(parse_hex_color("#FF0000"), 0x000000FF); // Blue=00, Green=00, Red=FF -> 0x000000FF
+        assert_eq!(parse_hex_color("#FF0000"), 0x000000FF);
         assert_eq!(parse_hex_color("#00FF00"), 0x0000FF00);
-        assert_eq!(parse_hex_color("#00FFFF"), 0x00FFFF00); // BGR: FF FF 00
+        assert_eq!(parse_hex_color("#00FFFF"), 0x00FFFF00);
         assert_eq!(parse_hex_color("ZZZ"), 0x00000000);
     }
 
     #[test]
     fn test_key_parsing() {
         use rdev::Key;
-        // Single Key
         let keys = crate::utils::parse_keys("A");
         assert_eq!(keys, vec![Key::KeyA]);
 
-        // Modifier + Key
         let keys = crate::utils::parse_keys("Ctrl+Z");
         assert_eq!(keys, vec![Key::ControlLeft, Key::KeyZ]);
 
-        // Multiple Modifiers
         let keys = crate::utils::parse_keys("Ctrl+Shift+Esc");
         assert_eq!(keys, vec![Key::ControlLeft, Key::ShiftLeft, Key::Escape]);
 
-        // F-Keys
         let keys = crate::utils::parse_keys("F12");
         assert_eq!(keys, vec![Key::F12]);
         
-        // Whitespace handling
         let keys = crate::utils::parse_keys("  Alt +  Tab ");
         assert_eq!(keys, vec![Key::Alt, Key::Tab]);
     }

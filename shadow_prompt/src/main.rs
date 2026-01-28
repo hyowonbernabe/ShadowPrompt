@@ -15,7 +15,7 @@ use crate::clipboard::ClipboardManager;
 use crate::ui::{UIManager, UICommand};
 use crate::llm::LlmClient;
 use crate::knowledge::KnowledgeProvider;
-use crate::utils::{parse_mcq_answer, McqAnswer, parse_hex_color, parse_keys};
+use crate::utils::{parse_mcq_with_context, McqAnswer, parse_hex_color, parse_keys};
 use std::sync::mpsc;
 
 fn main() -> anyhow::Result<()> {
@@ -202,8 +202,8 @@ async fn run_app() -> anyhow::Result<()> {
                              }
                         };
 
-                        // 4. Check for MCQ Answer
-                        if let Some(ans) = parse_mcq_answer(&response) {
+                        // 4. Check for MCQ Answer (with context from original input)
+                        if let Some(ans) = parse_mcq_with_context(&prompt, &response) {
                              let hex = match ans {
                                  McqAnswer::A => &config_clone.visuals.color_mcq_a,
                                  McqAnswer::B => &config_clone.visuals.color_mcq_b,
