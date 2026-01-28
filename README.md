@@ -2,7 +2,7 @@
   <img src="shadow_prompt/assets/logo_512.png" width="150" alt="ShadowPrompt Logo">
 </p>
 
-# ShadowPrompt: Zero-Install Discrete Academic Interface
+# ShadowPrompt: Portable Discrete Academic Interface
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/hyowonbernabe/ShadowPrompt?include_prereleases)](https://github.com/hyowonbernabe/ShadowPrompt/releases)
@@ -22,7 +22,7 @@ ShadowPrompt was born from the need for a **Discrete Academic Interface**—a to
 ### The Shadow Advantage
 | Feature | Benefit |
 |---------|---------|
-| **Zero-Install Portability** | Run directly from USB. No registry, no temp files, no trace. |
+| **Portable Architecture** | Run directly from USB. No registry, no temp files, no trace. |
 | **Cognitive Flow Preservation** | Global hotkeys—no window switching required. |
 | **Stealth by Design** | No taskbar icon, no windows. Just a single pixel indicator. |
 | **Panic Button** | Instantly kill process and wipe clipboard with one hotkey. |
@@ -182,6 +182,15 @@ To re-run the Setup Wizard: `shadow_prompt.exe --setup`
 - **Panic Wipe**: Clipboard is cleared on panic to prevent data leakage
 
 > **Note**: Queries sent to Groq/OpenRouter are subject to their privacy policies.
+
+---
+
+## 🎒 Portable Mode (USB)
+
+ShadowPrompt is designed to be a "Carry-On" tool.
+1. **No Admin Rights**: Requires zero elevation (unless using global hooks on protected windows).
+2. **Self-Contained**: Config, logs, and database live in the `shadow_prompt` folder next to the executable.
+3. **Plug & Play**: Plug into any Windows 10/11 machine, run, and eject when done.
 
 ---
 
