@@ -68,9 +68,10 @@ impl HotkeyRecorder {
             }
 
             // Check if any key was released this frame
-            let any_key_released = i.events.iter().any(|e| {
-                matches!(e, egui::Event::Key { pressed: false, .. })
-            });
+            let any_key_released = i
+                .events
+                .iter()
+                .any(|e| matches!(e, egui::Event::Key { pressed: false, .. }));
 
             // When a key is released, check if we have a valid combination
             if any_key_released && self.has_valid_combination() {
@@ -86,11 +87,11 @@ impl HotkeyRecorder {
 
     /// Check if we have a valid combination (modifier + key, or 2+ keys)
     fn has_valid_combination(&self) -> bool {
-        let has_modifier = self.current_modifiers.ctrl 
-            || self.current_modifiers.shift 
+        let has_modifier = self.current_modifiers.ctrl
+            || self.current_modifiers.shift
             || self.current_modifiers.alt;
         let has_key = !self.current_keys.is_empty();
-        
+
         // Valid: modifier + any key, or 2+ regular keys
         (has_modifier && has_key) || self.current_keys.len() >= 2
     }
@@ -101,7 +102,7 @@ impl HotkeyRecorder {
 
     pub fn get_current_display(&self) -> String {
         let mut parts: Vec<String> = Vec::new();
-        
+
         // Add modifiers first
         if self.current_modifiers.ctrl {
             parts.push("Ctrl".to_string());
@@ -112,12 +113,12 @@ impl HotkeyRecorder {
         if self.current_modifiers.alt {
             parts.push("Alt".to_string());
         }
-        
+
         // Add regular keys
         for key in &self.current_keys {
             parts.push(key_to_string(*key));
         }
-        
+
         if parts.is_empty() {
             "Press a key combination...".to_string()
         } else {
@@ -146,21 +147,21 @@ pub fn hotkey_field(
 
     ui.horizontal(|ui| {
         ui.label(label);
-        
+
         if recorder.is_recording() {
             // Recording mode
             let current_display = recorder.get_current_display();
-            
+
             // Make the text field focusable to capture keyboard input
             let response = ui.add(
                 egui::TextEdit::singleline(&mut current_display.clone())
                     .desired_width(200.0)
-                    .interactive(false)
+                    .interactive(false),
             );
-            
+
             // Request focus while recording
             response.request_focus();
-            
+
             if ui.button("Cancel").clicked() {
                 recorder.cancel();
             }
@@ -169,9 +170,9 @@ pub fn hotkey_field(
             ui.add(
                 egui::TextEdit::singleline(current_value)
                     .desired_width(200.0)
-                    .interactive(false)
+                    .interactive(false),
             );
-            
+
             if ui.button("Record").clicked() {
                 recorder.start_recording();
             }
@@ -182,7 +183,12 @@ pub fn hotkey_field(
 }
 
 /// Validate hotkeys don't conflict
-pub fn validate_hotkeys(wake: &str, model: &str, panic: &str) -> Result<(), String> {
+pub fn validate_hotkeys(
+    wake: &str,
+    model: &str,
+    panic: &str,
+    hide: Option<&str>,
+) -> Result<(), String> {
     if wake == model {
         return Err("Wake and Model hotkeys cannot be the same".to_string());
     }
@@ -192,31 +198,75 @@ pub fn validate_hotkeys(wake: &str, model: &str, panic: &str) -> Result<(), Stri
     if model == panic {
         return Err("Model and Panic hotkeys cannot be the same".to_string());
     }
+    if let Some(hide_key) = hide {
+        if !hide_key.is_empty() {
+            if wake == hide_key {
+                return Err("Wake and Hide hotkeys cannot be the same".to_string());
+            }
+            if model == hide_key {
+                return Err("Model and Hide hotkeys cannot be the same".to_string());
+            }
+            if panic == hide_key {
+                return Err("Panic and Hide hotkeys cannot be the same".to_string());
+            }
+        }
+    }
     Ok(())
 }
 
 fn key_to_string(key: egui::Key) -> String {
     match key {
-        egui::Key::A => "A", egui::Key::B => "B", egui::Key::C => "C",
-        egui::Key::D => "D", egui::Key::E => "E", egui::Key::F => "F",
-        egui::Key::G => "G", egui::Key::H => "H", egui::Key::I => "I",
-        egui::Key::J => "J", egui::Key::K => "K", egui::Key::L => "L",
-        egui::Key::M => "M", egui::Key::N => "N", egui::Key::O => "O",
-        egui::Key::P => "P", egui::Key::Q => "Q", egui::Key::R => "R",
-        egui::Key::S => "S", egui::Key::T => "T", egui::Key::U => "U",
-        egui::Key::V => "V", egui::Key::W => "W", egui::Key::X => "X",
-        egui::Key::Y => "Y", egui::Key::Z => "Z",
-        
-        egui::Key::Num0 => "0", egui::Key::Num1 => "1", egui::Key::Num2 => "2",
-        egui::Key::Num3 => "3", egui::Key::Num4 => "4", egui::Key::Num5 => "5",
-        egui::Key::Num6 => "6", egui::Key::Num7 => "7", egui::Key::Num8 => "8",
+        egui::Key::A => "A",
+        egui::Key::B => "B",
+        egui::Key::C => "C",
+        egui::Key::D => "D",
+        egui::Key::E => "E",
+        egui::Key::F => "F",
+        egui::Key::G => "G",
+        egui::Key::H => "H",
+        egui::Key::I => "I",
+        egui::Key::J => "J",
+        egui::Key::K => "K",
+        egui::Key::L => "L",
+        egui::Key::M => "M",
+        egui::Key::N => "N",
+        egui::Key::O => "O",
+        egui::Key::P => "P",
+        egui::Key::Q => "Q",
+        egui::Key::R => "R",
+        egui::Key::S => "S",
+        egui::Key::T => "T",
+        egui::Key::U => "U",
+        egui::Key::V => "V",
+        egui::Key::W => "W",
+        egui::Key::X => "X",
+        egui::Key::Y => "Y",
+        egui::Key::Z => "Z",
+
+        egui::Key::Num0 => "0",
+        egui::Key::Num1 => "1",
+        egui::Key::Num2 => "2",
+        egui::Key::Num3 => "3",
+        egui::Key::Num4 => "4",
+        egui::Key::Num5 => "5",
+        egui::Key::Num6 => "6",
+        egui::Key::Num7 => "7",
+        egui::Key::Num8 => "8",
         egui::Key::Num9 => "9",
-        
-        egui::Key::F1 => "F1", egui::Key::F2 => "F2", egui::Key::F3 => "F3",
-        egui::Key::F4 => "F4", egui::Key::F5 => "F5", egui::Key::F6 => "F6",
-        egui::Key::F7 => "F7", egui::Key::F8 => "F8", egui::Key::F9 => "F9",
-        egui::Key::F10 => "F10", egui::Key::F11 => "F11", egui::Key::F12 => "F12",
-        
+
+        egui::Key::F1 => "F1",
+        egui::Key::F2 => "F2",
+        egui::Key::F3 => "F3",
+        egui::Key::F4 => "F4",
+        egui::Key::F5 => "F5",
+        egui::Key::F6 => "F6",
+        egui::Key::F7 => "F7",
+        egui::Key::F8 => "F8",
+        egui::Key::F9 => "F9",
+        egui::Key::F10 => "F10",
+        egui::Key::F11 => "F11",
+        egui::Key::F12 => "F12",
+
         egui::Key::Space => "Space",
         egui::Key::Tab => "Tab",
         egui::Key::Escape => "Esc",
@@ -232,7 +282,8 @@ fn key_to_string(key: egui::Key) -> String {
         egui::Key::ArrowDown => "Down",
         egui::Key::ArrowLeft => "Left",
         egui::Key::ArrowRight => "Right",
-        
+
         _ => return format!("{:?}", key),
-    }.to_string()
+    }
+    .to_string()
 }

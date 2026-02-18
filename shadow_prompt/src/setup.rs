@@ -107,6 +107,7 @@ pub struct SetupWizard {
     wake_recorder: HotkeyRecorder,
     model_recorder: HotkeyRecorder,
     panic_recorder: HotkeyRecorder,
+    hide_recorder: HotkeyRecorder,
     hotkey_error: Option<String>,
 
     // Downloads
@@ -132,6 +133,7 @@ impl SetupWizard {
             wake_recorder: HotkeyRecorder::new(),
             model_recorder: HotkeyRecorder::new(),
             panic_recorder: HotkeyRecorder::new(),
+            hide_recorder: HotkeyRecorder::new(),
             hotkey_error: None,
             downloading: false,
             download_progress: 0.0,
@@ -187,6 +189,7 @@ impl SetupWizard {
                 &self.config.general.wake_key,
                 &self.config.general.model_key,
                 &self.config.general.panic_key,
+                Some(&self.config.visuals.hide_key),
             ) {
                 self.hotkey_error = Some(e);
                 return;
@@ -330,6 +333,7 @@ impl eframe::App for SetupWizard {
         // Request repaint for animations
         if self.downloading || self.wake_recorder.is_recording()
             || self.model_recorder.is_recording() || self.panic_recorder.is_recording()
+            || self.hide_recorder.is_recording()
         {
             ctx.request_repaint();
         }
@@ -592,6 +596,9 @@ impl SetupWizard {
         ui.add_space(8.0);
 
         hotkey_field(ui, "Panic (Exit):", &mut self.config.general.panic_key, &mut self.panic_recorder, "panic");
+        ui.add_space(8.0);
+
+        hotkey_field(ui, "Hide Graphics:", &mut self.config.visuals.hide_key, &mut self.hide_recorder, "hide");
         ui.add_space(12.0);
 
         // Validation error
@@ -610,9 +617,9 @@ impl SetupWizard {
     }
 
     fn show_visuals(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new("Customize the visual indicator.").strong());
+        ui.label(egui::RichText::new("Customize the visual indicators.").strong());
         ui.add_space(4.0);
-        ui.label("ShadowPrompt displays a small pixel indicator to show its status.");
+        ui.label("ShadowPrompt displays small pixel indicators to show its status.");
         ui.add_space(12.0);
 
         // Position
@@ -657,6 +664,56 @@ impl SetupWizard {
             ui.add_space(16.0);
             color_picker_compact(ui, "D:", &mut self.config.visuals.color_mcq_d);
         });
+
+        ui.add_space(16.0);
+
+        // True/False Colors
+        ui.label(egui::RichText::new("True/False Indicator Colors").strong());
+        ui.add_space(4.0);
+
+        ui.horizontal(|ui| {
+            color_picker_compact(ui, "True:", &mut self.config.visuals.color_true);
+            ui.add_space(16.0);
+            color_picker_compact(ui, "False:", &mut self.config.visuals.color_false);
+        });
+
+        ui.add_space(16.0);
+
+        // Text Overlay Settings
+        ui.label(egui::RichText::new("Text Answer Display").strong());
+        ui.add_space(4.0);
+
+        ui.checkbox(&mut self.config.visuals.text_overlay_enabled, "Show answer text at bottom-right");
+        
+        if self.config.visuals.text_overlay_enabled {
+            ui.add_space(8.0);
+            
+            ui.horizontal(|ui| {
+                ui.label("Position:");
+                egui::ComboBox::from_label("")
+                    .selected_text(&self.config.visuals.text_overlay_position)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.config.visuals.text_overlay_position, "bottom-right".to_string(), "Bottom Right");
+                        ui.selectable_value(&mut self.config.visuals.text_overlay_position, "top-right".to_string(), "Top Right");
+                        ui.selectable_value(&mut self.config.visuals.text_overlay_position, "bottom-left".to_string(), "Bottom Left");
+                        ui.selectable_value(&mut self.config.visuals.text_overlay_position, "top-left".to_string(), "Top Left");
+                    });
+            });
+
+            ui.add_space(4.0);
+            
+            ui.horizontal(|ui| {
+                ui.label("Font Size:");
+                ui.add(egui::Slider::new(&mut self.config.visuals.text_overlay_font_size, 8..=24).text(""));
+            });
+
+            ui.add_space(4.0);
+            
+            ui.horizontal(|ui| {
+                ui.label("Opacity:");
+                ui.add(egui::Slider::new(&mut self.config.visuals.text_overlay_opacity, 50..=255).text(""));
+            });
+        }
     }
 
     fn show_downloads(&mut self, ui: &mut egui::Ui) {
@@ -716,8 +773,12 @@ impl SetupWizard {
                     ui.code(&self.config.general.model_key);
                     ui.end_row();
 
-                    ui.label("Panic (Exit):");
+            ui.label("Panic (Exit):");
                     ui.code(&self.config.general.panic_key);
+                    ui.end_row();
+
+                    ui.label("Hide Graphics:");
+                    ui.code(&self.config.visuals.hide_key);
                     ui.end_row();
                 });
         });

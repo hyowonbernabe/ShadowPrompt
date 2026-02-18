@@ -1,6 +1,6 @@
 # ShadowPrompt: Portable Stealth AI Architecture
 
-**Version:** 1.0.5
+**Version:** 1.1.0
 **Target OS:** Windows 10/11
 **Language:** Rust
 
@@ -78,6 +78,26 @@ ShadowPrompt uses **context-aware MCQ detection** to identify answers (e.g., "A"
     * **White:** No MCQ detected
 3. **Clipboard:** Full answer text is still copied.
 
+### F. Scenario 4: True/False Questions
+ShadowPrompt detects True/False questions via LLM and displays:
+1. **Trigger:** Standard Model Query.
+2. **Visual Feedback:** **Secondary Pixel**:
+    * **Lime Green:** True
+    * **Maroon:** False
+3. **Text Overlay:** Answer displayed at bottom-right (if enabled)
+
+### G. Scenario 5: Identification Questions
+ShadowPrompt detects identification/short-answer questions:
+1. **Trigger:** Standard Model Query.
+2. **Visual Feedback:** **White** pixel (same as "No MCQ")
+3. **Text Overlay:** Answer text displayed at bottom-right (if enabled)
+
+### H. Hide Graphics
+Press the **Hide Key** to toggle all visual indicators on/off.
+- Useful when needing to hide ShadowPrompt from view (e.g., professor approaches)
+- Press again to show indicators
+- Does not stop the application from running
+
 ---
 
 ## 4. Directory Structure & Portability
@@ -111,7 +131,12 @@ The application uses exe-relative paths via `get_exe_dir()`. The USB drive lette
 * **Keybind:** `Ctrl + Shift + F12`
 * **Behavior:** Terminates process immediately and clears system clipboard.
 
-### B. High-Risk Scenarios & Mitigations
+### B. Hide Graphics
+* **Keybind:** `Ctrl + Shift + H` (configurable)
+* **Behavior:** Toggles all visual indicators on/off without stopping the application.
+* **Use Case:** Hide indicators when someone approaches, press again to show.
+
+### C. High-Risk Scenarios & Mitigations
 | Risk | Impact | Strategy |
 | :--- | :--- | :--- |
 | **Visual Feedback** | Unsure of state | **Green Pixel** (Ready), **Red Pixel** (Busy). |
@@ -128,7 +153,7 @@ The application uses exe-relative paths via `get_exe_dir()`. The USB drive lette
 mode = "default"
 wake_key = "Alt + Space"     # Enter OCR Selection Mode
 model_key = "Ctrl + Space"   # Send Clipboard to Model
-panic_key = "F8"             # Force Exit
+panic_key = "F8"              # Force Exit
 
 [rag]
 enabled = true
@@ -149,6 +174,20 @@ color_mcq_a = "#00FFFF" # Cyan
 color_mcq_b = "#FF00FF" # Magenta
 color_mcq_c = "#FFFF00" # Yellow
 color_mcq_d = "#000000" # Black
+color_mcq_none = "#FFFFFF" # White (no answer detected)
+
+# True/False Colors
+color_true = "#00FF00"  # Lime Green
+color_false = "#800000" # Maroon
+
+# Text Overlay Settings
+text_overlay_enabled = true
+text_overlay_position = "bottom-right"  # Position of answer text
+text_overlay_font_size = 12
+text_overlay_opacity = 200  # 0-255
+
+# Hide Graphics Hotkey
+hide_key = "Ctrl+Shift+H"
 
 [models]
 provider = "groq" # Options: groq, openrouter, ollama
