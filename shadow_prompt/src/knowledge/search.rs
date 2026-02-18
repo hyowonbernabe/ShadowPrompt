@@ -4,10 +4,21 @@ use regex::Regex;
 use crate::config::SearchConfig;
 
 pub async fn perform_search(query: &str, config: &SearchConfig) -> Result<String> {
-    match config.engine.as_str() {
-        "serper" => perform_serper_search(query, config.max_results, &config.serper_api_key).await,
-        _ => perform_duckduckgo_search(query, config.max_results).await,
+    // Try Serper first if configured
+    if config.engine == "serper" {
+        match perform_serper_search(query, config.max_results, &config.serper_api_key).await {
+            Ok(results) if !results.is_empty() => return Ok(results),
+            Ok(_) => {
+                log::warn!("Serper returned empty results, falling back to DuckDuckGo...");
+            }
+            Err(e) => {
+                log::warn!("Serper failed: {}, falling back to DuckDuckGo...", e);
+            }
+        }
     }
+    
+    // Fallback to DuckDuckGo
+    perform_duckduckgo_search(query, config.max_results).await
 }
 
 async fn perform_serper_search(query: &str, max_results: usize, api_key: &Option<String>) -> Result<String> {
