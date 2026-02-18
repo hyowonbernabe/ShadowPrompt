@@ -80,9 +80,9 @@ impl RagSystem {
                      for doc in existing_index.documents {
                          existing_docs.insert(doc.path.clone(), doc);
                      }
-                     println!("[RAG] Loaded {} existing documents from index.", existing_docs.len());
-                 }
-             }
+                      println!("[RAG] Loaded {} existing documents from index.", existing_docs.len());
+                  }
+              }
         }
 
         let root_path_str = root_path.display().to_string();
@@ -121,10 +121,10 @@ impl RagSystem {
                         }
 
                         if !reuse {
-                             let content = fs::read_to_string(&path).unwrap_or_default();
-                             if !content.trim().is_empty() {
-                                 docs_to_embed.push((path_str, content, modified));
-                             }
+                            let content = fs::read_to_string(&path).unwrap_or_default();
+                            if !content.trim().is_empty() {
+                                docs_to_embed.push((path_str, content, modified));
+                            }
                         }
                     },
                     Err(e) => eprintln!("[RAG] Error reading file: {:?}", e),
@@ -499,5 +499,75 @@ mod tests {
         let ingest_result = rag.ingest().await;
         assert!(ingest_result.is_ok());
         assert_eq!(ingest_result.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_rag_corrupt_index() -> Result<()> {
+        use std::io::Write;
+        
+        let temp_dir = std::env::temp_dir().join(format!("shadow_prompt_test_corrupt_{}", uuid::Uuid::new_v4()));
+        let knowledge_dir = temp_dir.join("knowledge");
+        let data_dir = temp_dir.join("data");
+        let index_path = data_dir.join("index.json");
+
+        fs::create_dir_all(&knowledge_dir)?;
+        fs::create_dir_all(&data_dir)?;
+
+        // 1. Create a dummy knowledge file
+        let doc1_path = knowledge_dir.join("doc1.txt");
+        {
+            let mut f = fs::File::create(&doc1_path)?;
+            f.write_all(b"content 1")?;
+        }
+
+        // 2. Write a corrupted index.json
+        {
+            let mut f = fs::File::create(&index_path)?;
+            f.write_all(b"{ \"documents\": [ ")?; // Invalid JSON
+        }
+
+        // Setup RagSystem
+        let mut config = Config::default();
+        config.rag.enabled = true;
+        // Point to our temp dirs using absolute paths so they work with get_exe_dir().join() logic
+        config.rag.knowledge_path = knowledge_dir.to_string_lossy().to_string();
+        config.rag.index_path = data_dir.to_string_lossy().to_string();
+
+        let rag = RagSystem {
+            embedding_model: None,
+            config: config.clone(),
+            cached_index: tokio::sync::RwLock::new(None),
+            is_operational: true,
+            init_error: None,
+        };
+
+        // TEST 1: Verify get_files_to_embed handles corrupt index
+        println!("Testing get_files_to_embed with corrupt index...");
+        let result = rag.get_files_to_embed(&knowledge_dir, &index_path);
+        
+        assert!(result.is_ok(), "get_files_to_embed failed with corrupt index");
+        let (reused, to_embed) = result.unwrap();
+        
+        // Should ignore corrupt index (treat as empty), see file on disk, and mark it for embedding
+        assert_eq!(reused.len(), 0, "Should have 0 reused docs (index corrupted)");
+        assert_eq!(to_embed.len(), 1, "Should have 1 doc to embed (fresh scan)");
+        assert_eq!(to_embed[0].0, doc1_path.display().to_string());
+
+
+        // TEST 2: Call ingest (graceful handling verification)
+        let ingest_result = rag.ingest().await;
+        assert!(ingest_result.is_ok());
+        assert_eq!(ingest_result.unwrap(), 0);
+
+
+        // TEST 3: Call query (graceful handling verification)
+        let query_result = rag.query("test").await;
+        assert!(query_result.is_ok());
+        assert!(query_result.unwrap().is_empty());
+
+        // Clean up
+        let _ = fs::remove_dir_all(temp_dir);
+
+        Ok(())
     }
 }
