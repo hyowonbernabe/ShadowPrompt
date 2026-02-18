@@ -1,8 +1,51 @@
-use anyhow::Result;
+use anyhow::{Result, Context};
 use reqwest::{Client, header};
 use regex::Regex;
+use crate::config::SearchConfig;
 
-pub async fn perform_search(query: &str, max_results: usize) -> Result<String> {
+pub async fn perform_search(query: &str, config: &SearchConfig) -> Result<String> {
+    match config.engine.as_str() {
+        "serper" => perform_serper_search(query, config.max_results, &config.serper_api_key).await,
+        _ => perform_duckduckgo_search(query, config.max_results).await,
+    }
+}
+
+async fn perform_serper_search(query: &str, max_results: usize, api_key: &Option<String>) -> Result<String> {
+    let api_key = api_key.as_ref().context("Serper API key not configured")?;
+    
+    let client = Client::new();
+    let res = client.post("https://google.serper.dev/search")
+        .header("X-API-KEY", api_key)
+        .json(&serde_json::json!({
+            "q": query,
+            "num": max_results
+        }))
+        .send()
+        .await?
+        .text()
+        .await?;
+    
+    let json: serde_json::Value = serde_json::from_str(&res)
+        .context("Failed to parse Serper response")?;
+    
+    let organic = json["organic"].as_array()
+        .context("No results from Serper")?;
+    
+    let mut results = String::new();
+    for item in organic.iter().take(max_results) {
+        let title = item["title"].as_str().unwrap_or("");
+        let snippet = item["snippet"].as_str().unwrap_or("");
+        results.push_str(&format!("- {}\n  {}\n", title, snippet));
+    }
+    
+    if results.is_empty() {
+        return Ok("No search results found.".to_string());
+    }
+    
+    Ok(results)
+}
+
+async fn perform_duckduckgo_search(query: &str, max_results: usize) -> Result<String> {
     let client = Client::new();
     let url = "https://html.duckduckgo.com/html/";
     

@@ -534,7 +534,22 @@ impl SetupWizard {
         // Web Search
         ui.group(|ui| {
             ui.label(egui::RichText::new("🔍 Web Search").strong());
-            ui.label("LLM models can search the web via DuckDuckGo, significantly improving accuracy for current information.");
+            ui.label("LLM models can search the web, significantly improving accuracy for current information.");
+            ui.add_space(8.0);
+            ui.label("Search Engine:");
+            ui.add_space(4.0);
+            ui.radio_value(&mut self.config.search.engine, "serper".to_string(), "Serper.dev (Recommended - reliable, $0.50/1k queries)");
+            ui.radio_value(&mut self.config.search.engine, "duckduckgo".to_string(), "DuckDuckGo (Free - may rate-limit)");
+            
+            if self.config.search.engine == "serper" {
+                ui.add_space(8.0);
+                let api_key = self.config.search.serper_api_key.get_or_insert_with(String::new);
+                ui.horizontal(|ui| {
+                    ui.label("Serper API Key:");
+                    ui.add(egui::TextEdit::singleline(api_key).desired_width(250.0).password(true));
+                });
+                ui.label(egui::RichText::new("Get your free API key at serper.dev").color(egui::Color32::GRAY).small());
+            }
         });
 
         ui.add_space(8.0);

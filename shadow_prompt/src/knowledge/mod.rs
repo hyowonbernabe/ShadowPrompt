@@ -40,7 +40,7 @@ impl KnowledgeProvider {
 
         // 1. Web Search
         if config.search.enabled {
-            match search::perform_search(query, config.search.max_results).await {
+            match search::perform_search(query, &config.search).await {
                 Ok(results) => {
                     if !results.is_empty() {
                         context.push_str("Based on web search results:\n");
