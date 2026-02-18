@@ -266,8 +266,28 @@ impl LlmClient {
          }
 
          let json: Value = res.json().await?;
-         let response = json["response"].as_str().context("No response field")?.to_string();
-         Ok(response)
+        let response = json["response"].as_str().context("No response field")?.to_string();
+        Ok(response)
+    }
+
+    /// Test provider connectivity with a simple prompt
+    pub async fn test_provider(provider: &str, config: &Config) -> Result<String> {
+        let connect_timeout = Duration::from_secs(5);
+        let read_timeout = Duration::from_secs(15);
+        
+        let client = reqwest::Client::builder()
+            .connect_timeout(connect_timeout)
+            .timeout(read_timeout)
+            .build()?;
+        
+        let test_prompt = "Reply with only the word 'OK' if you can read this.";
+        
+        match provider {
+            "groq" => Self::query_groq(&client, test_prompt, config).await,
+            "openrouter" => Self::query_openrouter(&client, test_prompt, config).await,
+            "ollama" => Self::query_ollama(&client, test_prompt, config).await,
+            _ => anyhow::bail!("Unknown provider: {}", provider),
+        }
     }
 
 

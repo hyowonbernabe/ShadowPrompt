@@ -5,6 +5,24 @@ use crate::tos_text::{TOS_TEXT, TOS_VERSION};
 use crate::hotkey_recorder::{HotkeyRecorder, hotkey_field, validate_hotkeys};
 use crate::color_picker::{color_picker, color_picker_compact};
 use std::path::Path;
+use crate::llm::LlmClient;
+
+// --- Helper function to test provider connectivity ---
+fn test_provider_sync(provider: &str, config: &Config) -> Result<String, String> {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        match LlmClient::test_provider(provider, config).await {
+            Ok(response) => {
+                if response.to_lowercase().contains("ok") || response.len() < 50 {
+                    Ok("Connected successfully!".to_string())
+                } else {
+                    Ok(format!("Connected (response: {})", &response[..response.len().min(30)]))
+                }
+            }
+            Err(e) => Err(e.to_string())
+        }
+    })
+}
 
 // --- Page Enum ---
 
@@ -57,6 +75,10 @@ struct ProviderState {
     groq_enabled: bool,
     openrouter_enabled: bool,
     ollama_enabled: bool,
+    groq_test_result: Option<Result<String, String>>,
+    openrouter_test_result: Option<Result<String, String>>,
+    ollama_test_result: Option<Result<String, String>>,
+    testing_provider: Option<String>,
 }
 
 impl ProviderState {
@@ -65,6 +87,10 @@ impl ProviderState {
             groq_enabled: config.models.groq.as_ref().map(|g| !g.api_key.is_empty()).unwrap_or(false),
             openrouter_enabled: config.models.openrouter.as_ref().map(|o| !o.api_key.is_empty()).unwrap_or(false),
             ollama_enabled: config.models.ollama.is_some(),
+            groq_test_result: None,
+            openrouter_test_result: None,
+            ollama_test_result: None,
+            testing_provider: None,
         }
     }
 
@@ -377,6 +403,8 @@ impl SetupWizard {
         ui.label(egui::RichText::new("Configure at least one LLM provider to continue.").strong());
         ui.add_space(4.0);
         ui.label("You can configure multiple providers. ShadowPrompt will automatically fall back to the next available provider if one fails.");
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new("Tip: Click 'Test Connection' to verify your API key works.").color(egui::Color32::GRAY).small());
         ui.add_space(12.0);
 
         // --- Groq ---
@@ -399,6 +427,23 @@ impl SetupWizard {
                     ui.label("Model:");
                     ui.add(egui::TextEdit::singleline(&mut groq.model_id).desired_width(200.0));
                 });
+                ui.add_space(4.0);
+                
+                // Test Connection button
+                let groq_enabled = self.provider_state.groq_enabled;
+                if groq_enabled {
+                    if ui.button("Test Groq Connection").clicked() {
+                        let config = self.config.clone();
+                        std::thread::spawn(move || {
+                            let result = test_provider_sync("groq", &config);
+                            match &result {
+                                Ok(msg) => log::info!("Groq test: {}", msg),
+                                Err(e) => log::error!("Groq test failed: {}", e),
+                            }
+                        });
+                    }
+                    ui.label(egui::RichText::new("(Check logs for result)").color(egui::Color32::GRAY).small());
+                }
             }
         });
 
@@ -423,6 +468,18 @@ impl SetupWizard {
                     ui.label("Model:");
                     ui.add(egui::TextEdit::singleline(&mut or.model_id).desired_width(200.0));
                 });
+                ui.add_space(4.0);
+                if ui.button("Test OpenRouter Connection").clicked() {
+                    let config = self.config.clone();
+                    std::thread::spawn(move || {
+                        let result = test_provider_sync("openrouter", &config);
+                        match &result {
+                            Ok(msg) => log::info!("OpenRouter test: {}", msg),
+                            Err(e) => log::error!("OpenRouter test failed: {}", e),
+                        }
+                    });
+                }
+                ui.label(egui::RichText::new("(Check logs for result)").color(egui::Color32::GRAY).small());
             }
         });
 
@@ -448,6 +505,18 @@ impl SetupWizard {
                     ui.label("Model:");
                     ui.add(egui::TextEdit::singleline(&mut ol.model_id).desired_width(150.0));
                 });
+                ui.add_space(4.0);
+                if ui.button("Test Ollama Connection").clicked() {
+                    let config = self.config.clone();
+                    std::thread::spawn(move || {
+                        let result = test_provider_sync("ollama", &config);
+                        match &result {
+                            Ok(msg) => log::info!("Ollama test: {}", msg),
+                            Err(e) => log::error!("Ollama test failed: {}", e),
+                        }
+                    });
+                }
+                ui.label(egui::RichText::new("(Check logs for result)").color(egui::Color32::GRAY).small());
             }
         });
 
