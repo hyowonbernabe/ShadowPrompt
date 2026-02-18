@@ -124,7 +124,10 @@ pub struct VisualsConfig {
     pub text_overlay_font_size: i32,
 
     #[serde(default = "default_text_opacity")]
-    pub text_overlay_opacity: u8,
+    pub text_overlay_bg_opacity: u8,
+
+    #[serde(default = "default_text_opacity")]
+    pub text_overlay_text_opacity: u8,
 
     #[serde(default = "default_hide_key")]
     pub hide_key: String,
@@ -152,7 +155,8 @@ impl Default for VisualsConfig {
             text_overlay_enabled: true,
             text_overlay_position: default_position(),
             text_overlay_font_size: default_text_size(),
-            text_overlay_opacity: default_text_opacity(),
+            text_overlay_bg_opacity: 200,
+            text_overlay_text_opacity: 255,
             hide_key: default_hide_key(),
         }
     }
@@ -234,6 +238,10 @@ impl Default for ModelConfig {
 pub struct GroqConfig {
     pub api_key: String,
     pub model_id: String,
+    #[serde(default)]
+    pub supports_search: bool,
+    #[serde(default)]
+    pub supports_vision: bool,
 }
 
 impl Default for GroqConfig {
@@ -241,6 +249,8 @@ impl Default for GroqConfig {
         Self {
             api_key: "".to_string(),
             model_id: "llama-3.1-8b-instant".to_string(),
+            supports_search: false,
+            supports_vision: false,
         }
     }
 }
@@ -250,6 +260,10 @@ impl Default for GroqConfig {
 pub struct OpenRouterConfig {
     pub api_key: String,
     pub model_id: String,
+    #[serde(default)]
+    pub supports_search: bool,
+    #[serde(default)]
+    pub supports_vision: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -257,6 +271,10 @@ pub struct OpenRouterConfig {
 pub struct OllamaConfig {
     pub base_url: String,
     pub model_id: String,
+    #[serde(default)]
+    pub supports_search: bool,
+    #[serde(default)]
+    pub supports_vision: bool,
 }
 
 impl Default for OllamaConfig {
@@ -264,6 +282,8 @@ impl Default for OllamaConfig {
         Self {
             base_url: "http://localhost:11434".to_string(),
             model_id: "llama3".to_string(),
+            supports_search: false,
+            supports_vision: false,
         }
     }
 }

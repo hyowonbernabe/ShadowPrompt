@@ -3,6 +3,7 @@ pub mod rag;
 
 use anyhow::Result;
 use crate::config::Config;
+use crate::capabilities::ModelCapabilities;
 use std::sync::Arc;
 
 pub struct KnowledgeProvider {
@@ -38,8 +39,10 @@ impl KnowledgeProvider {
         let mut context = String::new();
         let mut warnings = Vec::new();
 
-        // 1. Web Search
-        if config.search.enabled {
+        let model_has_search = ModelCapabilities::supports_search(config);
+
+        // 1. Web Search - ONLY if model doesn't have built-in search
+        if config.search.enabled && !model_has_search {
             match search::perform_search(query, &config.search).await {
                 Ok(results) => {
                     if !results.is_empty() {
@@ -54,6 +57,8 @@ impl KnowledgeProvider {
                     warnings.push(msg);
                 }
             }
+        } else if model_has_search {
+            info!("[*] Model has built-in search capability, skipping external search");
         }
 
         // 2. Local RAG

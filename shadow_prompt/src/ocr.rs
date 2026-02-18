@@ -1,4 +1,5 @@
 #![allow(unused)]
+use base64::Engine;
 use windows::Media::Ocr::OcrEngine;
 use windows::Graphics::Imaging::{SoftwareBitmap, BitmapPixelFormat, BitmapAlphaMode};
 use windows::Storage::Streams::DataWriter;
@@ -52,6 +53,12 @@ impl OcrManager {
 
         Ok(text)
     }
+
+    pub async fn capture_as_base64(x: i32, y: i32, width: i32, height: i32) -> Result<String> {
+        let pixels = capture_pixels(x, y, width, height)?;
+        let png_bytes = encode_bgra_to_png(&pixels, width, height)?;
+        Ok(base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png_bytes))
+    }
 }
 
 fn capture_pixels(x: i32, y: i32, width: i32, height: i32) -> Result<Vec<u8>> {
@@ -88,4 +95,32 @@ fn capture_pixels(x: i32, y: i32, width: i32, height: i32) -> Result<Vec<u8>> {
         
         Ok(pixels)
     }
+}
+
+fn encode_bgra_to_png(pixels: &[u8], width: i32, height: i32) -> Result<Vec<u8>> {
+    use image::{ImageBuffer, RgbaImage, ImageEncoder};
+    
+    let w = width as u32;
+    let h = height as u32;
+    
+    let mut rgba_pixels: Vec<u8> = Vec::with_capacity((w * h * 4) as usize);
+    
+    for chunk in pixels.chunks(4) {
+        if chunk.len() == 4 {
+            rgba_pixels.push(chunk[2]);
+            rgba_pixels.push(chunk[1]);
+            rgba_pixels.push(chunk[0]);
+            rgba_pixels.push(chunk[3]);
+        }
+    }
+    
+    let img: RgbaImage = ImageBuffer::from_raw(w, h, rgba_pixels)
+        .context("Failed to create image buffer")?;
+    
+    let mut png_bytes = Vec::new();
+    let encoder = image::codecs::png::PngEncoder::new(&mut png_bytes);
+    encoder.write_image(&img, w, h, image::ExtendedColorType::Rgba8)
+        .context("Failed to encode PNG")?;
+    
+    Ok(png_bytes)
 }

@@ -13,6 +13,7 @@ mod logger;
 mod tos_text;
 mod hotkey_recorder;
 mod color_picker;
+mod capabilities;
 
 #[macro_use]
 extern crate log;
@@ -23,6 +24,7 @@ use crate::clipboard::ClipboardManager;
 use crate::ui::{UIManager, UICommand};
 use crate::llm::LlmClient;
 use crate::knowledge::KnowledgeProvider;
+use crate::capabilities::ModelCapabilities;
 use crate::utils::{parse_mcq_with_context, McqAnswer, parse_hex_color, parse_keys};
 use std::sync::mpsc;
 
@@ -111,6 +113,13 @@ async fn run_app() -> anyhow::Result<()> {
     // Set initial Green "Ready" state
     let ready_color = parse_hex_color(&config.visuals.ready_color);
     let _ = ui_tx.send(UICommand::SetColor(ready_color)); 
+    
+    // Send overlay config
+    let _ = ui_tx.send(UICommand::UpdateOverlayConfig(
+        config.visuals.text_overlay_font_size,
+        config.visuals.text_overlay_bg_opacity,
+        config.visuals.text_overlay_text_opacity,
+    ));
 
     // 3. Start Input Listener
     let (tx, rx) = mpsc::channel();
@@ -153,21 +162,77 @@ async fn run_app() -> anyhow::Result<()> {
                     println!("[*] OCR Region Captured: x={}, y={}, w={}, h={}", x, y, w, h);
                     let _ = ui_tx.send(UICommand::SetColor(0x0000FFFF));
 
+                    let config_clone = config.clone();
                     let ui_tx_clone = ui_tx.clone();
                     let ready_color = parse_hex_color(&config.visuals.ready_color);
                     
                     tokio::spawn(async move {
-                        println!("[*] Extracting text...");
+                        let supports_vision = ModelCapabilities::supports_vision(&config_clone);
                         
-                        match crate::ocr::OcrManager::extract_from_screen(x, y, w, h).await {
-                            Ok(text) => {
-                                println!("[+] OCR Success: \"{}\"", text.trim());
-                                if let Err(e) = ClipboardManager::write(&text) {
-                                    eprintln!("Clipboard Write Error: {}", e);
+                        if supports_vision {
+                            println!("[*] Model supports vision, capturing screenshot for LLM...");
+                            
+                            match crate::ocr::OcrManager::capture_as_base64(x, y, w, h).await {
+                                Ok(image_b64) => {
+                                    let prompt = "Describe what you see in this image and answer any questions about it. Be concise.";
+                                    
+                                    match LlmClient::query_with_image(prompt, &image_b64, &config_clone).await {
+                                        Ok(response) => {
+                                            println!("[+] Vision query success");
+                                            if let Err(e) = ClipboardManager::write(&response) {
+                                                eprintln!("Clipboard Write Error: {}", e);
+                                            }
+                                        },
+                                        Err(e) => {
+                                            eprintln!("[-] Vision query failed: {}, falling back to OCR...", e);
+                                            if let Ok(text) = crate::ocr::OcrManager::extract_from_screen(x, y, w, h).await {
+                                                match LlmClient::query(&text, &config_clone).await {
+                                                    Ok(response) => {
+                                                        println!("[+] OCR fallback success");
+                                                        if let Err(e) = ClipboardManager::write(&response) {
+                                                            eprintln!("Clipboard Write Error: {}", e);
+                                                        }
+                                                    },
+                                                    Err(e) => {
+                                                        eprintln!("[-] LLM query failed: {}", e);
+                                                        if let Err(e) = ClipboardManager::write(&text) {
+                                                            eprintln!("Clipboard Write Error: {}", e);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    eprintln!("[-] Screenshot capture failed: {}", e);
                                 }
-                            },
-                            Err(e) => {
-                                eprintln!("[-] OCR Failed: {}", e);
+                            }
+                        } else {
+                            println!("[*] Model doesn't support vision, using OCR fallback...");
+                            
+                            match crate::ocr::OcrManager::extract_from_screen(x, y, w, h).await {
+                                Ok(text) => {
+                                    println!("[+] OCR Success: \"{}\"", text.trim());
+                                    
+                                    match LlmClient::query(&text, &config_clone).await {
+                                        Ok(response) => {
+                                            println!("[+] LLM query success");
+                                            if let Err(e) = ClipboardManager::write(&response) {
+                                                eprintln!("Clipboard Write Error: {}", e);
+                                            }
+                                        },
+                                        Err(e) => {
+                                            eprintln!("[-] LLM query failed: {}, writing OCR text only", e);
+                                            if let Err(e) = ClipboardManager::write(&text) {
+                                                eprintln!("Clipboard Write Error: {}", e);
+                                            }
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    eprintln!("[-] OCR Failed: {}", e);
+                                }
                             }
                         }
                         
@@ -180,6 +245,7 @@ async fn run_app() -> anyhow::Result<()> {
                     let mcq_none_color = parse_hex_color(&config.visuals.color_mcq_none);
                     let _ = ui_tx.send(UICommand::SetColor(processing_color)); 
                     let _ = ui_tx.send(UICommand::SetSecondaryColor(mcq_none_color));
+                    let _ = ui_tx.send(UICommand::ClearOverlayText);
                     
                     let config_clone = config.clone();
                     let ui_tx_clone = ui_tx.clone();
@@ -261,6 +327,11 @@ async fn run_app() -> anyhow::Result<()> {
                         // 5. Write Clipboard (Always)
                         if let Err(e) = ClipboardManager::write(&response) {
                             eprintln!("Clipboard Write Error: {}", e);
+                        }
+
+                        // 6. Show text overlay if enabled
+                        if config_clone.visuals.text_overlay_enabled && !response.is_empty() {
+                            let _ = ui_tx_clone.send(UICommand::SetOverlayText(response.clone()));
                         }
 
                         println!("[*] Response written to clipboard.");

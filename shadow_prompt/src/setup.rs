@@ -625,7 +625,7 @@ impl SetupWizard {
         // Position
         ui.horizontal(|ui| {
             ui.label("Indicator Position:");
-            egui::ComboBox::from_label("")
+            egui::ComboBox::from_id_salt("indicator_position")
                 .selected_text(&self.config.visuals.position)
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut self.config.visuals.position, "top-right".to_string(), "Top Right");
@@ -690,7 +690,7 @@ impl SetupWizard {
             
             ui.horizontal(|ui| {
                 ui.label("Position:");
-                egui::ComboBox::from_label("")
+                egui::ComboBox::from_id_salt("text_overlay_position")
                     .selected_text(&self.config.visuals.text_overlay_position)
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut self.config.visuals.text_overlay_position, "bottom-right".to_string(), "Bottom Right");
@@ -704,14 +704,21 @@ impl SetupWizard {
             
             ui.horizontal(|ui| {
                 ui.label("Font Size:");
-                ui.add(egui::Slider::new(&mut self.config.visuals.text_overlay_font_size, 8..=24).text(""));
+                ui.add(egui::Slider::new(&mut self.config.visuals.text_overlay_font_size, 8..=48).text(""));
             });
 
             ui.add_space(4.0);
             
             ui.horizontal(|ui| {
-                ui.label("Opacity:");
-                ui.add(egui::Slider::new(&mut self.config.visuals.text_overlay_opacity, 50..=255).text(""));
+                ui.label("Background Opacity:");
+                ui.add(egui::Slider::new(&mut self.config.visuals.text_overlay_bg_opacity, 50..=255).text(""));
+            });
+            
+            ui.add_space(4.0);
+            
+            ui.horizontal(|ui| {
+                ui.label("Text Opacity:");
+                ui.add(egui::Slider::new(&mut self.config.visuals.text_overlay_text_opacity, 50..=255).text(""));
             });
         }
     }

@@ -34,9 +34,12 @@ ShadowPrompt was born from the need for a **Discrete Academic Interface**—a to
 - **🔴 Stealth Pixel Indicators**: Discrete visual cues (Green/Red/Cyan/etc.) indicate status and answers
 - **📋 Clipboard Injection**: Copy question → trigger → answer appears in clipboard
 - **👁️ OCR Region Capture**: Extract text from images or locked PDFs with invisible selection
+- **🖼️ Vision Capable Models**: OCR automatically sends screenshots directly to vision-capable LLMs
+- **🔍 Smart Search**: Skips external search engines when model has built-in search capability
 - **📚 Local RAG**: Index your `.md`/`.txt` notes for project-specific AI context
 - **🔄 Auto-LLM Fallback**: Automatically switches providers if rate limits hit (Groq → OpenRouter → Ollama)
 - **🎯 MCQ Detection**: Automatic color-coded pixel for multiple choice answers
+- **📝 Text Overlay**: Shows answer text on screen (configurable position, opacity, font size)
 
 ---
 
@@ -164,6 +167,16 @@ provider = "groq"                # Options: groq, openrouter, ollama
 [models.groq]
 api_key = "gsk_your_key_here"
 model_id = "llama-3.1-8b-instant"
+supports_search = false          # Set true if model has built-in search
+supports_vision = false          # Set true if model can process images
+
+[visuals]
+# Text Overlay (Answer Display)
+text_overlay_enabled = true
+text_overlay_position = "bottom-right"  # Options: top-left, top-right, bottom-left, bottom-right
+text_overlay_font_size = 16
+text_overlay_bg_opacity = 200    # 0-255
+text_overlay_text_opacity = 255  # 0-255
 
 [rag]
 enabled = true

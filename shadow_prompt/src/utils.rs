@@ -6,6 +6,7 @@ pub enum McqAnswer {
     D,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, PartialEq, Clone)]
 pub enum QuestionType {
     MultipleChoice(McqAnswer),
@@ -114,6 +115,7 @@ pub fn parse_mcq_with_context(input: &str, output: &str) -> Option<McqAnswer> {
     parse_mcq_answer(output)
 }
 
+#[allow(dead_code)]
 pub fn parse_question_type(input: &str, output: &str) -> QuestionType {
     let output_lower = output.to_lowercase();
 
@@ -157,13 +159,14 @@ pub fn parse_question_type(input: &str, output: &str) -> QuestionType {
 
     // Fallback: If there's a substantial answer text, treat as Identification
     let answer_only = output.trim();
-    if answer_only.len() > 0 && answer_only.len() < 100 {
+    if !answer_only.is_empty() && answer_only.len() < 100 {
         return QuestionType::Identification(answer_only.to_string());
     }
 
     QuestionType::Unknown
 }
 
+#[allow(dead_code)]
 pub fn question_type_to_display_text(qt: &QuestionType, input: &str) -> String {
     match qt {
         QuestionType::MultipleChoice(ans) => {
