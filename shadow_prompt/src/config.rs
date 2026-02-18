@@ -107,6 +107,27 @@ pub struct VisualsConfig {
     pub color_processing: String,
 
     pub cursor_change: bool,
+
+    #[serde(default = "default_color_true")]
+    pub color_true: String,
+
+    #[serde(default = "default_color_false")]
+    pub color_false: String,
+
+    #[serde(default = "default_true")]
+    pub text_overlay_enabled: bool,
+
+    #[serde(default = "default_position")]
+    pub text_overlay_position: String,
+
+    #[serde(default = "default_text_size")]
+    pub text_overlay_font_size: i32,
+
+    #[serde(default = "default_text_opacity")]
+    pub text_overlay_opacity: u8,
+
+    #[serde(default = "default_hide_key")]
+    pub hide_key: String,
 }
 
 impl Default for VisualsConfig {
@@ -126,6 +147,13 @@ impl Default for VisualsConfig {
             color_mcq_none: default_mcq_none(),
             color_processing: default_processing(),
             cursor_change: false,
+            color_true: default_color_true(),
+            color_false: default_color_false(),
+            text_overlay_enabled: true,
+            text_overlay_position: default_position(),
+            text_overlay_font_size: default_text_size(),
+            text_overlay_opacity: default_text_opacity(),
+            hide_key: default_hide_key(),
         }
     }
 }
@@ -153,6 +181,30 @@ fn default_mcq_none() -> String {
 }
 fn default_processing() -> String {
     "#FF0000".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_color_true() -> String {
+    "#00FF00".to_string()
+}
+
+fn default_color_false() -> String {
+    "#800000".to_string()
+}
+
+fn default_text_size() -> i32 {
+    12
+}
+
+fn default_text_opacity() -> u8 {
+    200
+}
+
+fn default_hide_key() -> String {
+    "Ctrl+Shift+H".to_string()
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
