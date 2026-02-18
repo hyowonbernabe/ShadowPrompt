@@ -1,7 +1,7 @@
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::fs;
-use anyhow::{Result, Context};
 use std::collections::HashMap;
+use std::fs;
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[allow(dead_code)]
@@ -12,15 +12,19 @@ pub struct Config {
     pub search: SearchConfig,
     pub rag: RagConfig,
     pub safety: SafetyConfig,
+    #[serde(default)]
+    pub http: HttpConfig,
 }
-
-
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[allow(dead_code)]
 pub struct SearchConfig {
     pub enabled: bool,
     pub max_results: usize,
+    #[serde(default = "default_search_engine")]
+    pub engine: String,
+    #[serde(default)]
+    pub serper_api_key: Option<String>,
 }
 
 impl Default for SearchConfig {
@@ -28,8 +32,14 @@ impl Default for SearchConfig {
         Self {
             enabled: true,
             max_results: 3,
+            engine: default_search_engine(),
+            serper_api_key: None,
         }
     }
+}
+
+fn default_search_engine() -> String {
+    "serper".to_string()
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -68,14 +78,14 @@ impl Default for GeneralConfig {
 pub struct VisualsConfig {
     pub indicator_color: String, // Kept for backwards compatibility/parsing, but we might prefer color_processing
     pub ready_color: String,
-    
+
     // New Fields
     #[serde(default = "default_position")]
     pub position: String,
     #[serde(default = "default_size")]
     pub size: i32,
     #[serde(default)]
-    pub offset: i32,    
+    pub offset: i32,
     #[serde(default)]
     pub x_axis: i32,
     #[serde(default)]
@@ -92,7 +102,7 @@ pub struct VisualsConfig {
     pub color_mcq_d: String,
     #[serde(default = "default_mcq_none")]
     pub color_mcq_none: String,
-    
+
     #[serde(default = "default_processing")]
     pub color_processing: String,
 
@@ -120,14 +130,30 @@ impl Default for VisualsConfig {
     }
 }
 
-fn default_position() -> String { "top-right".to_string() }
-fn default_size() -> i32 { 5 }
-fn default_mcq_a() -> String { "#00FFFF".to_string() } // Cyan
-fn default_mcq_b() -> String { "#FF00FF".to_string() } // Magenta
-fn default_mcq_c() -> String { "#FFFF00".to_string() } // Yellow
-fn default_mcq_d() -> String { "#000000".to_string() }
-fn default_mcq_none() -> String { "#FFFFFF".to_string() }
-fn default_processing() -> String { "#FF0000".to_string() }
+fn default_position() -> String {
+    "top-right".to_string()
+}
+fn default_size() -> i32 {
+    5
+}
+fn default_mcq_a() -> String {
+    "#00FFFF".to_string()
+} // Cyan
+fn default_mcq_b() -> String {
+    "#FF00FF".to_string()
+} // Magenta
+fn default_mcq_c() -> String {
+    "#FFFF00".to_string()
+} // Yellow
+fn default_mcq_d() -> String {
+    "#000000".to_string()
+}
+fn default_mcq_none() -> String {
+    "#FFFFFF".to_string()
+}
+fn default_processing() -> String {
+    "#FF0000".to_string()
+}
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[allow(dead_code)]
@@ -173,8 +199,6 @@ pub struct OpenRouterConfig {
     pub api_key: String,
     pub model_id: String,
 }
-
-
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[allow(dead_code)]
@@ -228,15 +252,39 @@ impl Default for SafetyConfig {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[allow(dead_code)]
+pub struct HttpConfig {
+    #[serde(default = "default_connect_timeout")]
+    pub connect_timeout_secs: u64,
+    #[serde(default = "default_read_timeout")]
+    pub read_timeout_secs: u64,
+}
+
+impl Default for HttpConfig {
+    fn default() -> Self {
+        Self {
+            connect_timeout_secs: 10,
+            read_timeout_secs: 30,
+        }
+    }
+}
+
+fn default_connect_timeout() -> u64 {
+    10
+}
+fn default_read_timeout() -> u64 {
+    30
+}
+
 impl Config {
     pub fn load() -> Result<Self> {
         let config_path = get_config_path();
-        
+
         let content = fs::read_to_string(&config_path)
             .context(format!("Failed to read config.toml at {:?}", config_path))?;
 
-        let config: Config = toml::from_str(&content)
-            .context("Failed to parse config.toml")?;
+        let config: Config = toml::from_str(&content).context("Failed to parse config.toml")?;
 
         Ok(config)
     }
@@ -252,16 +300,14 @@ impl Config {
 
     pub fn save(&self) -> Result<()> {
         let config_path = get_config_path();
-        let content = toml::to_string_pretty(self)
-            .context("Failed to serialize config")?;
-        
+        let content = toml::to_string_pretty(self).context("Failed to serialize config")?;
+
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        
-        fs::write(&config_path, content)
-            .context("Failed to write config.toml")?;
-        
+
+        fs::write(&config_path, content).context("Failed to write config.toml")?;
+
         Ok(())
     }
 
@@ -275,7 +321,10 @@ impl Config {
     }
 
     pub fn is_setup_complete() -> bool {
-        get_exe_dir().join("config").join(".setup_complete").exists()
+        get_exe_dir()
+            .join("config")
+            .join(".setup_complete")
+            .exists()
     }
 }
 
@@ -289,41 +338,37 @@ pub fn get_exe_dir() -> std::path::PathBuf {
 pub fn get_config_path() -> std::path::PathBuf {
     let exe_dir = get_exe_dir();
     let config_path = exe_dir.join("config").join("config.toml");
-    
+
     if config_path.exists() {
         return config_path;
     }
-    
+
     let cwd_config = std::path::PathBuf::from("config/config.toml");
     if cwd_config.exists() {
         return cwd_config;
     }
-    
+
     config_path
 }
 
 pub fn ensure_directories() -> Result<()> {
     let exe_dir = get_exe_dir();
-    
+
     let knowledge_dir = exe_dir.join("knowledge");
     if !knowledge_dir.exists() {
-        fs::create_dir_all(&knowledge_dir)
-            .context("Failed to create knowledge directory")?;
+        fs::create_dir_all(&knowledge_dir).context("Failed to create knowledge directory")?;
         println!("[*] Created knowledge directory: {:?}", knowledge_dir);
     }
-    
+
     let config_dir = exe_dir.join("config");
     if !config_dir.exists() {
-        fs::create_dir_all(&config_dir)
-            .context("Failed to create config directory")?;
+        fs::create_dir_all(&config_dir).context("Failed to create config directory")?;
     }
-    
+
     let data_dir = exe_dir.join("data");
     if !data_dir.exists() {
-        fs::create_dir_all(&data_dir)
-            .context("Failed to create data directory")?;
+        fs::create_dir_all(&data_dir).context("Failed to create data directory")?;
     }
-    
+
     Ok(())
 }
-

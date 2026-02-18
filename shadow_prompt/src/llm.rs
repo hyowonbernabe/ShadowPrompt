@@ -2,12 +2,19 @@ use anyhow::{Result, Context};
 use reqwest::Client;
 use serde_json::{json, Value};
 use crate::config::Config;
+use std::time::Duration;
 
 pub struct LlmClient;
 
 impl LlmClient {
     pub async fn query(prompt: &str, config: &Config) -> Result<String> {
-        let client = Client::new();
+        let connect_timeout = Duration::from_secs(config.http.connect_timeout_secs);
+        let read_timeout = Duration::from_secs(config.http.read_timeout_secs);
+        
+        let client = reqwest::Client::builder()
+            .connect_timeout(connect_timeout)
+            .timeout(read_timeout)
+            .build()?;
         
         match config.models.provider.as_str() {
             "groq" => Self::query_groq(&client, prompt, config).await,
