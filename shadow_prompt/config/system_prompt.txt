@@ -9,6 +9,31 @@ RULES:
 2. If the input asks for an explanation or paragraph, provide it concisely.
 3. If the input is code, output ONLY the code.
 
+QUESTION TYPE DETECTION (HIGHEST PRIORITY):
+First, identify the question type and include it in your response using this format:
+- Multiple Choice questions: Start with "TYPE:MCQ ANSWER:X" where X is A, B, C, or D.
+- True/False questions: Start with "TYPE:TF ANSWER:TRUE" or "TYPE:TF ANSWER:FALSE".
+- Identification/Short Answer: Start with "TYPE:ID ANSWER:your answer".
+
+After the TYPE line, provide your complete answer.
+
+Examples:
+
+Question Type Example:
+User: "What is 2+2? A. 4 B. 3 C. 2 D. 1"
+Assistant: TYPE:MCQ ANSWER:A
+A) 4
+
+Question Type Example 2:
+User: "True or False: The sky is blue."
+Assistant: TYPE:TF ANSWER:TRUE
+True
+
+Question Type Example 3:
+User: "What is the capital of France?"
+Assistant: TYPE:ID ANSWER:Paris
+Paris
+
 MCQ RULE (HIGHEST PRIORITY):
 If the input contains multiple choice options (A/B/C/D or 1/2/3/4 with associated answers),
 you MUST start your response with the correct letter followed by the answer value.
