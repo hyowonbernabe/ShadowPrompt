@@ -75,10 +75,6 @@ struct ProviderState {
     groq_enabled: bool,
     openrouter_enabled: bool,
     ollama_enabled: bool,
-    groq_test_result: Option<Result<String, String>>,
-    openrouter_test_result: Option<Result<String, String>>,
-    ollama_test_result: Option<Result<String, String>>,
-    testing_provider: Option<String>,
 }
 
 impl ProviderState {
@@ -87,10 +83,6 @@ impl ProviderState {
             groq_enabled: config.models.groq.as_ref().map(|g| !g.api_key.is_empty()).unwrap_or(false),
             openrouter_enabled: config.models.openrouter.as_ref().map(|o| !o.api_key.is_empty()).unwrap_or(false),
             ollama_enabled: config.models.ollama.is_some(),
-            groq_test_result: None,
-            openrouter_test_result: None,
-            ollama_test_result: None,
-            testing_provider: None,
         }
     }
 

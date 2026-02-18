@@ -67,6 +67,7 @@ impl RagSystem {
     }
 
 
+    #[allow(clippy::type_complexity)]
     fn get_files_to_embed(
         &self, 
         root_path: &std::path::Path, 
@@ -75,7 +76,7 @@ impl RagSystem {
         // Load existing index if available
         let mut existing_docs: HashMap<String, Document> = HashMap::new();
         if index_file_path.exists() {
-             if let Ok(content) = fs::read_to_string(&index_file_path) {
+             if let Ok(content) = fs::read_to_string(index_file_path) {
                  if let Ok(existing_index) = serde_json::from_str::<RagIndex>(&content) {
                      for doc in existing_index.documents {
                          existing_docs.insert(doc.path.clone(), doc);
