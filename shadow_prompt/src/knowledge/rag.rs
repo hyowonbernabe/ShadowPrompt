@@ -6,6 +6,8 @@ use fastembed::{TextEmbedding, InitOptions, EmbeddingModel};
 use serde::{Deserialize, Serialize};
 use crate::config::{Config, get_exe_dir};
 
+use std::collections::HashMap;
+
 // Simple Document struct for In-Memory/JSON Storage
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Document {
@@ -13,6 +15,7 @@ struct Document {
     path: String,
     content: String,
     embedding: Vec<f32>,
+    last_modified: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -63,6 +66,75 @@ impl RagSystem {
         self.init_error.as_deref()
     }
 
+
+    fn get_files_to_embed(
+        &self, 
+        root_path: &std::path::Path, 
+        index_file_path: &std::path::Path
+    ) -> Result<(Vec<Document>, Vec<(String, String, u64)>)> {
+        // Load existing index if available
+        let mut existing_docs: HashMap<String, Document> = HashMap::new();
+        if index_file_path.exists() {
+             if let Ok(content) = fs::read_to_string(&index_file_path) {
+                 if let Ok(existing_index) = serde_json::from_str::<RagIndex>(&content) {
+                     for doc in existing_index.documents {
+                         existing_docs.insert(doc.path.clone(), doc);
+                     }
+                     println!("[RAG] Loaded {} existing documents from index.", existing_docs.len());
+                 }
+             }
+        }
+
+        let root_path_str = root_path.display().to_string();
+        
+        let mut docs_to_embed = Vec::new();
+        let mut final_docs = Vec::new();
+
+        let patterns = vec![
+            format!("{}/*.md", root_path_str),
+            format!("{}/*.txt", root_path_str),
+            format!("{}/**/*.md", root_path_str),
+            format!("{}/**/*.txt", root_path_str),
+        ];
+
+        let mut found_paths = std::collections::HashSet::new();
+
+        for pattern in patterns {
+            for entry in glob(&pattern).context("Failed to read glob pattern")? {
+                match entry {
+                    Ok(path) => {
+                        let path_str = path.display().to_string();
+                        if found_paths.contains(&path_str) {
+                            continue;
+                        }
+                        found_paths.insert(path_str.clone());
+
+                        let metadata = fs::metadata(&path)?;
+                        let modified = metadata.modified()?.duration_since(std::time::UNIX_EPOCH)?.as_secs();
+
+                        let mut reuse = false;
+                        if let Some(existing_doc) = existing_docs.get(&path_str) {
+                            if existing_doc.last_modified == modified {
+                                final_docs.push(existing_doc.clone());
+                                reuse = true;
+                            }
+                        }
+
+                        if !reuse {
+                             let content = fs::read_to_string(&path).unwrap_or_default();
+                             if !content.trim().is_empty() {
+                                 docs_to_embed.push((path_str, content, modified));
+                             }
+                        }
+                    },
+                    Err(e) => eprintln!("[RAG] Error reading file: {:?}", e),
+                }
+            }
+        }
+        
+        Ok((final_docs, docs_to_embed))
+    }
+
     pub async fn ingest(&self) -> Result<usize> {
         if !self.config.rag.enabled || !self.is_operational {
              return Ok(0);
@@ -92,55 +164,36 @@ impl RagSystem {
             fs::create_dir_all(parent)?;
         }
 
-        let root_path_str = root_path.display().to_string();
-        println!("[RAG] Scanning knowledge folder: {}", root_path_str);
+        println!("[RAG] Scanning knowledge folder: {}", root_path.display());
+        
+        let (mut final_docs, docs_to_embed) = self.get_files_to_embed(&root_path, &index_file_path)?;
 
-        let mut new_docs = Vec::new();
-        let patterns = vec![
-            format!("{}/*.md", root_path_str),
-            format!("{}/*.txt", root_path_str),
-            format!("{}/**/*.md", root_path_str),
-            format!("{}/**/*.txt", root_path_str),
-        ];
+        if docs_to_embed.is_empty() && final_docs.is_empty() {
+             return Ok(0);
+        }
 
-        for pattern in patterns {
-            for entry in glob(&pattern).context("Failed to read glob pattern")? {
-                match entry {
-                    Ok(path) => {
-                        let content = fs::read_to_string(&path).unwrap_or_default();
-                        if !content.trim().is_empty() {
-                            new_docs.push((path.display().to_string(), content));
-                        }
-                    },
-                    Err(e) => eprintln!("[RAG] Error reading file: {:?}", e),
-                }
+        if !docs_to_embed.is_empty() {
+            println!("[RAG] Found {} new/modified documents. Generating embeddings...", docs_to_embed.len());
+            let texts: Vec<String> = docs_to_embed.iter().map(|(_, c, _)| c.clone()).collect();
+            let embeddings = embedding_model.embed(texts, None)?;
+
+            for (i, embedding) in embeddings.into_iter().enumerate() {
+                let (path, content, modified) = &docs_to_embed[i];
+                final_docs.push(Document {
+                    id: uuid::Uuid::new_v4().to_string(), // Generate unique ID
+                    path: path.clone(),
+                    content: content.clone(),
+                    embedding,
+                    last_modified: *modified,
+                });
             }
+        } else {
+            println!("[RAG] No new documents to embed. Using cached index.");
         }
 
-        // Deduplicate paths
-        new_docs.sort_by(|a, b| a.0.cmp(&b.0));
-        new_docs.dedup_by(|a, b| a.0 == b.0);
-
-        if new_docs.is_empty() {
-            return Ok(0);
-        }
-
-        println!("[RAG] Found {} unique documents. Generating embeddings...", new_docs.len());
-
-        let texts: Vec<String> = new_docs.iter().map(|(_, c)| c.clone()).collect();
-        let embeddings = embedding_model.embed(texts, None)?;
-
-        let mut index = RagIndex::default();
-
-        for (i, embedding) in embeddings.into_iter().enumerate() {
-            let (path, content) = &new_docs[i];
-            index.documents.push(Document {
-                id: uuid::Uuid::new_v4().to_string(), // Generate unique ID
-                path: path.clone(),
-                content: content.clone(),
-                embedding,
-            });
-        }
+        let index = RagIndex {
+            documents: final_docs,
+        };
 
         // Save to Disk (JSON)
         let json = serde_json::to_string_pretty(&index)?;
@@ -287,6 +340,7 @@ mod tests {
             path: "test.txt".to_string(),
             content: "hello world".to_string(),
             embedding: vec![0.1, 0.2, 0.3],
+            last_modified: 0,
         });
 
         {
@@ -307,25 +361,126 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_rag_incremental_logic() -> Result<()> {
+        use std::io::Write;
+        
+        let temp_dir = std::env::temp_dir().join(format!("shadow_prompt_test_{}", uuid::Uuid::new_v4()));
+        let knowledge_dir = temp_dir.join("knowledge");
+        let data_dir = temp_dir.join("data");
+        let index_path = data_dir.join("index.json");
+
+        fs::create_dir_all(&knowledge_dir)?;
+        fs::create_dir_all(&data_dir)?;
+
+        // Create doc1.txt
+        let doc1_path = knowledge_dir.join("doc1.txt");
+        {
+            let mut f = fs::File::create(&doc1_path)?;
+            f.write_all(b"content 1")?;
+        }
+        
+        // Sleep to ensure modification time is distinct if we needed to wait (but we set it manually in index for first test)
+        // actually we read it from FS.
+        
+        let metadata = fs::metadata(&doc1_path)?;
+        let modified = metadata.modified()?.duration_since(std::time::UNIX_EPOCH)?.as_secs();
+
+        // Create initial index with doc1 having correct timestamp
+        let index = RagIndex {
+            documents: vec![
+                Document {
+                    id: "1".to_string(),
+                    path: doc1_path.display().to_string(),
+                    content: "content 1".to_string(),
+                    embedding: vec![],
+                    last_modified: modified,
+                },
+                Document {
+                    id: "2".to_string(),
+                    path: knowledge_dir.join("doc2_missing.txt").display().to_string(),
+                    content: "content 2".to_string(),
+                    embedding: vec![],
+                    last_modified: 12345,
+                }
+            ]
+        };
+        
+        let json = serde_json::to_string(&index)?;
+        fs::write(&index_path, json)?;
+
+        // Setup RagSystem
+        let mut config = Config::default();
+        config.rag.enabled = true;
+        let rag = RagSystem {
+            embedding_model: None,
+            config: config.clone(),
+            cached_index: tokio::sync::RwLock::new(None),
+            is_operational: true,
+            init_error: None,
+        };
+
+        // TEST 1: No changes
+        let (reused, to_embed) = rag.get_files_to_embed(&knowledge_dir, &index_path)?;
+        
+        // doc1 should be reused
+        assert_eq!(reused.len(), 1, "Should reuse 1 document");
+        assert_eq!(reused[0].path, doc1_path.display().to_string());
+        // doc2 is missing from disk, so it is dropped (neither reused nor embedded)
+        // to_embed should be empty
+        assert_eq!(to_embed.len(), 0, "Should have 0 docs to embed");
+
+
+        // TEST 2: Modify doc1
+        // Wait a bit to ensure FS timestamp granularity (some systems are 1s, others 100ns)
+        // But simply sleeping 1.1s is safe for most.
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        
+        {
+            let mut f = fs::File::create(&doc1_path)?;
+            f.write_all(b"content 1 modified")?;
+        }
+
+        let (reused_2, to_embed_2) = rag.get_files_to_embed(&knowledge_dir, &index_path)?;
+        
+        // doc1 is modified, so it should NOT be reused
+        assert_eq!(reused_2.len(), 0, "Should reuse 0 documents (doc1 changed)");
+        // doc1 should be in to_embed
+        assert_eq!(to_embed_2.len(), 1, "Should have 1 doc to embed");
+        assert_eq!(to_embed_2[0].0, doc1_path.display().to_string());
+        assert_eq!(to_embed_2[0].1, "content 1 modified");
+
+
+        // TEST 3: Add new file
+        let doc3_path = knowledge_dir.join("doc3.txt");
+        {
+             let mut f = fs::File::create(&doc3_path)?;
+             f.write_all(b"content 3")?;
+        }
+        
+        let (reused_3, to_embed_3) = rag.get_files_to_embed(&knowledge_dir, &index_path)?;
+        // doc1 is still modified compared to disk index (we haven't updated index on disk in this test sequence)
+        // so doc1 is re-embedded. doc3 is new, so embedded.
+        // Wait, logic:
+        // index on disk has doc1 with OLD timestamp.
+        // file on disk has NEW timestamp.
+        // So doc1 -> to_embed.
+        // doc3 -> to_embed.
+        
+        assert_eq!(reused_3.len(), 0);
+        assert_eq!(to_embed_3.len(), 2);
+        
+        // Clean up
+        let _ = fs::remove_dir_all(temp_dir);
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_rag_operational_flag() {
         // Create a dummy config
         let mut config = Config::default();
         config.rag.enabled = true;
 
-        // Since fields are private, we need a way to construct it.
-        // We can add a helper in the parent module that is only for tests.
-        // Or we can just use the public constructor?
-        // But we want to simulate failure.
-        
-        // Let's rely on the fact that if this compiles, it works.
-        // If it compiles, it means my understanding of visibility was wrong or incomplete.
-        // (Actually, checking docs: "Private items are visible to the current module and its descendants.")
-        // Yes! "Private items are visible to the current module AND ITS DESCENDANTS."
-        // Since `tests` is a descendant of `rag`, it can see private items of `rag`!
-        // Struct fields are private to the module defining the struct.
-        // Since `RagSystem` is defined in `rag`, its private fields are visible to `rag` and `rag`'s descendants (like `tests`).
-        // So it is correct!
-        
         let rag = RagSystem {
             embedding_model: None,
             config: config.clone(),
