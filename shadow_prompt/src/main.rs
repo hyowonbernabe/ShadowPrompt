@@ -118,9 +118,10 @@ async fn run_app() -> anyhow::Result<()> {
     let wake_keys = parse_keys(&config.general.wake_key);
     let model_keys = parse_keys(&config.general.model_key);
     let panic_keys = parse_keys(&config.general.panic_key);
+    let hide_keys = parse_keys(&config.visuals.hide_key);
 
     println!("[*] Listening for Hotkeys...");
-    InputManager::start(wake_keys, model_keys, panic_keys, tx);
+    InputManager::start(wake_keys, model_keys, panic_keys, hide_keys, tx);
 
     // 4. Main Event Loop
     println!("[*] ShadowPrompt is running. Press Panic Key to exit.");
@@ -278,6 +279,10 @@ async fn run_app() -> anyhow::Result<()> {
                         eprintln!("Failed to clear clipboard: {}", e);
                     }
                     std::process::exit(0);
+                },
+                InputEvent::HideToggle => {
+                    println!("[!] EVENT: Hide Toggle Key Pressed");
+                    let _ = ui_tx.send(UICommand::HideToggle);
                 }
             }
         }

@@ -1,4 +1,4 @@
-use rdev::{listen, Event, EventType, Key, Button};
+use rdev::{listen, Button, Event, EventType, Key};
 use std::collections::HashSet;
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -9,6 +9,7 @@ pub enum InputEvent {
     Panic,
     OCRClick1,
     OCRRect(i32, i32, i32, i32), // x, y, w, h
+    HideToggle,
 }
 
 #[allow(dead_code)]
@@ -21,27 +22,29 @@ pub struct InputManager {
 
 impl InputManager {
     pub fn start(
-        wake_keys: Vec<Key>, 
-        model_keys: Vec<Key>, 
-        panic_keys: Vec<Key>, 
-        sender: Sender<InputEvent>
+        wake_keys: Vec<Key>,
+        model_keys: Vec<Key>,
+        panic_keys: Vec<Key>,
+        hide_keys: Vec<Key>,
+        sender: Sender<InputEvent>,
     ) {
         thread::spawn(move || {
             let mut pressed_keys = HashSet::new();
             let mut is_selecting = false;
             let mut p1: Option<(f64, f64)> = None;
             let mut current_pos = (0.0, 0.0);
-            
+
             // This closure needs to handle the state
             let callback = move |event: Event| {
                 match event.event_type {
                     EventType::KeyPress(key) => {
                         pressed_keys.insert(key);
-                        
+
                         // Check combos
                         if check_combo(&pressed_keys, &panic_keys) {
                             let _ = sender.send(InputEvent::Panic);
-                            is_selecting = false; p1 = None; // Reset
+                            is_selecting = false;
+                            p1 = None; // Reset
                         } else if check_combo(&pressed_keys, &wake_keys) {
                             let _ = sender.send(InputEvent::Wake);
                             is_selecting = true; // Enter Selection Mode
@@ -49,7 +52,12 @@ impl InputManager {
                             println!("[*] Input: Entering OCR Selection Mode");
                         } else if check_combo(&pressed_keys, &model_keys) {
                             let _ = sender.send(InputEvent::Model);
-                            is_selecting = false; p1 = None;
+                            is_selecting = false;
+                            p1 = None;
+                        } else if check_combo(&pressed_keys, &hide_keys) {
+                            let _ = sender.send(InputEvent::HideToggle);
+                            is_selecting = false;
+                            p1 = None;
                         }
                     }
                     EventType::KeyRelease(key) => {
@@ -67,11 +75,11 @@ impl InputManager {
                                 let y = start.1.min(current_pos.1) as i32;
                                 let w = (start.0 - current_pos.0).abs() as i32;
                                 let h = (start.1 - current_pos.1).abs() as i32;
-                                
+
                                 if w > 0 && h > 0 {
                                     let _ = sender.send(InputEvent::OCRRect(x, y, w, h));
                                 }
-                                
+
                                 // Reset
                                 is_selecting = false;
                                 p1 = None;
@@ -95,6 +103,8 @@ impl InputManager {
 }
 
 fn check_combo(pressed: &HashSet<Key>, target: &[Key]) -> bool {
-    if target.is_empty() { return false; }
+    if target.is_empty() {
+        return false;
+    }
     target.iter().all(|k| pressed.contains(k))
 }
