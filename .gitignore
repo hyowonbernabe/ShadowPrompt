@@ -35,3 +35,7 @@ shadow_prompt/tools/protoc/include/
 
 # Release Builds
 release/
+
+# Git Worktrees
+.worktrees/
+worktrees/
