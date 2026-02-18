@@ -3,6 +3,7 @@ use reqwest::Client;
 use serde_json::{json, Value};
 use crate::config::Config;
 use std::time::Duration;
+use tokio::time::sleep;
 
 pub struct LlmClient;
 
@@ -17,27 +18,121 @@ impl LlmClient {
             .build()?;
         
         match config.models.provider.as_str() {
-            "groq" => Self::query_groq(&client, prompt, config).await,
-            "openrouter" => Self::query_openrouter(&client, prompt, config).await,
-            "ollama" => Self::query_ollama(&client, prompt, config).await,
+            "groq" => Self::query_with_retry_groq(&client, prompt, config).await,
+            "openrouter" => Self::query_with_retry_openrouter(&client, prompt, config).await,
+            "ollama" => Self::query_with_retry_ollama(&client, prompt, config).await,
             "auto" => Self::query_with_fallback(&client, prompt, config).await,
             "github_copilot" => anyhow::bail!("GitHub Copilot provider not fully implemented yet"),
             _ => anyhow::bail!("Unknown provider: {}", config.models.provider),
         }
     }
 
+    /// Retry wrapper for Groq
+    async fn query_with_retry_groq(client: &Client, prompt: &str, config: &Config) -> Result<String> {
+        let max_retries = 3;
+        let base_delay = Duration::from_secs(1);
+        
+        let mut last_error = None;
+        
+        for attempt in 0..max_retries {
+            match Self::query_groq(client, prompt, config).await {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    last_error = Some(e);
+                    let error_str = last_error.as_ref().unwrap().to_string().to_lowercase();
+                    
+                    if Self::is_retryable_error(&error_str) && attempt < max_retries - 1 {
+                        let delay = base_delay * 2u32.pow(attempt as u32);
+                        log::warn!("Groq attempt {} failed, retrying in {:?}...", attempt + 1, delay);
+                        sleep(delay).await;
+                    }
+                }
+            }
+        }
+        
+        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("All retries failed")))
+    }
+
+    /// Retry wrapper for OpenRouter
+    async fn query_with_retry_openrouter(client: &Client, prompt: &str, config: &Config) -> Result<String> {
+        let max_retries = 3;
+        let base_delay = Duration::from_secs(1);
+        
+        let mut last_error = None;
+        
+        for attempt in 0..max_retries {
+            match Self::query_openrouter(client, prompt, config).await {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    last_error = Some(e);
+                    let error_str = last_error.as_ref().unwrap().to_string().to_lowercase();
+                    
+                    if Self::is_retryable_error(&error_str) && attempt < max_retries - 1 {
+                        let delay = base_delay * 2u32.pow(attempt as u32);
+                        log::warn!("OpenRouter attempt {} failed, retrying in {:?}...", attempt + 1, delay);
+                        sleep(delay).await;
+                    }
+                }
+            }
+        }
+        
+        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("All retries failed")))
+    }
+
+    /// Retry wrapper for Ollama
+    async fn query_with_retry_ollama(client: &Client, prompt: &str, config: &Config) -> Result<String> {
+        let max_retries = 3;
+        let base_delay = Duration::from_secs(1);
+        
+        let mut last_error = None;
+        
+        for attempt in 0..max_retries {
+            match Self::query_ollama(client, prompt, config).await {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    last_error = Some(e);
+                    let error_str = last_error.as_ref().unwrap().to_string().to_lowercase();
+                    
+                    if Self::is_retryable_error(&error_str) && attempt < max_retries - 1 {
+                        let delay = base_delay * 2u32.pow(attempt as u32);
+                        log::warn!("Ollama attempt {} failed, retrying in {:?}...", attempt + 1, delay);
+                        sleep(delay).await;
+                    }
+                }
+            }
+        }
+        
+        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("All retries failed")))
+    }
+
+    /// Check if an error is retryable (transient failures)
+    fn is_retryable_error(error_str: &str) -> bool {
+        error_str.contains("429") 
+            || error_str.contains("rate limit")
+            || error_str.contains("too many requests")
+            || error_str.contains("quota exceeded")
+            || error_str.contains("5")
+            || error_str.contains("connection")
+            || error_str.contains("timeout")
+            || error_str.contains("network")
+            || error_str.contains("temporarily unavailable")
+            || error_str.contains("service unavailable")
+    }
+
     /// Auto-LLM Selection with fallback chain: Groq -> OpenRouter -> Ollama
+    /// Each provider is tried with retry logic before falling back
     async fn query_with_fallback(client: &Client, prompt: &str, config: &Config) -> Result<String> {
         // Priority 1: Groq (fastest, free tier)
         if let Some(groq) = &config.models.groq {
             if !groq.api_key.is_empty() && groq.api_key != "your_groq_api_key_here" {
-                match Self::query_groq(client, prompt, config).await {
+                match Self::query_with_retry_groq(client, prompt, config).await {
                     Ok(res) => return Ok(res),
                     Err(e) => {
-                        if Self::is_rate_limit_error(&e) {
-                            warn!("Groq rate limited, falling back to next provider...");
+                        let error_str = e.to_string().to_lowercase();
+                        if Self::is_retryable_error(&error_str) {
+                            log::warn!("Groq failed (retryable): {}. Falling back...", e);
                         } else {
-                            error!("Groq failed: {}. Trying next provider...", e);
+                            log::error!("Groq failed: {}. Trying next provider...", e);
                         }
                     }
                 }
@@ -47,13 +142,14 @@ impl LlmClient {
         // Priority 2: OpenRouter (wider model selection)
         if let Some(or) = &config.models.openrouter {
             if !or.api_key.is_empty() && or.api_key != "your_openrouter_api_key_here" {
-                match Self::query_openrouter(client, prompt, config).await {
+                match Self::query_with_retry_openrouter(client, prompt, config).await {
                     Ok(res) => return Ok(res),
                     Err(e) => {
-                        if Self::is_rate_limit_error(&e) {
-                            warn!("OpenRouter rate limited, falling back to Ollama...");
+                        let error_str = e.to_string().to_lowercase();
+                        if Self::is_retryable_error(&error_str) {
+                            log::warn!("OpenRouter failed (retryable): {}. Falling back...", e);
                         } else {
-                            error!("OpenRouter failed: {}. Trying Ollama...", e);
+                            log::error!("OpenRouter failed: {}. Trying next provider...", e);
                         }
                     }
                 }
@@ -62,24 +158,15 @@ impl LlmClient {
         
         // Priority 3: Ollama (local, no rate limits)
         if config.models.ollama.is_some() {
-            match Self::query_ollama(client, prompt, config).await {
+            match Self::query_with_retry_ollama(client, prompt, config).await {
                 Ok(res) => return Ok(res),
                 Err(e) => {
-                    error!("Ollama failed: {}", e);
+                    log::error!("Ollama failed: {}", e);
                 }
             }
         }
         
         anyhow::bail!("All providers failed. Please check your API keys and network connection.")
-    }
-
-    /// Check if an error is a rate limit (429) error
-    fn is_rate_limit_error(error: &anyhow::Error) -> bool {
-        let error_str = error.to_string().to_lowercase();
-        error_str.contains("429") 
-            || error_str.contains("rate limit")
-            || error_str.contains("too many requests")
-            || error_str.contains("quota exceeded")
     }
 
     async fn query_groq(client: &Client, prompt: &str, config: &Config) -> Result<String> {
