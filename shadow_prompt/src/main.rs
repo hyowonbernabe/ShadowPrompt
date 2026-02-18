@@ -201,11 +201,12 @@ async fn run_app() -> anyhow::Result<()> {
 
 
                         // 2. Gather Context (Search/RAG)
-                        let context = match kp_arc.gather_context(&prompt, &config_clone).await {
-                             Ok(ctx) => ctx,
+                        let (context, warnings) = match kp_arc.gather_context(&prompt, &config_clone).await {
+                             Ok((ctx, warns)) => (ctx, warns),
                              Err(e) => {
-                                 error!("Knowledge Error: {}", e);
-                                 String::new() 
+                                 let err_msg = format!("Knowledge System Error: {}", e);
+                                 error!("{}", err_msg);
+                                 (String::new(), vec![err_msg])
                              }
                         };
                         
@@ -217,13 +218,28 @@ async fn run_app() -> anyhow::Result<()> {
                         };
 
                         // 3. Query LLM
-                        let response = match LlmClient::query(&augmented_prompt, &config_clone).await {
-                             Ok(res) => res,
+                        let mut final_output = String::new();
+
+                        // Add warnings to output if any
+                        for warning in warnings {
+                            final_output.push_str(&format!("[System Warning: {}]\n\n", warning));
+                        }
+
+                        match LlmClient::query(&augmented_prompt, &config_clone).await {
+                             Ok(res) => {
+                                 final_output.push_str(&res);
+                             },
                              Err(e) => {
-                                 error!("LLM Error: {}", e);
-                                 "Error: Failed to get response from AI.".to_string()
+                                 let err_msg = format!("AI Error: {}", e);
+                                 error!("{}", err_msg);
+                                 // If we have warnings, they are already in final_output. 
+                                 // We append the fatal error.
+                                 final_output.push_str(&format!("[FATAL ERROR]\n{}", err_msg));
                              }
                         };
+                        
+                        // Treat the final_output as the response for MCQ/Clipboard
+                        let response = final_output;
 
                         // 4. Check for MCQ Answer (with context from original input)
                         let mcq_color = if let Some(ans) = parse_mcq_with_context(&prompt, &response) {

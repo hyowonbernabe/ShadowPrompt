@@ -13,13 +13,8 @@ impl KnowledgeProvider {
     pub async fn new(config: &Config) -> Result<Self> {
         let rag = if config.rag.enabled {
             println!("[*] Initializing Local RAG System...");
-            match rag::RagSystem::new(config).await {
-                Ok(sys) => Some(Arc::new(sys)),
-                Err(e) => {
-                    eprintln!("[!] Failed to initialize RAG: {}", e);
-                    None
-                }
-            }
+            let sys = rag::RagSystem::new(config).await;
+            Some(Arc::new(sys))
         } else {
             None
         };
@@ -39,8 +34,9 @@ impl KnowledgeProvider {
         Ok(provider)
     }
 
-    pub async fn gather_context(&self, query: &str, config: &Config) -> Result<String> {
+    pub async fn gather_context(&self, query: &str, config: &Config) -> Result<(String, Vec<String>)> {
         let mut context = String::new();
+        let mut warnings = Vec::new();
 
         // 1. Web Search
         if config.search.enabled {
@@ -53,7 +49,9 @@ impl KnowledgeProvider {
                     }
                 }
                 Err(e) => {
-                    eprintln!("Search failed: {}", e); 
+                    let msg = format!("Search failed: {}", e);
+                    eprintln!("{}", msg); 
+                    warnings.push(msg);
                 }
             }
         }
@@ -71,11 +69,13 @@ impl KnowledgeProvider {
                     }
                 },
                 Err(e) => {
-                    eprintln!("[!] RAG Query Failed: {}", e);
+                    let msg = format!("RAG Query Failed: {}", e);
+                    eprintln!("[!] {}", msg);
+                    warnings.push(msg);
                 }
             }
         }
 
-        Ok(context)
+        Ok((context, warnings))
     }
 }

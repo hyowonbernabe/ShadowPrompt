@@ -21,12 +21,14 @@ struct RagIndex {
 }
 
 pub struct RagSystem {
-    embedding_model: TextEmbedding,
+    embedding_model: Option<TextEmbedding>,
     config: Config,
+    is_operational: bool,
+    init_error: Option<String>,
 }
 
 impl RagSystem {
-    pub async fn new(config: &Config) -> Result<Self> {
+    pub async fn new(config: &Config) -> Self {
         // Initialize Embedding Model
         // We use BGE-Small-EN-V1.5 which is small and fast.
         let mut options = InitOptions::default();
@@ -34,18 +36,40 @@ impl RagSystem {
         options.show_download_progress = true;
         options.cache_dir = get_exe_dir().join("data").join("models");
 
-        let model = TextEmbedding::try_new(options).context("Failed to initialize FastEmbed")?;
+        let (model, is_operational, init_error) = match TextEmbedding::try_new(options) {
+            Ok(m) => (Some(m), true, None),
+            Err(e) => {
+                let err_msg = e.to_string();
+                eprintln!("[!] Failed to initialize FastEmbed: {}", err_msg);
+                (None, false, Some(err_msg))
+            }
+        };
 
-        Ok(Self {
+        Self {
             embedding_model: model,
             config: config.clone(),
-        })
+            is_operational,
+            init_error,
+        }
+    }
+
+    pub fn is_operational(&self) -> bool {
+        self.is_operational
+    }
+
+    pub fn get_init_error(&self) -> Option<&str> {
+        self.init_error.as_deref()
     }
 
     pub async fn ingest(&self) -> Result<usize> {
-        if !self.config.rag.enabled {
+        if !self.config.rag.enabled || !self.is_operational {
              return Ok(0);
         }
+
+        let embedding_model = match &self.embedding_model {
+            Some(m) => m,
+            None => return Ok(0),
+        };
 
         let exe_dir = get_exe_dir();
         let root_path = exe_dir.join(&self.config.rag.knowledge_path);
@@ -102,7 +126,7 @@ impl RagSystem {
         println!("[RAG] Found {} unique documents. Generating embeddings...", new_docs.len());
 
         let texts: Vec<String> = new_docs.iter().map(|(_, c)| c.clone()).collect();
-        let embeddings = self.embedding_model.embed(texts, None)?;
+        let embeddings = embedding_model.embed(texts, None)?;
 
         let mut index = RagIndex::default();
 
@@ -130,6 +154,16 @@ impl RagSystem {
              return Ok(vec![]);
         }
 
+        if !self.is_operational {
+            eprintln!("[!] RAG is not operational (initialization failed). Returning empty results.");
+            return Ok(vec![]);
+        }
+
+        let embedding_model = match &self.embedding_model {
+            Some(m) => m,
+            None => return Ok(vec![]),
+        };
+
         let exe_dir = get_exe_dir();
         let index_base = exe_dir.join(&self.config.rag.index_path);
         let index_file_path = if self.config.rag.index_path.ends_with(".json") {
@@ -153,7 +187,7 @@ impl RagSystem {
         }
 
         // Embed Query
-        let query_embeddings = self.embedding_model.embed(vec![text.to_string()], None)?;
+        let query_embeddings = embedding_model.embed(vec![text.to_string()], None)?;
         let query_vec = &query_embeddings[0];
 
         // Calculate Cosine Similarity
@@ -186,4 +220,48 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     }
     
     dot_product / (norm_a * norm_b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_rag_operational_flag() {
+        // Create a dummy config
+        let mut config = Config::default();
+        config.rag.enabled = true;
+
+        // Since fields are private, we need a way to construct it.
+        // We can add a helper in the parent module that is only for tests.
+        // Or we can just use the public constructor?
+        // But we want to simulate failure.
+        
+        // Let's rely on the fact that if this compiles, it works.
+        // If it compiles, it means my understanding of visibility was wrong or incomplete.
+        // (Actually, checking docs: "Private items are visible to the current module and its descendants.")
+        // Yes! "Private items are visible to the current module AND ITS DESCENDANTS."
+        // Since `tests` is a descendant of `rag`, it can see private items of `rag`!
+        // Struct fields are private to the module defining the struct.
+        // Since `RagSystem` is defined in `rag`, its private fields are visible to `rag` and `rag`'s descendants (like `tests`).
+        // So it is correct!
+        
+        let rag = RagSystem {
+            embedding_model: None,
+            config: config.clone(),
+            is_operational: false,
+            init_error: Some("Simulated failure".to_string()),
+        };
+
+        // Test Query
+        let result = rag.query("test").await;
+        assert!(result.is_ok());
+        let results = result.unwrap();
+        assert!(results.is_empty());
+
+        // Test Ingest
+        let ingest_result = rag.ingest().await;
+        assert!(ingest_result.is_ok());
+        assert_eq!(ingest_result.unwrap(), 0);
+    }
 }

@@ -696,13 +696,12 @@ impl SetupWizard {
                 // Step 2: Initialize FastEmbed models
                 let _ = tx.send((0.4, "Downloading embedding models...".to_string()));
 
-                match crate::knowledge::rag::RagSystem::new(&config_clone).await {
-                    Ok(_) => {
-                        let _ = tx.send((1.0, "Download complete!".to_string()));
-                    }
-                    Err(e) => {
-                        let _ = tx.send((0.0, format!("Error: {}", e)));
-                    }
+                let rag_system = crate::knowledge::rag::RagSystem::new(&config_clone).await;
+                if rag_system.is_operational() {
+                     let _ = tx.send((1.0, "Download complete!".to_string()));
+                } else {
+                     let error_msg = rag_system.get_init_error().unwrap_or("Unknown error");
+                     let _ = tx.send((0.0, format!("Error: {}", error_msg)));
                 }
             });
         });
