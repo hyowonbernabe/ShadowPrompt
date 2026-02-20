@@ -7,6 +7,10 @@ edition = "2021"
 name = "Shadow_Prompt"
 path = "src/main.rs"
 
+[[bin]]
+name = "test_overlay"
+path = "test_overlay.rs"
+
 [features]
 default = []
 debug = []

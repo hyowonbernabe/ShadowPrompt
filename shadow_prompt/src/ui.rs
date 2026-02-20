@@ -9,9 +9,10 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetSystemMetrics, PeekMessageW,
     PostQuitMessage, RegisterClassW, SetLayeredWindowAttributes, SetWindowPos, ShowWindow,
-    TranslateMessage, CS_HREDRAW, CS_VREDRAW, HCURSOR, HICON, HMENU, LWA_ALPHA, MSG, PM_REMOVE,
-    SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, SW_SHOW, WM_DESTROY,
-    WM_PAINT, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
+    TranslateMessage, CS_HREDRAW, CS_VREDRAW, HCURSOR, HICON, HMENU, LWA_ALPHA, LWA_COLORKEY, MSG,
+    PM_REMOVE, SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, SW_SHOW,
+    WM_DESTROY, WM_ERASEBKGND, WM_PAINT, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    WS_POPUP, WS_VISIBLE,
 };
 
 const HWND_TOPMOST: HWND = HWND(-1_isize as *mut std::ffi::c_void);
@@ -19,7 +20,6 @@ const HWND_TOPMOST: HWND = HWND(-1_isize as *mut std::ffi::c_void);
 #[allow(dead_code)]
 pub enum UICommand {
     SetColor(u32),
-    SetSecondaryColor(u32),
     DrawDebugRect(i32, i32, i32, i32),
     ClearDebugRect,
     #[allow(dead_code)]
@@ -31,7 +31,6 @@ pub enum UICommand {
 }
 
 static mut CURRENT_COLOR: u32 = 0x0000FF00;
-static mut SECONDARY_COLOR: u32 = 0x00000000;
 static mut IS_HIDDEN: bool = false;
 static mut OVERLAY_TEXT: String = String::new();
 static mut OVERLAY_FONT_SIZE: i32 = 16;
@@ -47,7 +46,6 @@ impl UIManager {
             unsafe {
                 let instance = HINSTANCE::default();
                 let class_name = w!("ShadowPromptIndicator");
-                let secondary_class_name = w!("ShadowPromptIndicatorSecondary");
                 let debug_class_name = w!("ShadowPromptDebug");
 
                 // 1. Indicator Window Class
@@ -61,18 +59,6 @@ impl UIManager {
                     ..Default::default()
                 };
                 RegisterClassW(&wc);
-
-                // 1b. Secondary Indicator Window Class
-                let wc_sec = WNDCLASSW {
-                    hCursor: HCURSOR::default(),
-                    hIcon: HICON::default(),
-                    lpszClassName: secondary_class_name,
-                    hInstance: instance,
-                    lpfnWndProc: Some(secondary_wnd_proc),
-                    style: CS_HREDRAW | CS_VREDRAW,
-                    ..Default::default()
-                };
-                RegisterClassW(&wc_sec);
 
                 // 2. Debug Overlay Window Class (Black Box)
                 let wc_debug = WNDCLASSW {
@@ -157,36 +143,6 @@ impl UIManager {
                 )
                 .unwrap_or(HWND::default());
 
-                // Create Indicator 2 (Secondary)
-                // Default heuristic: Place BELOW if Top, ABOVE if Bottom?
-                // Or just stack vertically always?
-                // Let's place it just *below* the main one by default, separated by size?
-                // Or just adding `size` to Y?
-                // If Bottom, maybe above?
-                // Let's assume Top alignment for now as default.
-                // If it's bottom aligned, we might want to stack upwards.
-
-                let sec_y = if config.position.contains("bottom") {
-                    y - size // Stack above
-                } else {
-                    y + size // Stack below
-                };
-
-                let hwnd_sec = CreateWindowExW(
-                    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED,
-                    secondary_class_name,
-                    w!(""),
-                    WS_POPUP | WS_VISIBLE,
-                    x,
-                    sec_y,
-                    size,
-                    size,
-                    HWND::default(),
-                    HMENU::default(),
-                    instance,
-                    None,
-                )
-                .unwrap_or(HWND::default());
 
                 // Create Debug Window (Hidden initially)
                 let hwnd_debug = CreateWindowExW(
@@ -206,36 +162,37 @@ impl UIManager {
                 .unwrap_or(HWND::default());
 
                 // Create Text Overlay Window (Hidden initially)
-                let _overlay_font_size = config.text_overlay_font_size.clamp(8, 48) as u32;
-                let overlay_bg_opacity = config.text_overlay_bg_opacity;
-                let overlay_text_opacity = config.text_overlay_text_opacity;
+                // Store config values for later use
+                OVERLAY_FONT_SIZE = config.text_overlay_font_size.clamp(1, 48);
+                OVERLAY_TEXT_OPACITY = config.text_overlay_text_opacity;
+                let overlay_offset = config.text_overlay_offset;
+                let overlay_x_axis = config.text_overlay_x_axis;
+                let overlay_y_axis = config.text_overlay_y_axis;
 
-                // Store for later use
-                OVERLAY_FONT_SIZE = config.text_overlay_font_size.clamp(8, 48);
-                OVERLAY_BG_OPACITY = overlay_bg_opacity;
-                OVERLAY_TEXT_OPACITY = overlay_text_opacity;
-
-                // Calculate overlay position (default bottom-right)
-                let overlay_offset = 20i32;
-                let (overlay_x, overlay_y) = match config.text_overlay_position.as_str() {
-                    "top-left" => (overlay_offset, overlay_offset),
-                    "top-right" => (screen_w - 200 - overlay_offset, overlay_offset),
-                    "bottom-left" => (overlay_offset, screen_h - 30 - overlay_offset),
-                    _ => (
-                        screen_w - 200 - overlay_offset,
-                        screen_h - 30 - overlay_offset,
-                    ), // bottom-right default
+                // Calculate overlay position (default bottom-right with axis adjustments)
+                let base_x = screen_w - overlay_offset;
+                let base_y = screen_h - OVERLAY_FONT_SIZE - overlay_offset;
+                let position_str = config.text_overlay_position.to_lowercase();
+                let (overlay_x, overlay_y) = match position_str.as_str() {
+                    "top-left" => (
+                        overlay_offset + overlay_x_axis,
+                        overlay_offset + overlay_y_axis,
+                    ),
+                    "top-right" => (base_x + overlay_x_axis, overlay_offset + overlay_y_axis),
+                    "bottom-left" => (overlay_offset + overlay_x_axis, base_y + overlay_y_axis),
+                    "bottom-right" => (base_x + overlay_x_axis, base_y + overlay_y_axis),
+                    _ => (base_x + overlay_x_axis, base_y + overlay_y_axis), // default to bottom-right
                 };
 
                 let hwnd_overlay = CreateWindowExW(
-                    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED,
+                    WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW,
                     overlay_class_name,
                     w!("TextOverlay"),
                     WS_POPUP,
                     overlay_x,
                     overlay_y,
-                    200,
-                    30,
+                    100, // Initial width, will be resized dynamically
+                    OVERLAY_FONT_SIZE,
                     HWND::default(),
                     HMENU::default(),
                     instance,
@@ -248,24 +205,15 @@ impl UIManager {
                 }
 
                 let _ = ShowWindow(hwnd, SW_SHOW);
-                let _ = ShowWindow(hwnd_sec, SW_SHOW);
 
                 // Opacity for Indicator 1
                 let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
 
-                // Opacity for Indicator 2
-                let _ = SetLayeredWindowAttributes(hwnd_sec, COLORREF(0), 255, LWA_ALPHA);
-
                 // Opacity for Debug (50%)
                 let _ = SetLayeredWindowAttributes(hwnd_debug, COLORREF(0), 128, LWA_ALPHA);
 
-                // Opacity for Text Overlay
-                let _ = SetLayeredWindowAttributes(
-                    hwnd_overlay,
-                    COLORREF(0),
-                    overlay_bg_opacity,
-                    LWA_ALPHA,
-                );
+                // Opacity for Text Overlay - use color key for transparent background
+                let _ = SetLayeredWindowAttributes(hwnd_overlay, COLORREF(0), 255, LWA_COLORKEY);
 
                 // Loop
                 loop {
@@ -283,10 +231,6 @@ impl UIManager {
                             UICommand::SetColor(c) => {
                                 CURRENT_COLOR = c;
                                 let _ = InvalidateRect(hwnd, None, false);
-                            }
-                            UICommand::SetSecondaryColor(c) => {
-                                SECONDARY_COLOR = c;
-                                let _ = InvalidateRect(hwnd_sec, None, false);
                             }
                             UICommand::DrawDebugRect(x, y, w, h) => {
                                 let _ = ShowWindow(hwnd_debug, SW_SHOW);
@@ -310,10 +254,9 @@ impl UIManager {
                                 IS_HIDDEN = !IS_HIDDEN;
                                 if IS_HIDDEN {
                                     let _ = ShowWindow(hwnd, SW_HIDE);
-                                    let _ = ShowWindow(hwnd_sec, SW_HIDE);
+                                    let _ = ShowWindow(hwnd_overlay, SW_HIDE);
                                 } else {
                                     let _ = ShowWindow(hwnd, SW_SHOW);
-                                    let _ = ShowWindow(hwnd_sec, SW_SHOW);
                                 }
                             }
                             UICommand::SetOverlayText(text) => {
@@ -365,27 +308,6 @@ unsafe extern "system" fn wnd_proc(
     }
 }
 
-unsafe extern "system" fn secondary_wnd_proc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    match msg {
-        WM_PAINT => {
-            let mut ps = PAINTSTRUCT::default();
-            let hdc = BeginPaint(hwnd, &mut ps);
-            let color = COLORREF(SECONDARY_COLOR);
-            let brush = CreateSolidBrush(color);
-            FillRect(hdc, &ps.rcPaint, brush);
-            let _ = DeleteObject(brush);
-            let _ = EndPaint(hwnd, &ps);
-            LRESULT(0)
-        }
-        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
-    }
-}
-
 unsafe extern "system" fn debug_wnd_proc(
     hwnd: HWND,
     msg: u32,
@@ -420,10 +342,8 @@ unsafe extern "system" fn overlay_wnd_proc(
             let mut ps = PAINTSTRUCT::default();
             let hdc = BeginPaint(hwnd, &mut ps);
 
-            // Calculate background color with configured opacity
-            let bg_alpha = OVERLAY_BG_OPACITY;
-            let bg_color = COLORREF((bg_alpha as u32) << 24);
-            let brush = CreateSolidBrush(bg_color);
+            // Fill with black (transparent due to color key)
+            let brush = CreateSolidBrush(COLORREF(0));
             FillRect(hdc, &ps.rcPaint, brush);
             let _ = DeleteObject(brush);
 
@@ -435,17 +355,16 @@ unsafe extern "system" fn overlay_wnd_proc(
                     CreateFontW, DeleteObject, DrawTextW, GetTextExtentPoint32W, SelectObject,
                     SetBkMode, SetTextColor, DT_LEFT, DT_NOCLIP, TRANSPARENT,
                 };
-                use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOMOVE};
+                use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SET_WINDOW_POS_FLAGS};
 
-                let font_size = OVERLAY_FONT_SIZE.clamp(8, 48);
                 let font_name: Vec<u16> = "Arial\0".encode_utf16().collect();
 
                 let font = CreateFontW(
-                    font_size,
+                    OVERLAY_FONT_SIZE,
                     0,
                     0,
                     0,
-                    700,
+                    400,
                     0,
                     0,
                     0,
@@ -459,11 +378,7 @@ unsafe extern "system" fn overlay_wnd_proc(
 
                 let _ = SelectObject(hdc, font);
                 let _ = SetBkMode(hdc, TRANSPARENT);
-
-                // Calculate text color with configured opacity
-                let text_alpha = OVERLAY_TEXT_OPACITY;
-                let text_color = COLORREF((text_alpha as u32) << 24 | 0x00FFFFFF);
-                let _ = SetTextColor(hdc, text_color);
+                let _ = SetTextColor(hdc, COLORREF(0x00FFFFFF));
 
                 let text: Vec<u16> = OVERLAY_TEXT.encode_utf16().collect();
 
@@ -472,23 +387,24 @@ unsafe extern "system" fn overlay_wnd_proc(
                 let text_slice: &[u16] = &text;
                 let _ = GetTextExtentPoint32W(hdc, text_slice, &mut size);
 
-                // Resize window to fit text + padding
-                let width = size.cx + 20; // 10px padding each side
-                let height = size.cy + 6; // 3px padding top/bottom
+                // Resize window to fit text exactly (no padding)
+                let width = size.cx;
+                let height = OVERLAY_FONT_SIZE;
 
                 let _ = SetWindowPos(
                     hwnd,
                     HWND_TOPMOST,
                     0,
                     0,
-                    width.max(50),
-                    height.max(20),
-                    SWP_NOMOVE,
+                    width.max(10),
+                    height.max(1),
+                    SET_WINDOW_POS_FLAGS(0),
                 );
 
+                // Draw text with no padding
                 let mut rect = ps.rcPaint;
-                rect.left += 10;
-                rect.top += 3;
+                rect.left = 0;
+                rect.top = 0;
 
                 let mut text_with_null: Vec<u16> = OVERLAY_TEXT
                     .encode_utf16()
@@ -502,6 +418,10 @@ unsafe extern "system" fn overlay_wnd_proc(
 
             let _ = EndPaint(hwnd, &ps);
             LRESULT(0)
+        }
+        WM_ERASEBKGND => {
+            // Prevent default background erasing
+            LRESULT(1)
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }

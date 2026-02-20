@@ -25,7 +25,7 @@ use crate::ui::{UIManager, UICommand};
 use crate::llm::LlmClient;
 use crate::knowledge::KnowledgeProvider;
 use crate::capabilities::ModelCapabilities;
-use crate::utils::{parse_mcq_with_context, McqAnswer, parse_hex_color, parse_keys};
+use crate::utils::{parse_hex_color, parse_keys};
 use std::sync::mpsc;
 
 fn main() -> anyhow::Result<()> {
@@ -174,13 +174,17 @@ async fn run_app() -> anyhow::Result<()> {
                             
                             match crate::ocr::OcrManager::capture_as_base64(x, y, w, h).await {
                                 Ok(image_b64) => {
-                                    let prompt = "Describe what you see in this image and answer any questions about it. Be concise.";
+                                    let prompt = "Analyze the image. If there are questions, answer them directly and concisely. Provide all correct options if it is a multiple-choice question. If it is a matching or matrix question, clearly provide all pairings and answers.";
                                     
                                     match LlmClient::query_with_image(prompt, &image_b64, &config_clone).await {
                                         Ok(response) => {
                                             println!("[+] Vision query success");
                                             if let Err(e) = ClipboardManager::write(&response) {
                                                 eprintln!("Clipboard Write Error: {}", e);
+                                            }
+                                            // Show text overlay if enabled
+                                            if config_clone.visuals.text_overlay_enabled && !response.is_empty() {
+                                                let _ = ui_tx_clone.send(UICommand::SetOverlayText(response.clone()));
                                             }
                                         },
                                         Err(e) => {
@@ -191,6 +195,10 @@ async fn run_app() -> anyhow::Result<()> {
                                                         println!("[+] OCR fallback success");
                                                         if let Err(e) = ClipboardManager::write(&response) {
                                                             eprintln!("Clipboard Write Error: {}", e);
+                                                        }
+                                                        // Show text overlay if enabled
+                                                        if config_clone.visuals.text_overlay_enabled && !response.is_empty() {
+                                                            let _ = ui_tx_clone.send(UICommand::SetOverlayText(response.clone()));
                                                         }
                                                     },
                                                     Err(e) => {
@@ -221,6 +229,10 @@ async fn run_app() -> anyhow::Result<()> {
                                             if let Err(e) = ClipboardManager::write(&response) {
                                                 eprintln!("Clipboard Write Error: {}", e);
                                             }
+                                            // Show text overlay if enabled
+                                            if config_clone.visuals.text_overlay_enabled && !response.is_empty() {
+                                                let _ = ui_tx_clone.send(UICommand::SetOverlayText(response.clone()));
+                                            }
                                         },
                                         Err(e) => {
                                             eprintln!("[-] LLM query failed: {}, writing OCR text only", e);
@@ -242,9 +254,7 @@ async fn run_app() -> anyhow::Result<()> {
                 InputEvent::Model => {
                     println!("[!] EVENT: Model Key Pressed (Clipboard Trigger)");
                     let processing_color = parse_hex_color(&config.visuals.color_processing);
-                    let mcq_none_color = parse_hex_color(&config.visuals.color_mcq_none);
                     let _ = ui_tx.send(UICommand::SetColor(processing_color)); 
-                    let _ = ui_tx.send(UICommand::SetSecondaryColor(mcq_none_color));
                     let _ = ui_tx.send(UICommand::ClearOverlayText);
                     
                     let config_clone = config.clone();
@@ -308,22 +318,6 @@ async fn run_app() -> anyhow::Result<()> {
                         // Treat the final_output as the response for MCQ/Clipboard
                         let response = final_output;
 
-                        // 4. Check for MCQ Answer (with context from original input)
-                        let mcq_color = if let Some(ans) = parse_mcq_with_context(&prompt, &response) {
-                             let hex = match ans {
-                                 McqAnswer::A => &config_clone.visuals.color_mcq_a,
-                                 McqAnswer::B => &config_clone.visuals.color_mcq_b,
-                                 McqAnswer::C => &config_clone.visuals.color_mcq_c,
-                                 McqAnswer::D => &config_clone.visuals.color_mcq_d,
-                             };
-                             let color = parse_hex_color(hex);
-                             println!("[+] MCQ Detected: {:?} -> Color: {:08X}", ans, color);
-                             color
-                        } else {
-                             parse_hex_color(&config_clone.visuals.color_mcq_none)
-                        };
-                        let _ = ui_tx_clone.send(UICommand::SetSecondaryColor(mcq_color));
-
                         // 5. Write Clipboard (Always)
                         if let Err(e) = ClipboardManager::write(&response) {
                             eprintln!("Clipboard Write Error: {}", e);
@@ -340,8 +334,6 @@ async fn run_app() -> anyhow::Result<()> {
                         // We do NOT reset the secondary color immediately here, so the user can see it.
                         // However, we should probably reset it on the NEXT trigger or after a timeout?
                         // The user request didn't specify reset behavior, but usually indicators stay until next action.
-                        // But wait, if I run another query, I should probably clear it at the START of the event.
-                        // I'll add a clear command at the start of InputEvent::Model.
                     });
                 },
                 InputEvent::Panic => {

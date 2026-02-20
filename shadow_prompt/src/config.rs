@@ -117,17 +117,26 @@ pub struct VisualsConfig {
     #[serde(default = "default_true")]
     pub text_overlay_enabled: bool,
 
-    #[serde(default = "default_position")]
+    #[serde(default = "default_text_overlay_position")]
     pub text_overlay_position: String,
 
-    #[serde(default = "default_text_size")]
+    #[serde(default)]
+    pub text_overlay_x_axis: i32,
+
+    #[serde(default)]
+    pub text_overlay_y_axis: i32,
+
+    #[serde(default = "default_text_overlay_font_size")]
     pub text_overlay_font_size: i32,
 
-    #[serde(default = "default_text_opacity")]
+    #[serde(default = "default_text_overlay_bg_opacity")]
     pub text_overlay_bg_opacity: u8,
 
-    #[serde(default = "default_text_opacity")]
+    #[serde(default = "default_text_overlay_text_opacity")]
     pub text_overlay_text_opacity: u8,
+
+    #[serde(default = "default_text_overlay_offset")]
+    pub text_overlay_offset: i32,
 
     #[serde(default = "default_hide_key")]
     pub hide_key: String,
@@ -153,10 +162,13 @@ impl Default for VisualsConfig {
             color_true: default_color_true(),
             color_false: default_color_false(),
             text_overlay_enabled: true,
-            text_overlay_position: default_position(),
-            text_overlay_font_size: default_text_size(),
-            text_overlay_bg_opacity: 200,
-            text_overlay_text_opacity: 255,
+            text_overlay_position: default_text_overlay_position(),
+            text_overlay_font_size: default_text_overlay_font_size(),
+            text_overlay_bg_opacity: default_text_overlay_bg_opacity(),
+            text_overlay_text_opacity: default_text_overlay_text_opacity(),
+            text_overlay_offset: default_text_overlay_offset(),
+            text_overlay_x_axis: 0,
+            text_overlay_y_axis: 0,
             hide_key: default_hide_key(),
         }
     }
@@ -164,6 +176,10 @@ impl Default for VisualsConfig {
 
 fn default_position() -> String {
     "top-right".to_string()
+}
+
+fn default_text_overlay_position() -> String {
+    "bottom-right".to_string()
 }
 fn default_size() -> i32 {
     5
@@ -199,12 +215,30 @@ fn default_color_false() -> String {
     "#800000".to_string()
 }
 
+#[allow(dead_code)]
 fn default_text_size() -> i32 {
     12
 }
 
+fn default_text_overlay_font_size() -> i32 {
+    8
+}
+
+fn default_text_overlay_offset() -> i32 {
+    10
+}
+
+#[allow(dead_code)]
 fn default_text_opacity() -> u8 {
     200
+}
+
+fn default_text_overlay_bg_opacity() -> u8 {
+    0
+}
+
+fn default_text_overlay_text_opacity() -> u8 {
+    255
 }
 
 fn default_hide_key() -> String {
