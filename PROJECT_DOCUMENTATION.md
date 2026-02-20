@@ -92,7 +92,7 @@ ShadowPrompt detects identification/short-answer questions:
 2. **Visual Feedback:** **White** pixel (same as "No MCQ")
 3. **Text Overlay:** Answer text displayed at bottom-right (if enabled)
 
-### H. Scenario 6: Headless Browser Form Automation (New in v1.2.0)
+### H. Scenario 6: Headless Browser Form Automation (New in v1.5.0)
 ShadowPrompt can autonomously read and answer Google Forms via a built-in headless browser engine.
 1. **Trigger Incognito (Optional):** Press `Browser Incognito Key` (`Ctrl + Shift + I`) to launch an isolated Chrome instance with remote debugging enabled perfect for form filling without impacting your primary session.
 2. **Trigger Full Execution:** Press `Execute Form Key` (`Ctrl + Shift + 9`). ShadowPrompt will connect to the active tab (or extract cookies if launched cold), extract the questions, query the LLM, and inject the answers.
