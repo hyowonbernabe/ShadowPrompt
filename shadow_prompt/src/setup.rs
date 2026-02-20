@@ -108,6 +108,11 @@ pub struct SetupWizard {
     model_recorder: HotkeyRecorder,
     panic_recorder: HotkeyRecorder,
     hide_recorder: HotkeyRecorder,
+    browser_pass_recorder: HotkeyRecorder,
+    browser_exec_recorder: HotkeyRecorder,
+    browser_exec_single_recorder: HotkeyRecorder,
+    browser_abort_recorder: HotkeyRecorder,
+    browser_incognito_recorder: HotkeyRecorder,
     hotkey_error: Option<String>,
 
     // Downloads
@@ -134,6 +139,11 @@ impl SetupWizard {
             model_recorder: HotkeyRecorder::new(),
             panic_recorder: HotkeyRecorder::new(),
             hide_recorder: HotkeyRecorder::new(),
+            browser_pass_recorder: HotkeyRecorder::new(),
+            browser_exec_recorder: HotkeyRecorder::new(),
+            browser_exec_single_recorder: HotkeyRecorder::new(),
+            browser_abort_recorder: HotkeyRecorder::new(),
+            browser_incognito_recorder: HotkeyRecorder::new(),
             hotkey_error: None,
             downloading: false,
             download_progress: 0.0,
@@ -333,7 +343,9 @@ impl eframe::App for SetupWizard {
         // Request repaint for animations
         if self.downloading || self.wake_recorder.is_recording()
             || self.model_recorder.is_recording() || self.panic_recorder.is_recording()
-            || self.hide_recorder.is_recording()
+            || self.hide_recorder.is_recording() || self.browser_pass_recorder.is_recording()
+            || self.browser_exec_recorder.is_recording() || self.browser_abort_recorder.is_recording()
+            || self.browser_incognito_recorder.is_recording()
         {
             ctx.request_repaint();
         }
@@ -599,6 +611,24 @@ impl SetupWizard {
         ui.add_space(8.0);
 
         hotkey_field(ui, "Hide Graphics:", &mut self.config.visuals.hide_key, &mut self.hide_recorder, "hide");
+        ui.add_space(12.0);
+
+        ui.label(egui::RichText::new("Headless Browser Keybinds").strong());
+        ui.add_space(4.0);
+
+        hotkey_field(ui, "Save Password:", &mut self.config.general.key_browser_pass, &mut self.browser_pass_recorder, "b_pass");
+        ui.add_space(8.0);
+
+        hotkey_field(ui, "Execute Form (Auto):", &mut self.config.general.key_browser_exec, &mut self.browser_exec_recorder, "b_exec");
+        ui.add_space(8.0);
+
+        hotkey_field(ui, "Execute Single Page:", &mut self.config.general.key_browser_exec_single, &mut self.browser_exec_single_recorder, "b_exec_single");
+        ui.add_space(8.0);
+
+        hotkey_field(ui, "Abort Headless:", &mut self.config.general.key_browser_abort, &mut self.browser_abort_recorder, "b_abort");
+        ui.add_space(8.0);
+
+        hotkey_field(ui, "Launch Incognito:", &mut self.config.general.key_browser_incognito, &mut self.browser_incognito_recorder, "b_incognito");
         ui.add_space(12.0);
 
         // Validation error

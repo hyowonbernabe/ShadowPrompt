@@ -2,6 +2,7 @@
 name = "shadow_prompt"
 version = "1.2.0"
 edition = "2021"
+default-run = "Shadow_Prompt"
 
 [[bin]]
 name = "Shadow_Prompt"
@@ -10,6 +11,18 @@ path = "src/main.rs"
 [[bin]]
 name = "test_overlay"
 path = "test_overlay.rs"
+
+[[bin]]
+name = "test_ws"
+path = "test_ws.rs"
+
+[[bin]]
+name = "test_tabs"
+path = "test_tabs.rs"
+
+[[bin]]
+name = "test_hc"
+path = "test_hc.rs"
 
 [features]
 default = []
@@ -39,7 +52,7 @@ rdev = "0.5"
 arboard = "3.4"
 
 # Async & Networking
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["full", "macros", "rt-multi-thread"] }
 reqwest = { version = "0.12", features = ["json"] }
 
 # Data & Config
@@ -59,6 +72,9 @@ url = "2.5.8"
 
 # Build dependencies removed (Using local tools/protoc via Launcher.bat)
 
+# Browser Automation
+headless_chrome = "1.0"
+rookie = "0.1"
 
 # Embeddings & Vector DB
 fastembed = "4"

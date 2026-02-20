@@ -10,6 +10,11 @@ pub enum InputEvent {
     OCRClick1,
     OCRRect(i32, i32, i32, i32), // x, y, w, h
     HideToggle,
+    BrowserPass,
+    BrowserExec,
+    BrowserExecSingle,
+    BrowserAbort,
+    BrowserIncognito,
 }
 
 #[allow(dead_code)]
@@ -26,6 +31,11 @@ impl InputManager {
         model_keys: Vec<Key>,
         panic_keys: Vec<Key>,
         hide_keys: Vec<Key>,
+        b_pass_keys: Vec<Key>,
+        b_exec_keys: Vec<Key>,
+        b_exec_single_keys: Vec<Key>,
+        b_abort_keys: Vec<Key>,
+        b_incognito_keys: Vec<Key>,
         sender: Sender<InputEvent>,
     ) {
         thread::spawn(move || {
@@ -56,6 +66,26 @@ impl InputManager {
                             p1 = None;
                         } else if check_combo(&pressed_keys, &hide_keys) {
                             let _ = sender.send(InputEvent::HideToggle);
+                            is_selecting = false;
+                            p1 = None;
+                        } else if check_combo(&pressed_keys, &b_pass_keys) {
+                            let _ = sender.send(InputEvent::BrowserPass);
+                            is_selecting = false;
+                            p1 = None;
+                        } else if check_combo(&pressed_keys, &b_exec_keys) {
+                            let _ = sender.send(InputEvent::BrowserExec);
+                            is_selecting = false;
+                            p1 = None;
+                        } else if check_combo(&pressed_keys, &b_exec_single_keys) {
+                            let _ = sender.send(InputEvent::BrowserExecSingle);
+                            is_selecting = false;
+                            p1 = None;
+                        } else if check_combo(&pressed_keys, &b_abort_keys) {
+                            let _ = sender.send(InputEvent::BrowserAbort);
+                            is_selecting = false;
+                            p1 = None;
+                        } else if check_combo(&pressed_keys, &b_incognito_keys) {
+                            let _ = sender.send(InputEvent::BrowserIncognito);
                             is_selecting = false;
                             p1 = None;
                         }

@@ -14,6 +14,7 @@ mod tos_text;
 mod hotkey_recorder;
 mod color_picker;
 mod capabilities;
+pub mod browser;
 
 #[macro_use]
 extern crate log;
@@ -129,8 +130,14 @@ async fn run_app() -> anyhow::Result<()> {
     let panic_keys = parse_keys(&config.general.panic_key);
     let hide_keys = parse_keys(&config.visuals.hide_key);
 
+    let b_pass_keys = parse_keys(&config.general.key_browser_pass);
+    let b_exec_keys = parse_keys(&config.general.key_browser_exec);
+    let b_exec_single_keys = parse_keys(&config.general.key_browser_exec_single);
+    let b_abort_keys = parse_keys(&config.general.key_browser_abort);
+    let b_incognito_keys = parse_keys(&config.general.key_browser_incognito);
+
     println!("[*] Listening for Hotkeys...");
-    InputManager::start(wake_keys, model_keys, panic_keys, hide_keys, tx);
+    InputManager::start(wake_keys, model_keys, panic_keys, hide_keys, b_pass_keys, b_exec_keys, b_exec_single_keys, b_abort_keys, b_incognito_keys, tx);
 
     // 4. Main Event Loop
     println!("[*] ShadowPrompt is running. Press Panic Key to exit.");
@@ -139,6 +146,9 @@ async fn run_app() -> anyhow::Result<()> {
     // For simplicity, we parse on fly or clone config.
     // Ideally we put these in a strut but cloning config is fine for this app scale.
     
+    let mut active_browser_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut stored_password: Option<String> = None;
+
     loop {
         // Check for Input Events (Non-blocking or blocking depending on design)
         // Here we use recv() which blocks, effectively putting the main thread to sleep until an event.
@@ -346,6 +356,66 @@ async fn run_app() -> anyhow::Result<()> {
                 InputEvent::HideToggle => {
                     println!("[!] EVENT: Hide Toggle Key Pressed");
                     let _ = ui_tx.send(UICommand::HideToggle);
+                },
+                InputEvent::BrowserPass => {
+                    println!("[!] EVENT: Browser Pass Key Pressed");
+                    if let Ok(text) = ClipboardManager::read() {
+                        stored_password = Some(text);
+                        if config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("🔑 Password locked.".to_string())); }
+                    } else {
+                        if config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("❌ No password on clipboard.".to_string())); }
+                    }
+                },
+                InputEvent::BrowserAbort => {
+                    println!("[!] EVENT: Browser Abort Key Pressed");
+                    if let Some(handle) = active_browser_task.take() {
+                        handle.abort();
+                        if config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("🛑 Headless Browser Aborted.".to_string())); }
+                    } else {
+                        if config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("ℹ️ No active browser task to abort.".to_string())); }
+                    }
+                },
+                InputEvent::BrowserExec | InputEvent::BrowserExecSingle => {
+                    let is_auto = match event {
+                        InputEvent::BrowserExec => true,
+                        _ => false,
+                    };
+                    
+                    println!("[!] EVENT: Browser Exec Key Pressed (Auto={})", is_auto);
+                    // Read clipboard, but don't hard fail if it's empty or invalid yet.
+                    let url = match ClipboardManager::read() {
+                        Ok(t) if t.contains("forms.gle") || t.contains("docs.google.com/forms") => Some(t),
+                        _ => None,
+                    };
+
+                    if config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("🧠 Initializing browser...".to_string())); }
+                    
+                    let p_clone = stored_password.clone();
+                    let c_clone = std::sync::Arc::new(config.clone());
+                    let tx_clone = ui_tx.clone();
+                    let debug_mode = config.general.debug;
+                    
+                    active_browser_task = Some(tokio::spawn(async move {
+                        if let Err(e) = crate::browser::execute_form_flow(url.as_deref(), p_clone.as_deref(), c_clone, tx_clone.clone(), is_auto).await {
+                            if debug_mode { let _ = tx_clone.send(UICommand::SetOverlayText(format!("❌ Browser Error: {}", e))); }
+                        } else {
+                            if debug_mode { let _ = tx_clone.send(UICommand::SetOverlayText("✅ Answers Auto-saved.".to_string())); }
+                        }
+                    }));
+                },
+                InputEvent::BrowserIncognito => {
+                    println!("[!] EVENT: Browser Incognito Key Pressed");
+                    if config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("🌐 Launching Debug Incognito...".to_string())); }
+                    
+                    let tx_clone = ui_tx.clone();
+                    let debug_mode = config.general.debug;
+                    tokio::spawn(async move {
+                        if let Err(e) = crate::browser::launch_incognito_debugger() {
+                            if debug_mode { let _ = tx_clone.send(UICommand::SetOverlayText(format!("❌ Failed to launch Chrome: {}", e))); }
+                        } else {
+                            if debug_mode { let _ = tx_clone.send(UICommand::SetOverlayText("✅ Incognito Debugger Ready.".to_string())); }
+                        }
+                    });
                 }
             }
         }

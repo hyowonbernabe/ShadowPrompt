@@ -56,6 +56,17 @@ pub struct GeneralConfig {
     pub tos_accepted: bool,
     #[serde(default)]
     pub tos_accepted_version: String,
+
+    #[serde(default = "default_browser_pass")]
+    pub key_browser_pass: String,
+    #[serde(default = "default_browser_exec")]
+    pub key_browser_exec: String,
+    #[serde(default = "default_browser_exec_single")]
+    pub key_browser_exec_single: String,
+    #[serde(default = "default_browser_abort")]
+    pub key_browser_abort: String,
+    #[serde(default = "default_browser_incognito")]
+    pub key_browser_incognito: String,
 }
 
 impl Default for GeneralConfig {
@@ -69,9 +80,20 @@ impl Default for GeneralConfig {
             debug: false,
             tos_accepted: false,
             tos_accepted_version: String::new(),
+            key_browser_pass: default_browser_pass(),
+            key_browser_exec: default_browser_exec(),
+            key_browser_exec_single: default_browser_exec_single(),
+            key_browser_abort: default_browser_abort(),
+            key_browser_incognito: default_browser_incognito(),
         }
     }
 }
+
+fn default_browser_pass() -> String { "Ctrl+Shift+8".to_string() }
+fn default_browser_exec() -> String { "Ctrl+Shift+9".to_string() }
+fn default_browser_exec_single() -> String { "Ctrl+Shift+7".to_string() }
+fn default_browser_abort() -> String { "Ctrl+Shift+0".to_string() }
+fn default_browser_incognito() -> String { "Ctrl+Shift+I".to_string() }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[allow(dead_code)]
@@ -182,7 +204,7 @@ fn default_text_overlay_position() -> String {
     "bottom-right".to_string()
 }
 fn default_size() -> i32 {
-    5
+    3
 }
 fn default_mcq_a() -> String {
     "#00FFFF".to_string()

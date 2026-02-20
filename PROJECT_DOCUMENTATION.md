@@ -1,6 +1,6 @@
 # ShadowPrompt: Portable Stealth AI Architecture
 
-**Version:** 1.1.0
+**Version:** 1.5.0
 **Target OS:** Windows 10/11
 **Language:** Rust
 
@@ -92,7 +92,15 @@ ShadowPrompt detects identification/short-answer questions:
 2. **Visual Feedback:** **White** pixel (same as "No MCQ")
 3. **Text Overlay:** Answer text displayed at bottom-right (if enabled)
 
-### H. Hide Graphics
+### H. Scenario 6: Headless Browser Form Automation (New in v1.2.0)
+ShadowPrompt can autonomously read and answer Google Forms via a built-in headless browser engine.
+1. **Trigger Incognito (Optional):** Press `Browser Incognito Key` (`Ctrl + Shift + I`) to launch an isolated Chrome instance with remote debugging enabled perfect for form filling without impacting your primary session.
+2. **Trigger Full Execution:** Press `Execute Form Key` (`Ctrl + Shift + 9`). ShadowPrompt will connect to the active tab (or extract cookies if launched cold), extract the questions, query the LLM, and inject the answers.
+3. **Auto-Pagination:** By default, it will automatically click the "Next" button and continue filling subsequent pages up to a limit of 10 pages.
+4. **Trigger Single-Page:** Press `Execute Single Page Key` (`Ctrl + Shift + 7`) to answer only the current page and prevent the system from clicking "Next".
+5. **Abort:** Press `Abort Key` (`Ctrl + Shift + 0`) to panic-stop the automated browser process at any time.
+
+### I. Hide Graphics
 Press the **Hide Key** to toggle all visual indicators on/off.
 - Useful when needing to hide ShadowPrompt from view (e.g., professor approaches)
 - Press again to show indicators
@@ -154,6 +162,13 @@ mode = "default"
 wake_key = "Alt + Space"     # Enter OCR Selection Mode
 model_key = "Ctrl + Space"   # Send Clipboard to Model
 panic_key = "F8"              # Force Exit
+debug = false
+
+key_browser_pass = "Ctrl+Shift+8"
+key_browser_exec = "Ctrl+Shift+9"
+key_browser_exec_single = "Ctrl+Shift+7"
+key_browser_abort = "Ctrl+Shift+0"
+key_browser_incognito = "Ctrl+Shift+I"
 
 [rag]
 enabled = true
