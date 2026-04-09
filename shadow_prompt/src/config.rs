@@ -505,7 +505,7 @@ mod tests {
 
     #[test]
     fn test_example_toml_parses() {
-        let example = include_str!("../../config/config.example.toml");
+        let example = include_str!("../config/config.example.toml");
         // Replace placeholder API keys so parsing doesn't fail on validation
         let content = example
             .replace("YOUR_GROQ_API_KEY_HERE", "")
