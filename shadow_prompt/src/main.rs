@@ -23,7 +23,7 @@ use crate::config::Config;
 use crate::input::{InputManager, InputEvent};
 use crate::clipboard::ClipboardManager;
 use crate::ui::{UIManager, UICommand};
-use crate::llm::LlmClient;
+use crate::llm::{LlmClient, ModelUseCase};
 use crate::knowledge::{KnowledgeProvider, ContextBundle};
 use crate::capabilities::ModelCapabilities;
 use crate::utils::{parse_hex_color, parse_keys};
@@ -188,7 +188,7 @@ async fn run_app() -> anyhow::Result<()> {
                                                   If the image contains a graph, chart, diagram, or table, interpret it \
                                                   as part of the question context.";
                                     
-                                    match LlmClient::query_with_image(prompt, &image_b64, &config_clone).await {
+                                    match LlmClient::query_with_image(prompt, &image_b64, &config_clone, ModelUseCase::General).await {
                                         Ok(response) => {
                                             println!("[+] Vision query success");
                                             if let Err(e) = ClipboardManager::write(&response) {
@@ -202,7 +202,7 @@ async fn run_app() -> anyhow::Result<()> {
                                         Err(e) => {
                                             eprintln!("[-] Vision query failed: {}, falling back to OCR...", e);
                                             if let Ok(text) = crate::ocr::OcrManager::extract_from_screen(x, y, w, h).await {
-                                                match LlmClient::query(&text, &config_clone).await {
+                                                match LlmClient::query(&text, &config_clone, ModelUseCase::General).await {
                                                     Ok(response) => {
                                                         println!("[+] OCR fallback success");
                                                         if let Err(e) = ClipboardManager::write(&response) {
@@ -234,8 +234,8 @@ async fn run_app() -> anyhow::Result<()> {
                             match crate::ocr::OcrManager::extract_from_screen(x, y, w, h).await {
                                 Ok(text) => {
                                     println!("[+] OCR Success: \"{}\"", text.trim());
-                                    
-                                    match LlmClient::query(&text, &config_clone).await {
+
+                                    match LlmClient::query(&text, &config_clone, ModelUseCase::General).await {
                                         Ok(response) => {
                                             println!("[+] LLM query success");
                                             if let Err(e) = ClipboardManager::write(&response) {
@@ -329,7 +329,7 @@ async fn run_app() -> anyhow::Result<()> {
                             final_output.push_str(&format!("[System Warning: {}]\n\n", warning));
                         }
 
-                        match LlmClient::query(&augmented_prompt, &config_clone).await {
+                        match LlmClient::query(&augmented_prompt, &config_clone, ModelUseCase::General).await {
                              Ok(res) => {
                                  final_output.push_str(&res);
                              },
