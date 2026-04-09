@@ -48,6 +48,7 @@ impl InputManager {
             let callback = move |event: Event| {
                 match event.event_type {
                     EventType::KeyPress(key) => {
+                        let key = normalize_modifier(key);
                         pressed_keys.insert(key);
 
                         // Check combos
@@ -91,6 +92,7 @@ impl InputManager {
                         }
                     }
                     EventType::KeyRelease(key) => {
+                        let key = normalize_modifier(key);
                         pressed_keys.remove(&key);
                     }
                     EventType::MouseMove { x, y } => {
@@ -132,9 +134,48 @@ impl InputManager {
     }
 }
 
+/// Normalize right-side modifier keys to their left-side equivalents so that
+/// check_combo() works regardless of which physical key the user pressed.
+fn normalize_modifier(key: Key) -> Key {
+    match key {
+        Key::ControlRight => Key::ControlLeft,
+        Key::ShiftRight   => Key::ShiftLeft,
+        Key::AltGr        => Key::Alt,
+        other             => other,
+    }
+}
+
 fn check_combo(pressed: &HashSet<Key>, target: &[Key]) -> bool {
     if target.is_empty() {
         return false;
     }
     target.iter().all(|k| pressed.contains(k))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+    use rdev::Key;
+
+    #[test]
+    fn test_check_combo_left_ctrl() {
+        let mut pressed = HashSet::new();
+        pressed.insert(Key::ControlLeft);
+        pressed.insert(Key::KeyV);
+        let target = vec![Key::ControlLeft, Key::KeyV];
+        assert!(check_combo(&pressed, &target));
+    }
+
+    #[test]
+    fn test_check_combo_right_ctrl_not_matched_without_normalization() {
+        // Right ctrl is in pressed set, target expects ControlLeft — fails without normalization
+        let mut pressed = HashSet::new();
+        pressed.insert(Key::ControlRight);
+        pressed.insert(Key::KeyV);
+        let target = vec![Key::ControlLeft, Key::KeyV];
+        // Without normalization this would fail; after normalization it passes
+        // This test documents the EXPECTED post-fix behavior
+        assert!(!check_combo(&pressed, &target)); // still fails here — normalization is in the callback
+    }
 }
