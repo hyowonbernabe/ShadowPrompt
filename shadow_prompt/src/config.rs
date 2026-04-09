@@ -49,7 +49,6 @@ pub struct GeneralConfig {
     pub wake_key: String,
     pub model_key: String,
     pub panic_key: String,
-    pub use_rag: bool,
     #[serde(default)]
     pub debug: bool,
     #[serde(default)]
@@ -76,7 +75,6 @@ impl Default for GeneralConfig {
             wake_key: "Ctrl+Shift+Space".to_string(),
             model_key: "Ctrl+Shift+V".to_string(),
             panic_key: "Ctrl+Shift+F12".to_string(),
-            use_rag: true,
             debug: false,
             tos_accepted: false,
             tos_accepted_version: String::new(),
