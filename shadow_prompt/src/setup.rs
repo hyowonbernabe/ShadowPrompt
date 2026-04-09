@@ -855,6 +855,79 @@ impl SetupWizard {
 
         ui.add_space(16.0);
 
+        // Form Indicator Settings
+        ui.label(egui::RichText::new("Form Indicator").strong());
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(
+                "Independent pixel for Google Forms tasks. Hidden at startup, shows on first trigger.",
+            )
+            .color(egui::Color32::GRAY)
+            .small(),
+        );
+        ui.add_space(8.0);
+
+        ui.horizontal(|ui| {
+            ui.label("Position:");
+            egui::ComboBox::from_id_salt("form_indicator_position")
+                .selected_text(&self.config.visuals.form_indicator_position)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.config.visuals.form_indicator_position,
+                        "bottom-right".to_string(),
+                        "Bottom Right",
+                    );
+                    ui.selectable_value(
+                        &mut self.config.visuals.form_indicator_position,
+                        "bottom-left".to_string(),
+                        "Bottom Left",
+                    );
+                    ui.selectable_value(
+                        &mut self.config.visuals.form_indicator_position,
+                        "top-right".to_string(),
+                        "Top Right",
+                    );
+                    ui.selectable_value(
+                        &mut self.config.visuals.form_indicator_position,
+                        "top-left".to_string(),
+                        "Top Left",
+                    );
+                });
+        });
+        ui.add_space(4.0);
+
+        ui.horizontal(|ui| {
+            ui.label("Offset:");
+            ui.add(egui::Slider::new(&mut self.config.visuals.form_indicator_offset, 0..=50).text("px"));
+        });
+        ui.add_space(4.0);
+
+        ui.horizontal(|ui| {
+            ui.label("X Axis:");
+            ui.add(egui::Slider::new(&mut self.config.visuals.form_indicator_x_axis, -100..=100).text("px"));
+        });
+        ui.add_space(4.0);
+
+        ui.horizontal(|ui| {
+            ui.label("Y Axis:");
+            ui.add(egui::Slider::new(&mut self.config.visuals.form_indicator_y_axis, -100..=100).text("px"));
+        });
+        ui.add_space(8.0);
+
+        ui.label(egui::RichText::new("Form State Colors").strong());
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new("Running → uses Processing color  •  Done → uses Ready color")
+                .color(egui::Color32::GRAY)
+                .small(),
+        );
+        ui.add_space(4.0);
+        color_picker(ui, "Failed:", &mut self.config.visuals.form_color_failed);
+        ui.add_space(4.0);
+        color_picker(ui, "Aborted:", &mut self.config.visuals.form_color_aborted);
+
+        ui.add_space(16.0);
+
         // Text Overlay Settings
         ui.label(egui::RichText::new("Text Answer Display").strong());
         ui.add_space(4.0);
