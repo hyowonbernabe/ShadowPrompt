@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn test_extractor_js_handles_dropdown() {
-        assert!(EXTRACTOR_JS.contains("dropdown"));
+        assert!(EXTRACTOR_JS.contains("'dropdown'") || EXTRACTOR_JS.contains("\"dropdown\""));
     }
 
     #[test]
