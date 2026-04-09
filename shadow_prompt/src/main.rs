@@ -24,7 +24,7 @@ use crate::input::{InputManager, InputEvent};
 use crate::clipboard::ClipboardManager;
 use crate::ui::{UIManager, UICommand};
 use crate::llm::LlmClient;
-use crate::knowledge::KnowledgeProvider;
+use crate::knowledge::{KnowledgeProvider, ContextBundle};
 use crate::capabilities::ModelCapabilities;
 use crate::utils::{parse_hex_color, parse_keys};
 use std::sync::mpsc;
@@ -184,7 +184,9 @@ async fn run_app() -> anyhow::Result<()> {
                             
                             match crate::ocr::OcrManager::capture_as_base64(x, y, w, h).await {
                                 Ok(image_b64) => {
-                                    let prompt = "Analyze the image. If there are questions, answer them directly and concisely. Provide all correct options if it is a multiple-choice question. If it is a matching or matrix question, clearly provide all pairings and answers.";
+                                    let prompt = "Read the question in this image exactly as written and answer it. \
+                                                  If the image contains a graph, chart, diagram, or table, interpret it \
+                                                  as part of the question context.";
                                     
                                     match LlmClient::query_with_image(prompt, &image_b64, &config_clone).await {
                                         Ok(response) => {
@@ -288,21 +290,36 @@ async fn run_app() -> anyhow::Result<()> {
 
 
                         // 2. Gather Context (Search/RAG)
-                        let (context, warnings) = match kp_arc.gather_context(&prompt, &config_clone).await {
-                             Ok((ctx, warns)) => (ctx, warns),
-                             Err(e) => {
-                                 let err_msg = format!("Knowledge System Error: {}", e);
-                                 error!("{}", err_msg);
-                                 (String::new(), vec![err_msg])
-                             }
+                        let bundle = match kp_arc.gather_context(&prompt, &config_clone).await {
+                            Ok(b) => b,
+                            Err(e) => {
+                                let err_msg = format!("Knowledge System Error: {}", e);
+                                error!("{}", err_msg);
+                                ContextBundle {
+                                    web: String::new(),
+                                    local: String::new(),
+                                    warnings: vec![err_msg],
+                                }
+                            }
                         };
-                        
-                        let augmented_prompt = if !context.is_empty() {
-                            info!("[*] Context found. Augmenting prompt.");
-                            format!("Context:\n{}\nQuestion:\n{}", context, prompt)
-                        } else {
-                            prompt.clone()
-                        };
+
+                        let mut augmented_prompt = String::new();
+                        if !bundle.web.is_empty() {
+                            info!("[*] Web context found. Augmenting prompt.");
+                            augmented_prompt.push_str("[WEB SEARCH RESULTS]\n");
+                            augmented_prompt.push_str(&bundle.web);
+                            augmented_prompt.push_str("\n\n");
+                        }
+                        if !bundle.local.is_empty() {
+                            info!("[*] Local knowledge found. Augmenting prompt.");
+                            augmented_prompt.push_str("[LOCAL KNOWLEDGE]\n");
+                            augmented_prompt.push_str(&bundle.local);
+                            augmented_prompt.push_str("\n\n");
+                        }
+                        augmented_prompt.push_str("[QUESTION]\n");
+                        augmented_prompt.push_str(&prompt);
+
+                        let warnings = bundle.warnings;
 
                         // 3. Query LLM
                         let mut final_output = String::new();
