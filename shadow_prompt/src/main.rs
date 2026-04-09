@@ -387,6 +387,8 @@ async fn run_app() -> anyhow::Result<()> {
                     println!("[!] EVENT: Browser Abort Key Pressed");
                     if let Some(handle) = active_browser_task.take() {
                         handle.abort();
+                        let aborted_color = parse_hex_color(&config.visuals.form_color_aborted);
+                        let _ = ui_tx.send(UICommand::SetFormColor(aborted_color));
                         if config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("🛑 Headless Browser Aborted.".to_string())); }
                     } else {
                         if config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("ℹ️ No active browser task to abort.".to_string())); }
@@ -403,17 +405,24 @@ async fn run_app() -> anyhow::Result<()> {
                     };
 
                     if config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("🧠 Initializing browser...".to_string())); }
-                    
+                    // Set form indicator to running/processing state
+                    let form_run_color = parse_hex_color(&config.visuals.color_processing);
+                    let _ = ui_tx.send(UICommand::SetFormColor(form_run_color));
+
                     let p_clone = stored_password.clone();
                     let c_clone = std::sync::Arc::new(config.clone());
                     let tx_clone = ui_tx.clone();
                     let debug_mode = config.general.debug;
                     
                     active_browser_task = Some(tokio::spawn(async move {
-                        if let Err(e) = crate::browser::execute_form_flow(url.as_deref(), p_clone.as_deref(), c_clone, tx_clone.clone(), is_auto).await {
+                        if let Err(e) = crate::browser::execute_form_flow(url.as_deref(), p_clone.as_deref(), c_clone.clone(), tx_clone.clone(), is_auto).await {
                             if debug_mode { let _ = tx_clone.send(UICommand::SetOverlayText(format!("❌ Browser Error: {}", e))); }
+                            let failed_color = parse_hex_color(&c_clone.visuals.form_color_failed);
+                            let _ = tx_clone.send(UICommand::SetFormColor(failed_color));
                         } else {
                             if debug_mode { let _ = tx_clone.send(UICommand::SetOverlayText("✅ Answers Auto-saved.".to_string())); }
+                            let done_color = parse_hex_color(&c_clone.visuals.ready_color);
+                            let _ = tx_clone.send(UICommand::SetFormColor(done_color));
                         }
                     }));
                 },
