@@ -27,6 +27,8 @@ pub enum UICommand {
     HideToggle,
     SetOverlayText(String),
     ClearOverlayText,
+    SetNotificationText(String),
+    ClearNotificationText,
     UpdateOverlayConfig(i32, u8, u8),
     SetFormColor(u32),
 }
@@ -34,6 +36,7 @@ pub enum UICommand {
 static mut CURRENT_COLOR: u32 = 0x0000FF00;
 static mut IS_HIDDEN: bool = false;
 static mut OVERLAY_TEXT: String = String::new();
+static mut NOTIFICATION_TEXT: String = String::new();
 static mut OVERLAY_FONT_SIZE: i32 = 16;
 static mut OVERLAY_BG_OPACITY: u8 = 200;
 static mut OVERLAY_TEXT_OPACITY: u8 = 255;
@@ -98,6 +101,18 @@ impl UIManager {
                     ..Default::default()
                 };
                 RegisterClassW(&wc_overlay);
+
+                // 2c. Notification Overlay Window Class
+                let notification_class_name = w!("ShadowPromptNotification");
+                let wc_notification = WNDCLASSW {
+                    hCursor: HCURSOR::default(),
+                    hIcon: HICON::default(),
+                    lpszClassName: notification_class_name,
+                    hInstance: instance,
+                    lpfnWndProc: Some(notification_wnd_proc),
+                    ..Default::default()
+                };
+                RegisterClassW(&wc_notification);
 
                 // Calculate Position
                 let screen_w = GetSystemMetrics(SM_CXSCREEN);
@@ -245,6 +260,23 @@ impl UIManager {
                 )
                 .unwrap_or(HWND::default());
 
+                // Create Notification Window (Hidden initially, fixed at bottom-left)
+                let notif_offset = 20;
+                let hwnd_notification = CreateWindowExW(
+                    WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW,
+                    notification_class_name,
+                    w!("NotificationOverlay"),
+                    WS_POPUP,
+                    notif_offset,
+                    screen_h - OVERLAY_FONT_SIZE - notif_offset,
+                    100, 
+                    OVERLAY_FONT_SIZE,
+                    HWND::default(),
+                    HMENU::default(),
+                    instance,
+                    None,
+                ).unwrap_or(HWND::default());
+
                 if hwnd.0.is_null() {
                     return;
                 }
@@ -259,6 +291,9 @@ impl UIManager {
 
                 // Opacity for Text Overlay - use color key for transparent background
                 let _ = SetLayeredWindowAttributes(hwnd_overlay, COLORREF(0), 255, LWA_COLORKEY);
+
+                // Opacity for Notification Overlay
+                let _ = SetLayeredWindowAttributes(hwnd_notification, COLORREF(0), 255, LWA_COLORKEY);
 
                 // Opacity for Form Indicator (fully opaque)
                 let _ = SetLayeredWindowAttributes(hwnd_form, COLORREF(0), 255, LWA_ALPHA);
@@ -303,6 +338,7 @@ impl UIManager {
                                 if IS_HIDDEN {
                                     let _ = ShowWindow(hwnd, SW_HIDE);
                                     let _ = ShowWindow(hwnd_overlay, SW_HIDE);
+                                    let _ = ShowWindow(hwnd_notification, SW_HIDE);
                                     let _ = ShowWindow(hwnd_form, SW_HIDE);
                                 } else {
                                     let _ = ShowWindow(hwnd, SW_SHOW);
@@ -319,6 +355,15 @@ impl UIManager {
                             UICommand::ClearOverlayText => {
                                 OVERLAY_TEXT.clear();
                                 let _ = ShowWindow(hwnd_overlay, SW_HIDE);
+                            }
+                            UICommand::SetNotificationText(text) => {
+                                NOTIFICATION_TEXT = text;
+                                let _ = ShowWindow(hwnd_notification, SW_SHOW);
+                                let _ = InvalidateRect(hwnd_notification, None, false);
+                            }
+                            UICommand::ClearNotificationText => {
+                                NOTIFICATION_TEXT.clear();
+                                let _ = ShowWindow(hwnd_notification, SW_HIDE);
                             }
                             UICommand::UpdateOverlayConfig(font_size, bg_opacity, text_opacity) => {
                                 OVERLAY_FONT_SIZE = font_size;
@@ -505,5 +550,87 @@ unsafe extern "system" fn overlay_wnd_proc(
             LRESULT(1)
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
+#[allow(static_mut_refs)]
+unsafe extern "system" fn notification_wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    match msg {
+        WM_PAINT => {
+            use windows::Win32::Graphics::Gdi::{
+                BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, PAINTSTRUCT,
+            };
+            let mut ps = PAINTSTRUCT::default();
+            let hdc = BeginPaint(hwnd, &mut ps);
+
+            // Fill with black (transparent due to color key)
+            let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0));
+            FillRect(hdc, &ps.rcPaint, brush);
+            let _ = DeleteObject(brush);
+
+            // Draw text
+            if !NOTIFICATION_TEXT.is_empty() {
+                use windows::core::PCWSTR;
+                use windows::Win32::Foundation::SIZE;
+                use windows::Win32::Graphics::Gdi::{
+                    CreateFontW, DrawTextW, GetTextExtentPoint32W, SelectObject, SetBkMode,
+                    SetTextColor, DT_LEFT, DT_NOCLIP, TRANSPARENT,
+                };
+                use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SET_WINDOW_POS_FLAGS};
+
+                let font_name: Vec<u16> = "Arial\0".encode_utf16().collect();
+                let font = CreateFontW(
+                    OVERLAY_FONT_SIZE, 0, 0, 0, 700, 0, 0, 0, 0, 0, 0, 0, 0,
+                    PCWSTR::from_raw(font_name.as_ptr()),
+                );
+
+                let _ = SelectObject(hdc, font);
+                let _ = SetBkMode(hdc, TRANSPARENT);
+                // Yellow color for cycle notifications to distinct it from bright white answers
+                let _ = SetTextColor(hdc, windows::Win32::Foundation::COLORREF(0x0000FFFF));
+
+                let text: Vec<u16> = NOTIFICATION_TEXT.encode_utf16().collect();
+
+                let mut size = SIZE::default();
+                let text_slice: &[u16] = &text;
+                let _ = GetTextExtentPoint32W(hdc, text_slice, &mut size);
+
+                let width = size.cx;
+                let height = OVERLAY_FONT_SIZE;
+
+                let _ = SetWindowPos(
+                    hwnd,
+                    crate::ui::HWND_TOPMOST,
+                    0,
+                    0,
+                    width.max(10),
+                    height.max(1),
+                    SET_WINDOW_POS_FLAGS(0),
+                );
+
+                let mut rect = ps.rcPaint;
+                rect.left = 0;
+                rect.top = 0;
+
+                let mut text_with_null: Vec<u16> = NOTIFICATION_TEXT
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect();
+
+                let _ = DrawTextW(hdc, &mut text_with_null, &mut rect, DT_LEFT | DT_NOCLIP);
+
+                let _ = DeleteObject(font);
+            }
+
+            let _ = EndPaint(hwnd, &ps);
+            LRESULT(0)
+        }
+        WM_ERASEBKGND => LRESULT(1),
+        _ => windows::Win32::UI::WindowsAndMessaging::DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }

@@ -459,12 +459,12 @@ async fn run_app() -> anyhow::Result<()> {
                     provider_idx = (provider_idx + 1) % providers.len();
                     dynamic_config.models.provider = providers[provider_idx].to_string();
                     let text = format!("Provider: {}", dynamic_config.models.provider.to_uppercase());
-                    let _ = ui_tx.send(UICommand::SetOverlayText(text));
+                    let _ = ui_tx.send(UICommand::SetNotificationText(text));
                     
                     let ui_tx_clone = ui_tx.clone();
                     tokio::spawn(async move {
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        let _ = ui_tx_clone.send(UICommand::ClearOverlayText);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                        let _ = ui_tx_clone.send(UICommand::ClearNotificationText);
                     });
                 },
                 InputEvent::CycleModelGeneral => {
@@ -510,11 +510,11 @@ async fn run_app() -> anyhow::Result<()> {
                     }
                     
                     if !text.is_empty() {
-                        let _ = ui_tx.send(UICommand::SetOverlayText(text));
+                        let _ = ui_tx.send(UICommand::SetNotificationText(text));
                         let ui_tx_clone = ui_tx.clone();
                         tokio::spawn(async move {
-                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                            let _ = ui_tx_clone.send(UICommand::ClearOverlayText);
+                            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                            let _ = ui_tx_clone.send(UICommand::ClearNotificationText);
                         });
                     }
                 },
@@ -566,11 +566,11 @@ async fn run_app() -> anyhow::Result<()> {
                     }
                     
                     if !text.is_empty() {
-                        let _ = ui_tx.send(UICommand::SetOverlayText(text));
+                        let _ = ui_tx.send(UICommand::SetNotificationText(text));
                         let ui_tx_clone = ui_tx.clone();
                         tokio::spawn(async move {
-                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                            let _ = ui_tx_clone.send(UICommand::ClearOverlayText);
+                            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                            let _ = ui_tx_clone.send(UICommand::ClearNotificationText);
                         });
                     }
                 }
