@@ -122,6 +122,14 @@ pub struct SetupWizard {
     download_rx: Option<Receiver<(f32, String)>>,
     download_success: bool,
 
+    // Test connection state (one channel per provider)
+    groq_test_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
+    groq_test_result: Option<Result<String, String>>,
+    openrouter_test_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
+    openrouter_test_result: Option<Result<String, String>>,
+    ollama_test_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
+    ollama_test_result: Option<Result<String, String>>,
+
     finished: bool,
 }
 
@@ -150,6 +158,12 @@ impl SetupWizard {
             download_status: "Ready to download.".to_string(),
             download_rx: None,
             download_success: false,
+            groq_test_rx: None,
+            groq_test_result: None,
+            openrouter_test_rx: None,
+            openrouter_test_result: None,
+            ollama_test_rx: None,
+            ollama_test_result: None,
             finished: false,
         }
     }
@@ -263,6 +277,26 @@ impl eframe::App for SetupWizard {
             }
         }
 
+        // Poll test connection receivers
+        if let Some(rx) = &self.groq_test_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.groq_test_result = Some(result);
+                self.groq_test_rx = None;
+            }
+        }
+        if let Some(rx) = &self.openrouter_test_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.openrouter_test_result = Some(result);
+                self.openrouter_test_rx = None;
+            }
+        }
+        if let Some(rx) = &self.ollama_test_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.ollama_test_result = Some(result);
+                self.ollama_test_rx = None;
+            }
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             // --- Header ---
             ui.vertical_centered(|ui| {
@@ -351,10 +385,18 @@ impl eframe::App for SetupWizard {
         });
 
         // Request repaint for animations
-        if self.downloading || self.wake_recorder.is_recording()
-            || self.model_recorder.is_recording() || self.panic_recorder.is_recording()
-            || self.hide_recorder.is_recording() || self.browser_pass_recorder.is_recording()
-            || self.browser_exec_recorder.is_recording() || self.browser_abort_recorder.is_recording()
+        if self.downloading
+            || self.groq_test_rx.is_some()
+            || self.openrouter_test_rx.is_some()
+            || self.ollama_test_rx.is_some()
+            || self.wake_recorder.is_recording()
+            || self.model_recorder.is_recording()
+            || self.panic_recorder.is_recording()
+            || self.hide_recorder.is_recording()
+            || self.browser_pass_recorder.is_recording()
+            || self.browser_exec_recorder.is_recording()
+            || self.browser_exec_single_recorder.is_recording()
+            || self.browser_abort_recorder.is_recording()
             || self.browser_incognito_recorder.is_recording()
         {
             ctx.request_repaint();
@@ -450,17 +492,26 @@ impl SetupWizard {
                 // Test Connection button
                 let groq_enabled = self.provider_state.groq_enabled;
                 if groq_enabled {
-                    if ui.button("Test Groq Connection").clicked() {
+                    let testing = self.groq_test_rx.is_some();
+                    if ui.add_enabled(!testing, egui::Button::new("Test Groq Connection")).clicked() {
+                        self.groq_test_result = None;
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        self.groq_test_rx = Some(rx);
                         let config = self.config.clone();
                         std::thread::spawn(move || {
                             let result = test_provider_sync("groq", &config);
-                            match &result {
-                                Ok(msg) => log::info!("Groq test: {}", msg),
-                                Err(e) => log::error!("Groq test failed: {}", e),
-                            }
+                            let _ = tx.send(result);
                         });
                     }
-                    ui.label(egui::RichText::new("(Check logs for result)").color(egui::Color32::GRAY).small());
+                    if testing {
+                        ui.spinner();
+                    }
+                    if let Some(ref result) = self.groq_test_result {
+                        match result {
+                            Ok(msg) => { ui.colored_label(egui::Color32::GREEN, format!("✓ {}", msg)); }
+                            Err(e)  => { ui.colored_label(egui::Color32::RED,   format!("✗ {}", e)); }
+                        }
+                    }
                 }
             }
         });
@@ -487,17 +538,26 @@ impl SetupWizard {
                     ui.add(egui::TextEdit::singleline(&mut or.model_id).desired_width(200.0));
                 });
                 ui.add_space(4.0);
-                if ui.button("Test OpenRouter Connection").clicked() {
+                let testing = self.openrouter_test_rx.is_some();
+                if ui.add_enabled(!testing, egui::Button::new("Test OpenRouter Connection")).clicked() {
+                    self.openrouter_test_result = None;
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    self.openrouter_test_rx = Some(rx);
                     let config = self.config.clone();
                     std::thread::spawn(move || {
                         let result = test_provider_sync("openrouter", &config);
-                        match &result {
-                            Ok(msg) => log::info!("OpenRouter test: {}", msg),
-                            Err(e) => log::error!("OpenRouter test failed: {}", e),
-                        }
+                        let _ = tx.send(result);
                     });
                 }
-                ui.label(egui::RichText::new("(Check logs for result)").color(egui::Color32::GRAY).small());
+                if testing {
+                    ui.spinner();
+                }
+                if let Some(ref result) = self.openrouter_test_result {
+                    match result {
+                        Ok(msg) => { ui.colored_label(egui::Color32::GREEN, format!("✓ {}", msg)); }
+                        Err(e)  => { ui.colored_label(egui::Color32::RED,   format!("✗ {}", e)); }
+                    }
+                }
             }
         });
 
@@ -524,17 +584,26 @@ impl SetupWizard {
                     ui.add(egui::TextEdit::singleline(&mut ol.model_id).desired_width(150.0));
                 });
                 ui.add_space(4.0);
-                if ui.button("Test Ollama Connection").clicked() {
+                let testing = self.ollama_test_rx.is_some();
+                if ui.add_enabled(!testing, egui::Button::new("Test Ollama Connection")).clicked() {
+                    self.ollama_test_result = None;
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    self.ollama_test_rx = Some(rx);
                     let config = self.config.clone();
                     std::thread::spawn(move || {
                         let result = test_provider_sync("ollama", &config);
-                        match &result {
-                            Ok(msg) => log::info!("Ollama test: {}", msg),
-                            Err(e) => log::error!("Ollama test failed: {}", e),
-                        }
+                        let _ = tx.send(result);
                     });
                 }
-                ui.label(egui::RichText::new("(Check logs for result)").color(egui::Color32::GRAY).small());
+                if testing {
+                    ui.spinner();
+                }
+                if let Some(ref result) = self.ollama_test_result {
+                    match result {
+                        Ok(msg) => { ui.colored_label(egui::Color32::GREEN, format!("✓ {}", msg)); }
+                        Err(e)  => { ui.colored_label(egui::Color32::RED,   format!("✗ {}", e)); }
+                    }
+                }
             }
         });
 
