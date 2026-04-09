@@ -113,6 +113,31 @@ text_overlay_text_opacity = 255
 # Hotkey to toggle the overlay and indicator pixel visibility
 hide_key = "Ctrl+Shift+H"
 
+# --- Form (Google Forms) Indicator ---
+# An independent pixel that shows the status of the current Google Forms task.
+# It is hidden at startup and only appears when a form task is triggered.
+#
+# Running state uses color_processing above.
+# Done state uses ready_color above.
+# The two colors below are unique to the form indicator.
+
+# Corner where the form indicator appears (independent of the main indicator)
+# Options: "top-right", "top-left", "bottom-right", "bottom-left"
+form_indicator_position = "bottom-right"
+
+# Offset from the corner in pixels
+form_indicator_offset = 0
+
+# Manual X/Y override (0 = use position + offset)
+form_indicator_x_axis = 0
+form_indicator_y_axis = 0
+
+# Color when the form task encountered an error
+form_color_failed = "#FF00FF"   # Magenta
+
+# Color when the form task was aborted by the user
+form_color_aborted = "#FFA500"  # Orange
+
 [models]
 # Which provider to use for OCR / clipboard queries.
 # Options: "groq", "openrouter", "ollama", "auto"

@@ -160,6 +160,20 @@ pub struct VisualsConfig {
 
     #[serde(default = "default_hide_key")]
     pub hide_key: String,
+
+    // --- Form (Google Forms) Indicator ---
+    #[serde(default = "default_form_indicator_position")]
+    pub form_indicator_position: String,
+    #[serde(default)]
+    pub form_indicator_offset: i32,
+    #[serde(default)]
+    pub form_indicator_x_axis: i32,
+    #[serde(default)]
+    pub form_indicator_y_axis: i32,
+    #[serde(default = "default_form_color_failed")]
+    pub form_color_failed: String,
+    #[serde(default = "default_form_color_aborted")]
+    pub form_color_aborted: String,
 }
 
 impl Default for VisualsConfig {
@@ -190,6 +204,12 @@ impl Default for VisualsConfig {
             text_overlay_x_axis: 0,
             text_overlay_y_axis: 0,
             hide_key: default_hide_key(),
+            form_indicator_position: default_form_indicator_position(),
+            form_indicator_offset: 0,
+            form_indicator_x_axis: 0,
+            form_indicator_y_axis: 0,
+            form_color_failed: default_form_color_failed(),
+            form_color_aborted: default_form_color_aborted(),
         }
     }
 }
@@ -263,6 +283,18 @@ fn default_text_overlay_text_opacity() -> u8 {
 
 fn default_hide_key() -> String {
     "Ctrl+Shift+H".to_string()
+}
+
+fn default_form_indicator_position() -> String {
+    "bottom-right".to_string()
+}
+
+fn default_form_color_failed() -> String {
+    "#FF00FF".to_string() // Magenta
+}
+
+fn default_form_color_aborted() -> String {
+    "#FFA500".to_string() // Orange
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -531,12 +563,56 @@ mod tests {
         assert_eq!(config.general.panic_key, "Ctrl+Shift+F12");
         assert_eq!(config.general.key_browser_pass, "Ctrl+Shift+8");
         assert_eq!(config.visuals.hide_key, "Ctrl+Shift+H");
+        assert_eq!(config.visuals.form_indicator_position, "bottom-right");
+        assert_eq!(config.visuals.form_color_failed, "#FF00FF");
+        assert_eq!(config.visuals.form_color_aborted, "#FFA500");
         assert_eq!(config.http.connect_timeout_secs, 10);
         assert!(config.search.serper_api_key.is_none());
         assert_eq!(config.models.browser_provider, "");
         assert_eq!(config.models.groq.as_ref().unwrap().browser_model_id, "");
         assert_eq!(config.models.openrouter.as_ref().unwrap().browser_model_id, "");
         assert_eq!(config.models.ollama.as_ref().unwrap().browser_model_id, "");
+    }
+
+    #[test]
+    fn test_form_indicator_config_defaults() {
+        // Old config without form indicator fields — must parse and default correctly.
+        let toml = r##"
+[general]
+mode = "stealth"
+wake_key = "Ctrl+Shift+Space"
+model_key = "Ctrl+Shift+V"
+panic_key = "Ctrl+Shift+F12"
+
+[visuals]
+indicator_color = "#FF0000"
+ready_color = "#00FF00"
+cursor_change = false
+
+[models]
+provider = "auto"
+
+[search]
+enabled = true
+max_results = 3
+
+[rag]
+enabled = true
+knowledge_path = "knowledge"
+index_path = "data/rag_index"
+max_results = 3
+min_score = 0.5
+
+[safety]
+daily_spend_limit_usd = 0.5
+"##;
+        let config: Config = toml::from_str(toml).expect("should parse without form indicator fields");
+        assert_eq!(config.visuals.form_indicator_position, "bottom-right");
+        assert_eq!(config.visuals.form_indicator_offset, 0);
+        assert_eq!(config.visuals.form_indicator_x_axis, 0);
+        assert_eq!(config.visuals.form_indicator_y_axis, 0);
+        assert_eq!(config.visuals.form_color_failed, "#FF00FF");
+        assert_eq!(config.visuals.form_color_aborted, "#FFA500");
     }
 
     #[test]
