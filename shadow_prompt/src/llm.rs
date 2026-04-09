@@ -5,42 +5,71 @@ use crate::config::Config;
 use std::time::Duration;
 use tokio::time::sleep;
 
+/// Selects which provider + model ID to use from config.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ModelUseCase {
+    /// OCR / clipboard queries — uses `config.models.provider` + `model_id`
+    General,
+    /// Google Forms automation — uses `config.models.browser_provider` + `browser_model_id`
+    Browser,
+}
+
 pub struct LlmClient;
 
 impl LlmClient {
-    pub async fn query(prompt: &str, config: &Config) -> Result<String> {
+    fn resolve_model_id<'a>(model_id: &'a str, browser_model_id: &'a str, use_case: &ModelUseCase) -> &'a str {
+        match use_case {
+            ModelUseCase::Browser if !browser_model_id.is_empty() => browser_model_id,
+            _ => model_id,
+        }
+    }
+
+    fn resolve_provider<'a>(provider: &'a str, browser_provider: &'a str, use_case: &ModelUseCase) -> &'a str {
+        match use_case {
+            ModelUseCase::Browser if !browser_provider.is_empty() => browser_provider,
+            _ => provider,
+        }
+    }
+
+    pub async fn query(prompt: &str, config: &Config, use_case: ModelUseCase) -> Result<String> {
         let connect_timeout = Duration::from_secs(config.http.connect_timeout_secs);
         let read_timeout = Duration::from_secs(config.http.read_timeout_secs);
-        
+
         let client = reqwest::Client::builder()
             .connect_timeout(connect_timeout)
             .timeout(read_timeout)
             .build()?;
-        
-        match config.models.provider.as_str() {
-            "groq" => Self::query_with_retry_groq(&client, prompt, config).await,
-            "openrouter" => Self::query_with_retry_openrouter(&client, prompt, config).await,
-            "ollama" => Self::query_with_retry_ollama(&client, prompt, config).await,
-            "auto" => Self::query_with_fallback(&client, prompt, config).await,
+
+        let provider = Self::resolve_provider(
+            &config.models.provider,
+            &config.models.browser_provider,
+            &use_case,
+        );
+
+        match provider {
+            "groq" => Self::query_with_retry_groq(&client, prompt, config, &use_case).await,
+            "openrouter" => Self::query_with_retry_openrouter(&client, prompt, config, &use_case).await,
+            "ollama" => Self::query_with_retry_ollama(&client, prompt, config, &use_case).await,
+            "auto" => Self::query_with_fallback(&client, prompt, config, &use_case).await,
             "github_copilot" => anyhow::bail!("GitHub Copilot provider not fully implemented yet"),
-            _ => anyhow::bail!("Unknown provider: {}", config.models.provider),
+            _ => anyhow::bail!("Unknown provider: {}", provider),
         }
     }
 
     /// Retry wrapper for Groq
-    async fn query_with_retry_groq(client: &Client, prompt: &str, config: &Config) -> Result<String> {
+    async fn query_with_retry_groq(client: &Client, prompt: &str, config: &Config, use_case: &ModelUseCase) -> Result<String> {
         let max_retries = 3;
         let base_delay = Duration::from_secs(1);
-        
+
         let mut last_error = None;
-        
+
         for attempt in 0..max_retries {
-            match Self::query_groq(client, prompt, config).await {
+            match Self::query_groq(client, prompt, config, use_case).await {
                 Ok(result) => return Ok(result),
                 Err(e) => {
                     last_error = Some(e);
                     let error_str = last_error.as_ref().unwrap().to_string().to_lowercase();
-                    
+
                     if Self::is_retryable_error(&error_str) && attempt < max_retries - 1 {
                         let delay = base_delay * 2u32.pow(attempt as u32);
                         log::warn!("Groq attempt {} failed, retrying in {:?}...", attempt + 1, delay);
@@ -49,24 +78,24 @@ impl LlmClient {
                 }
             }
         }
-        
+
         Err(last_error.unwrap_or_else(|| anyhow::anyhow!("All retries failed")))
     }
 
     /// Retry wrapper for OpenRouter
-    async fn query_with_retry_openrouter(client: &Client, prompt: &str, config: &Config) -> Result<String> {
+    async fn query_with_retry_openrouter(client: &Client, prompt: &str, config: &Config, use_case: &ModelUseCase) -> Result<String> {
         let max_retries = 3;
         let base_delay = Duration::from_secs(1);
-        
+
         let mut last_error = None;
-        
+
         for attempt in 0..max_retries {
-            match Self::query_openrouter(client, prompt, config).await {
+            match Self::query_openrouter(client, prompt, config, use_case).await {
                 Ok(result) => return Ok(result),
                 Err(e) => {
                     last_error = Some(e);
                     let error_str = last_error.as_ref().unwrap().to_string().to_lowercase();
-                    
+
                     if Self::is_retryable_error(&error_str) && attempt < max_retries - 1 {
                         let delay = base_delay * 2u32.pow(attempt as u32);
                         log::warn!("OpenRouter attempt {} failed, retrying in {:?}...", attempt + 1, delay);
@@ -75,24 +104,24 @@ impl LlmClient {
                 }
             }
         }
-        
+
         Err(last_error.unwrap_or_else(|| anyhow::anyhow!("All retries failed")))
     }
 
     /// Retry wrapper for Ollama
-    async fn query_with_retry_ollama(client: &Client, prompt: &str, config: &Config) -> Result<String> {
+    async fn query_with_retry_ollama(client: &Client, prompt: &str, config: &Config, use_case: &ModelUseCase) -> Result<String> {
         let max_retries = 3;
         let base_delay = Duration::from_secs(1);
-        
+
         let mut last_error = None;
-        
+
         for attempt in 0..max_retries {
-            match Self::query_ollama(client, prompt, config).await {
+            match Self::query_ollama(client, prompt, config, use_case).await {
                 Ok(result) => return Ok(result),
                 Err(e) => {
                     last_error = Some(e);
                     let error_str = last_error.as_ref().unwrap().to_string().to_lowercase();
-                    
+
                     if Self::is_retryable_error(&error_str) && attempt < max_retries - 1 {
                         let delay = base_delay * 2u32.pow(attempt as u32);
                         log::warn!("Ollama attempt {} failed, retrying in {:?}...", attempt + 1, delay);
@@ -101,13 +130,13 @@ impl LlmClient {
                 }
             }
         }
-        
+
         Err(last_error.unwrap_or_else(|| anyhow::anyhow!("All retries failed")))
     }
 
     /// Check if an error is retryable (transient failures)
     fn is_retryable_error(error_str: &str) -> bool {
-        error_str.contains("429") 
+        error_str.contains("429")
             || error_str.contains("rate limit")
             || error_str.contains("too many requests")
             || error_str.contains("quota exceeded")
@@ -121,11 +150,11 @@ impl LlmClient {
 
     /// Auto-LLM Selection with fallback chain: Groq -> OpenRouter -> Ollama
     /// Each provider is tried with retry logic before falling back
-    async fn query_with_fallback(client: &Client, prompt: &str, config: &Config) -> Result<String> {
+    async fn query_with_fallback(client: &Client, prompt: &str, config: &Config, use_case: &ModelUseCase) -> Result<String> {
         // Priority 1: Groq (fastest, free tier)
         if let Some(groq) = &config.models.groq {
             if !groq.api_key.is_empty() && groq.api_key != "your_groq_api_key_here" {
-                match Self::query_with_retry_groq(client, prompt, config).await {
+                match Self::query_with_retry_groq(client, prompt, config, use_case).await {
                     Ok(res) => return Ok(res),
                     Err(e) => {
                         let error_str = e.to_string().to_lowercase();
@@ -138,11 +167,11 @@ impl LlmClient {
                 }
             }
         }
-        
+
         // Priority 2: OpenRouter (wider model selection)
         if let Some(or) = &config.models.openrouter {
             if !or.api_key.is_empty() && or.api_key != "your_openrouter_api_key_here" {
-                match Self::query_with_retry_openrouter(client, prompt, config).await {
+                match Self::query_with_retry_openrouter(client, prompt, config, use_case).await {
                     Ok(res) => return Ok(res),
                     Err(e) => {
                         let error_str = e.to_string().to_lowercase();
@@ -155,28 +184,29 @@ impl LlmClient {
                 }
             }
         }
-        
+
         // Priority 3: Ollama (local, no rate limits)
         if config.models.ollama.is_some() {
-            match Self::query_with_retry_ollama(client, prompt, config).await {
+            match Self::query_with_retry_ollama(client, prompt, config, use_case).await {
                 Ok(res) => return Ok(res),
                 Err(e) => {
                     log::error!("Ollama failed: {}", e);
                 }
             }
         }
-        
+
         anyhow::bail!("All providers failed. Please check your API keys and network connection.")
     }
 
-    async fn query_groq(client: &Client, prompt: &str, config: &Config) -> Result<String> {
+    async fn query_groq(client: &Client, prompt: &str, config: &Config, use_case: &ModelUseCase) -> Result<String> {
         let groq_config = config.models.groq.as_ref()
             .context("Groq config missing")?;
 
+        let model_id = Self::resolve_model_id(&groq_config.model_id, &groq_config.browser_model_id, use_case);
         let system_prompt = Self::load_system_prompt();
 
         let body = json!({
-            "model": groq_config.model_id,
+            "model": model_id,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
@@ -206,14 +236,15 @@ impl LlmClient {
             .unwrap_or_else(|_| "You are a concise assistant.".to_string())
     }
 
-    async fn query_openrouter(client: &Client, prompt: &str, config: &Config) -> Result<String> {
+    async fn query_openrouter(client: &Client, prompt: &str, config: &Config, use_case: &ModelUseCase) -> Result<String> {
         let openrouter_config = config.models.openrouter.as_ref()
             .context("OpenRouter config missing")?;
 
+        let model_id = Self::resolve_model_id(&openrouter_config.model_id, &openrouter_config.browser_model_id, use_case);
         let system_prompt = Self::load_system_prompt();
 
         let body = json!({
-            "model": openrouter_config.model_id,
+            "model": model_id,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
@@ -236,12 +267,13 @@ impl LlmClient {
         Self::extract_content(&json)
     }
 
-    async fn query_ollama(client: &Client, prompt: &str, config: &Config) -> Result<String> {
+    async fn query_ollama(client: &Client, prompt: &str, config: &Config, use_case: &ModelUseCase) -> Result<String> {
          let ollama_config = config.models.ollama.as_ref().context("Ollama config missing")?;
+         let model_id = Self::resolve_model_id(&ollama_config.model_id, &ollama_config.browser_model_id, use_case);
          let system_prompt = Self::load_system_prompt();
-         
+
          let body = json!({
-             "model": ollama_config.model_id,
+             "model": model_id,
              "prompt": prompt,
              "system": system_prompt,
              "stream": false
@@ -266,65 +298,69 @@ impl LlmClient {
     pub async fn test_provider(provider: &str, config: &Config) -> Result<String> {
         let connect_timeout = Duration::from_secs(5);
         let read_timeout = Duration::from_secs(15);
-        
         let client = reqwest::Client::builder()
             .connect_timeout(connect_timeout)
             .timeout(read_timeout)
             .build()?;
-        
         let test_prompt = "Reply with only the word 'OK' if you can read this.";
-        
         match provider {
-            "groq" => Self::query_groq(&client, test_prompt, config).await,
-            "openrouter" => Self::query_openrouter(&client, test_prompt, config).await,
-            "ollama" => Self::query_ollama(&client, test_prompt, config).await,
+            "groq" => Self::query_groq(&client, test_prompt, config, &ModelUseCase::General).await,
+            "openrouter" => Self::query_openrouter(&client, test_prompt, config, &ModelUseCase::General).await,
+            "ollama" => Self::query_ollama(&client, test_prompt, config, &ModelUseCase::General).await,
             _ => anyhow::bail!("Unknown provider: {}", provider),
         }
     }
 
     /// Query LLM with an image (for vision-capable models)
-    pub async fn query_with_image(prompt: &str, image_base64: &str, config: &Config) -> Result<String> {
+    pub async fn query_with_image(prompt: &str, image_base64: &str, config: &Config, use_case: ModelUseCase) -> Result<String> {
         let connect_timeout = Duration::from_secs(config.http.connect_timeout_secs);
         let read_timeout = Duration::from_secs(config.http.read_timeout_secs);
-        
+
         let client = reqwest::Client::builder()
             .connect_timeout(connect_timeout)
             .timeout(read_timeout)
             .build()?;
 
-        match config.models.provider.as_str() {
-            "groq" => Self::query_groq_with_image(&client, prompt, image_base64, config).await,
-            "openrouter" => Self::query_openrouter_with_image(&client, prompt, image_base64, config).await,
-            "ollama" => Self::query_ollama_with_image(&client, prompt, image_base64, config).await,
+        let provider = Self::resolve_provider(
+            &config.models.provider,
+            &config.models.browser_provider,
+            &use_case,
+        );
+
+        match provider {
+            "groq" => Self::query_groq_with_image(&client, prompt, image_base64, config, &use_case).await,
+            "openrouter" => Self::query_openrouter_with_image(&client, prompt, image_base64, config, &use_case).await,
+            "ollama" => Self::query_ollama_with_image(&client, prompt, image_base64, config, &use_case).await,
             "auto" => {
                 if let Some(groq) = &config.models.groq {
                     if !groq.api_key.is_empty() && groq.api_key != "your_groq_api_key_here" {
-                        if let Ok(res) = Self::query_groq_with_image(&client, prompt, image_base64, config).await {
+                        if let Ok(res) = Self::query_groq_with_image(&client, prompt, image_base64, config, &use_case).await {
                             return Ok(res);
                         }
                     }
                 }
                 if let Some(or) = &config.models.openrouter {
                     if !or.api_key.is_empty() && or.api_key != "your_openrouter_api_key_here" {
-                        if let Ok(res) = Self::query_openrouter_with_image(&client, prompt, image_base64, config).await {
+                        if let Ok(res) = Self::query_openrouter_with_image(&client, prompt, image_base64, config, &use_case).await {
                             return Ok(res);
                         }
                     }
                 }
                 anyhow::bail!("No vision-capable provider available")
             }
-            _ => anyhow::bail!("Provider does not support vision: {}", config.models.provider),
+            _ => anyhow::bail!("Provider does not support vision: {}", provider),
         }
     }
 
-    async fn query_groq_with_image(client: &Client, prompt: &str, image_base64: &str, config: &Config) -> Result<String> {
+    async fn query_groq_with_image(client: &Client, prompt: &str, image_base64: &str, config: &Config, use_case: &ModelUseCase) -> Result<String> {
         let groq_config = config.models.groq.as_ref()
             .context("Groq config missing")?;
 
+        let model_id = Self::resolve_model_id(&groq_config.model_id, &groq_config.browser_model_id, use_case);
         let system_prompt = Self::load_system_prompt();
 
         let body = json!({
-            "model": groq_config.model_id,
+            "model": model_id,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": [
@@ -349,14 +385,15 @@ impl LlmClient {
         Self::extract_content(&json)
     }
 
-    async fn query_openrouter_with_image(client: &Client, prompt: &str, image_base64: &str, config: &Config) -> Result<String> {
+    async fn query_openrouter_with_image(client: &Client, prompt: &str, image_base64: &str, config: &Config, use_case: &ModelUseCase) -> Result<String> {
         let openrouter_config = config.models.openrouter.as_ref()
             .context("OpenRouter config missing")?;
 
+        let model_id = Self::resolve_model_id(&openrouter_config.model_id, &openrouter_config.browser_model_id, use_case);
         let system_prompt = Self::load_system_prompt();
 
         let body = json!({
-            "model": openrouter_config.model_id,
+            "model": model_id,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": [
@@ -381,13 +418,14 @@ impl LlmClient {
         Self::extract_content(&json)
     }
 
-    async fn query_ollama_with_image(client: &Client, prompt: &str, image_base64: &str, config: &Config) -> Result<String> {
+    async fn query_ollama_with_image(client: &Client, prompt: &str, image_base64: &str, config: &Config, use_case: &ModelUseCase) -> Result<String> {
         let ollama_config = config.models.ollama.as_ref()
             .context("Ollama config missing")?;
 
+        let model_id = Self::resolve_model_id(&ollama_config.model_id, &ollama_config.browser_model_id, use_case);
         let system_prompt = Self::load_system_prompt();
         let body = json!({
-            "model": ollama_config.model_id,
+            "model": model_id,
             "prompt": prompt,
             "system": system_prompt,
             "images": [image_base64],
@@ -478,5 +516,53 @@ mod tests {
     fn test_extract_content_missing_fails() {
         let json = json!({"choices": [{"message": {"content": null}}]});
         assert!(LlmClient::extract_content(&json).is_err());
+    }
+
+    #[test]
+    fn test_resolve_model_id_general_uses_model_id() {
+        assert_eq!(
+            LlmClient::resolve_model_id("general-model", "browser-model", &ModelUseCase::General),
+            "general-model"
+        );
+    }
+
+    #[test]
+    fn test_resolve_model_id_browser_uses_browser_model_when_set() {
+        assert_eq!(
+            LlmClient::resolve_model_id("general-model", "browser-model", &ModelUseCase::Browser),
+            "browser-model"
+        );
+    }
+
+    #[test]
+    fn test_resolve_model_id_browser_falls_back_when_empty() {
+        assert_eq!(
+            LlmClient::resolve_model_id("general-model", "", &ModelUseCase::Browser),
+            "general-model"
+        );
+    }
+
+    #[test]
+    fn test_resolve_provider_browser_empty_falls_back() {
+        assert_eq!(
+            LlmClient::resolve_provider("auto", "", &ModelUseCase::Browser),
+            "auto"
+        );
+    }
+
+    #[test]
+    fn test_resolve_provider_browser_explicit() {
+        assert_eq!(
+            LlmClient::resolve_provider("auto", "groq", &ModelUseCase::Browser),
+            "groq"
+        );
+    }
+
+    #[test]
+    fn test_resolve_provider_general_ignores_browser_provider() {
+        assert_eq!(
+            LlmClient::resolve_provider("auto", "groq", &ModelUseCase::General),
+            "auto"
+        );
     }
 }
