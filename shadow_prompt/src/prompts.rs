@@ -14,10 +14,13 @@ pub enum FormsNav {
     SinglePage,
 }
 
-/// Minimal user message for vision (image) queries.
-/// Output format rules are enforced entirely by the system prompt.
-pub fn vision_user() -> &'static str {
-    "Answer the question shown in this image."
+/// Builds the user message for vision (image) queries.
+/// Injects web/RAG context when available (sourced from OCR of the same region).
+/// Output format rules are enforced by the system prompt.
+pub fn build_vision_query(web: &str, local: &str) -> String {
+    let mut prompt = context_section(web, local);
+    prompt.push_str("Answer the question shown in this image.");
+    prompt
 }
 
 /// Builds the augmented user message for text-based queries (clipboard, OCR).
@@ -128,7 +131,15 @@ mod tests {
     }
 
     #[test]
-    fn test_vision_user_nonempty() {
-        assert!(!vision_user().is_empty());
+    fn test_build_vision_query_no_context() {
+        let result = build_vision_query("", "");
+        assert_eq!(result, "Answer the question shown in this image.");
+    }
+
+    #[test]
+    fn test_build_vision_query_with_context() {
+        let result = build_vision_query("web results", "");
+        assert!(result.contains("[WEB SEARCH RESULTS]\nweb results"));
+        assert!(result.ends_with("Answer the question shown in this image."));
     }
 }

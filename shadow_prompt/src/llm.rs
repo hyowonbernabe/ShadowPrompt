@@ -243,17 +243,13 @@ impl LlmClient {
     }
 
     fn load_system_prompt() -> String {
-        let path = crate::config::get_exe_dir()
-            .join("config")
-            .join("system_prompt.txt");
+        let path = crate::config::get_config_file_path("system_prompt.txt");
         std::fs::read_to_string(&path)
             .unwrap_or_else(|_| "You are a concise assistant.".to_string())
     }
 
     fn load_forms_system_prompt() -> String {
-        let path = crate::config::get_exe_dir()
-            .join("config")
-            .join("forms_system_prompt.txt");
+        let path = crate::config::get_config_file_path("forms_system_prompt.txt");
         std::fs::read_to_string(&path)
             .unwrap_or_else(|_| {
                 "You output ONLY valid JSON arrays of form actions. No markdown, no explanation.".to_string()

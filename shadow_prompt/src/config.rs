@@ -548,6 +548,20 @@ pub fn get_exe_dir() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
+/// Resolves a file inside the config/ folder.
+/// Tries exe-relative first (production / USB), then CWD (cargo run / dev).
+pub fn get_config_file_path(filename: &str) -> std::path::PathBuf {
+    let exe_path = get_exe_dir().join("config").join(filename);
+    if exe_path.exists() {
+        return exe_path;
+    }
+    let cwd_path = std::path::PathBuf::from("config").join(filename);
+    if cwd_path.exists() {
+        return cwd_path;
+    }
+    exe_path
+}
+
 pub fn get_config_path() -> std::path::PathBuf {
     let exe_dir = get_exe_dir();
     let config_path = exe_dir.join("config").join("config.toml");

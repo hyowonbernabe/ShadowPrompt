@@ -200,9 +200,15 @@ async fn run_app() -> anyhow::Result<()> {
                         if supports_vision {
                             println!("[*] Model supports vision, capturing screenshot for LLM...");
                             
-                            match crate::ocr::OcrManager::capture_as_base64(x, y, w, h).await {
+                            // Capture image and OCR text concurrently.
+                            // OCR text is used only as the search query — the image goes to the LLM.
+                            let (image_result, ocr_result) = tokio::join!(
+                                crate::ocr::OcrManager::capture_as_base64(x, y, w, h),
+                                crate::ocr::OcrManager::extract_from_screen(x, y, w, h)
+                            );
+
+                            match image_result {
                                 Ok(image_b64) => {
-                                    // Save screenshot for debugging if debug mode is enabled (CLI flag or config)
                                     let args: Vec<String> = std::env::args().collect();
                                     let debug_enabled = config_clone.general.debug || args.iter().any(|a| a == "--debug");
                                     if debug_enabled {
@@ -210,16 +216,30 @@ async fn run_app() -> anyhow::Result<()> {
                                             println!("[!] Debug screenshot saved to: {}", path.display());
                                         }
                                     }
-                                    // For image queries, skip web search — the image IS the context.
-                                    // The system prompt enforces all output format rules.
-                                    let prompt = crate::prompts::vision_user();
+
+                                    // Use OCR text as search query so web/RAG context is available.
+                                    // The image is what gets answered — OCR is search-only.
+                                    let ocr_text = ocr_result.unwrap_or_default();
+                                    let bundle = if !ocr_text.trim().is_empty() {
+                                        match kp_arc.gather_context(&ocr_text, &config_clone).await {
+                                            Ok(b) => b,
+                                            Err(e) => {
+                                                error!("Knowledge System Error: {}", e);
+                                                ContextBundle { web: String::new(), local: String::new(), warnings: vec![] }
+                                            }
+                                        }
+                                    } else {
+                                        ContextBundle { web: String::new(), local: String::new(), warnings: vec![] }
+                                    };
+
+                                    let prompt = crate::prompts::build_vision_query(&bundle.web, &bundle.local);
 
                                     if debug_enabled {
-                                        println!("[DEBUG] Sending vision query (image only, no web search)");
-                                        println!("[DEBUG] Vision prompt: {}", prompt);
+                                        println!("[DEBUG] OCR text for search: {:.100}", ocr_text.trim());
+                                        println!("[DEBUG] Vision prompt ({} chars): {:.200}", prompt.len(), prompt);
                                     }
 
-                                    match LlmClient::query_with_image(prompt, &image_b64, &config_clone, ModelUseCase::General).await {
+                                    match LlmClient::query_with_image(&prompt, &image_b64, &config_clone, ModelUseCase::General).await {
                                         Ok(response) => {
                                             println!("[+] Vision query success");
                                             if let Err(e) = ClipboardManager::write(&response) {
