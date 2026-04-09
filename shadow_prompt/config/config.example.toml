@@ -114,14 +114,20 @@ text_overlay_text_opacity = 255
 hide_key = "Ctrl+Shift+H"
 
 [models]
-# Which provider to use.
+# Which provider to use for OCR / clipboard queries.
 # Options: "groq", "openrouter", "ollama", "auto"
 # "auto" cascades: Groq → OpenRouter → Ollama, using the first that succeeds.
 provider = "auto"
 
+# Which provider to use for Google Forms automation.
+# Leave empty (or omit) to use the same provider as above.
+browser_provider = ""
+
 [models.groq]
 api_key  = "YOUR_GROQ_API_KEY_HERE"
 model_id = "llama-3.1-8b-instant"
+# Model used for Google Forms automation. Leave empty to reuse model_id above.
+browser_model_id = ""
 # Set true if this model supports built-in web search (function calling)
 supports_search = false
 # Set true if this model can process images (e.g. llama-3.2-11b-vision-preview)
@@ -130,6 +136,8 @@ supports_vision = false
 [models.openrouter]
 api_key  = "YOUR_OPENROUTER_API_KEY_HERE"
 model_id = "google/gemma-3-27b-it:free"
+# Model used for Google Forms automation. Leave empty to reuse model_id above.
+browser_model_id = ""
 # Set true if this model supports built-in search
 supports_search = false
 # Set true if this model can process images (e.g. google/gemini-2.0-flash-exp)
@@ -138,6 +146,8 @@ supports_vision = false
 [models.ollama]
 base_url = "http://localhost:11434"
 model_id = "llama3"
+# Model used for Google Forms automation. Leave empty to reuse model_id above.
+browser_model_id = ""
 # Set true if this model supports built-in search
 supports_search = false
 # Set true if this model can process images (e.g. llava)

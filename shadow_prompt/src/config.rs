@@ -269,6 +269,9 @@ fn default_hide_key() -> String {
 #[allow(dead_code)]
 pub struct ModelConfig {
     pub provider: String,
+    /// Provider used for browser/Google Forms queries. Empty string = use same as `provider`.
+    #[serde(default)]
+    pub browser_provider: String,
     pub openrouter: Option<OpenRouterConfig>,
     pub github_copilot: Option<HashMap<String, String>>, // Flexible for now
     pub ollama: Option<OllamaConfig>,
@@ -279,6 +282,7 @@ impl Default for ModelConfig {
     fn default() -> Self {
         Self {
             provider: "auto".to_string(),
+            browser_provider: String::new(),
             openrouter: None,
             github_copilot: None,
             ollama: None,
@@ -292,6 +296,9 @@ impl Default for ModelConfig {
 pub struct GroqConfig {
     pub api_key: String,
     pub model_id: String,
+    /// Model ID for browser/Google Forms queries. Empty = use `model_id`.
+    #[serde(default)]
+    pub browser_model_id: String,
     #[serde(default)]
     pub supports_search: bool,
     #[serde(default)]
@@ -303,6 +310,7 @@ impl Default for GroqConfig {
         Self {
             api_key: "".to_string(),
             model_id: "llama-3.1-8b-instant".to_string(),
+            browser_model_id: String::new(),
             supports_search: false,
             supports_vision: false,
         }
@@ -314,6 +322,9 @@ impl Default for GroqConfig {
 pub struct OpenRouterConfig {
     pub api_key: String,
     pub model_id: String,
+    /// Model ID for browser/Google Forms queries. Empty = use `model_id`.
+    #[serde(default)]
+    pub browser_model_id: String,
     #[serde(default)]
     pub supports_search: bool,
     #[serde(default)]
@@ -325,6 +336,9 @@ pub struct OpenRouterConfig {
 pub struct OllamaConfig {
     pub base_url: String,
     pub model_id: String,
+    /// Model ID for browser/Google Forms queries. Empty = use `model_id`.
+    #[serde(default)]
+    pub browser_model_id: String,
     #[serde(default)]
     pub supports_search: bool,
     #[serde(default)]
@@ -336,6 +350,7 @@ impl Default for OllamaConfig {
         Self {
             base_url: "http://localhost:11434".to_string(),
             model_id: "llama3".to_string(),
+            browser_model_id: String::new(),
             supports_search: false,
             supports_vision: false,
         }
@@ -518,5 +533,59 @@ mod tests {
         assert_eq!(config.visuals.hide_key, "Ctrl+Shift+H");
         assert_eq!(config.http.connect_timeout_secs, 10);
         assert!(config.search.serper_api_key.is_none());
+        assert_eq!(config.models.browser_provider, "");
+        assert_eq!(config.models.groq.as_ref().unwrap().browser_model_id, "");
+        assert_eq!(config.models.openrouter.as_ref().unwrap().browser_model_id, "");
+        assert_eq!(config.models.ollama.as_ref().unwrap().browser_model_id, "");
+    }
+
+    #[test]
+    fn test_browser_model_defaults_to_empty() {
+        let toml = r#"
+[general]
+mode = "stealth"
+wake_key = "Ctrl+Shift+Space"
+model_key = "Ctrl+Shift+V"
+panic_key = "Ctrl+Shift+F12"
+
+[visuals]
+indicator_color = "#FF0000"
+ready_color = "#00FF00"
+cursor_change = false
+
+[models]
+provider = "auto"
+
+[models.groq]
+api_key = "gsk_test"
+model_id = "llama-3.1-8b-instant"
+
+[models.openrouter]
+api_key = "sk-or-test"
+model_id = "google/gemma-3-27b-it:free"
+
+[models.ollama]
+base_url = "http://localhost:11434"
+model_id = "llama3"
+
+[search]
+enabled = true
+max_results = 3
+
+[rag]
+enabled = true
+knowledge_path = "knowledge"
+index_path = "data/rag_index"
+max_results = 3
+min_score = 0.5
+
+[safety]
+daily_spend_limit_usd = 0.5
+"#;
+        let config: Config = toml::from_str(toml).expect("should parse without browser fields");
+        assert_eq!(config.models.browser_provider, "");
+        assert_eq!(config.models.groq.as_ref().unwrap().browser_model_id, "");
+        assert_eq!(config.models.openrouter.as_ref().unwrap().browser_model_id, "");
+        assert_eq!(config.models.ollama.as_ref().unwrap().browser_model_id, "");
     }
 }
