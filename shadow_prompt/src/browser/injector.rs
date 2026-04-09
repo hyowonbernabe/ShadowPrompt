@@ -209,31 +209,49 @@ pub const EXTRACTOR_JS: &str = r#"
 pub fn build_injector_call(raw_actions_json: &str) -> String {
     format!(
         r#"
-        (function() {{
+        (async function() {{
             try {{
-                let actions = {actions};
-                for (let action of actions) {{
-                    let target = document.getElementById(action.id);
+                var actions = {actions};
 
-                    if (!target && action.id) {{
-                        let all = document.querySelectorAll('[role="radio"], [role="checkbox"]');
-                        for(let i=0; i<all.length; i++) {{
-                            if (all[i].getAttribute('data-value') == action.id || all[i].getAttribute('aria-label') == action.id) {{
-                                target = all[i];
-                                break;
-                            }}
+                function findTarget(id) {{
+                    var el = document.getElementById(id);
+                    if (el) return el;
+                    var all = document.querySelectorAll('[role="radio"],[role="checkbox"],[role="option"],select,input,textarea,[role="button"]');
+                    for (var i = 0; i < all.length; i++) {{
+                        if (all[i].getAttribute('data-value') === id || all[i].getAttribute('aria-label') === id) {{
+                            return all[i];
                         }}
                     }}
+                    return null;
+                }}
 
-                    if (target) {{
-                        if (action.action === "click" || action.action === "check") {{
-                            if (target.getAttribute('aria-checked') !== 'true') {{
-                                target.click();
+                for (var i = 0; i < actions.length; i++) {{
+                    var action = actions[i];
+                    var target = findTarget(action.id);
+                    if (!target) continue;
+
+                    if (action.action === "click" || action.action === "check") {{
+                        if (target.getAttribute('aria-checked') !== 'true') {{
+                            target.click();
+                        }}
+                    }} else if (action.action === "type") {{
+                        target.value = action.value || "";
+                        target.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        target.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    }} else if (action.action === "select_native") {{
+                        target.value = action.value || "";
+                        target.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    }} else if (action.action === "select_option") {{
+                        target.click();
+                    }} else if (action.action === "dropdown_select") {{
+                        target.click();
+                        await new Promise(function(r) {{ setTimeout(r, 350); }});
+                        var opts = document.querySelectorAll('[role="option"]');
+                        for (var j = 0; j < opts.length; j++) {{
+                            if (opts[j].innerText.trim() === (action.value || "").trim()) {{
+                                opts[j].click();
+                                break;
                             }}
-                        }} else if (action.action === "type") {{
-                            target.value = action.value || "";
-                            target.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                            target.dispatchEvent(new Event('change', {{ bubbles: true }}));
                         }}
                     }}
                 }}
@@ -241,7 +259,7 @@ pub fn build_injector_call(raw_actions_json: &str) -> String {
             }} catch(e) {{
                 return "ERROR: " + e.toString();
             }}
-        }})();
+        }})()
         "#,
         actions = raw_actions_json
     )

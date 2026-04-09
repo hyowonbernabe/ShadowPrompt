@@ -216,7 +216,7 @@ Form JSON:\n{}",
 
         // 7. Inject Actions
         let injection_script = injector::build_injector_call(&raw_actions);
-        tab.evaluate(&injection_script, false)
+        tab.evaluate(&injection_script, true)
             .map_err(|e| anyhow!("Injection Script Error: {}", e))?;
 
         // 8. Determine if we should loop
