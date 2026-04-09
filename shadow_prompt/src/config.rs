@@ -517,5 +517,6 @@ mod tests {
         assert_eq!(config.general.key_browser_pass, "Ctrl+Shift+8");
         assert_eq!(config.visuals.hide_key, "Ctrl+Shift+H");
         assert_eq!(config.http.connect_timeout_secs, 10);
+        assert!(config.search.serper_api_key.is_none());
     }
 }
