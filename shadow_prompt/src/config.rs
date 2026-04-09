@@ -541,7 +541,7 @@ mod tests {
 
     #[test]
     fn test_browser_model_defaults_to_empty() {
-        let toml = r#"
+        let toml = r##"
 [general]
 mode = "stealth"
 wake_key = "Ctrl+Shift+Space"
@@ -581,7 +581,7 @@ min_score = 0.5
 
 [safety]
 daily_spend_limit_usd = 0.5
-"#;
+"##;
         let config: Config = toml::from_str(toml).expect("should parse without browser fields");
         assert_eq!(config.models.browser_provider, "");
         assert_eq!(config.models.groq.as_ref().unwrap().browser_model_id, "");
