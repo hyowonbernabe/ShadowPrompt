@@ -156,7 +156,7 @@ async fn run_app() -> anyhow::Result<()> {
     let mut dynamic_config = config.clone();
     
     // State Trackers
-    let providers = vec!["openrouter", "groq", "ollama", "auto"];
+    let providers = ["openrouter", "groq", "ollama", "auto"];
     let mut provider_idx = providers.iter().position(|&p| p == dynamic_config.models.provider).unwrap_or(0);
     
     let mut or_gen_idx = 0;
@@ -190,6 +190,7 @@ async fn run_app() -> anyhow::Result<()> {
                     let config_clone = dynamic_config.clone();
                     let ui_tx_clone = ui_tx.clone();
                     let ready_color = parse_hex_color(&dynamic_config.visuals.ready_color);
+                    let kp_arc = knowledge_provider.clone();
                     
                     tokio::spawn(async move {
                         let supports_vision = ModelCapabilities::supports_vision(&config_clone);
@@ -203,13 +204,43 @@ async fn run_app() -> anyhow::Result<()> {
                                                   If the image contains a graph, chart, diagram, or table, interpret it \
                                                   as part of the question context.";
                                     
-                                    match LlmClient::query_with_image(prompt, &image_b64, &config_clone, ModelUseCase::General).await {
+                                    // Gather context for the image
+                                    let context_prompt = "Image contains a question that needs answering. Search for relevant information.";
+                                    let bundle = match kp_arc.gather_context(context_prompt, &config_clone).await {
+                                        Ok(b) => b,
+                                        Err(e) => {
+                                            let err_msg = format!("Knowledge System Error: {}", e);
+                                            error!("{}", err_msg);
+                                            ContextBundle {
+                                                web: String::new(),
+                                                local: String::new(),
+                                                warnings: vec![err_msg],
+                                            }
+                                        }
+                                    };
+
+                                    // Build augmented prompt
+                                    let mut augmented_prompt = String::new();
+                                    if !bundle.web.is_empty() {
+                                        info!("[*] Web context found for OCR. Augmenting prompt.");
+                                        augmented_prompt.push_str("[WEB SEARCH RESULTS]\n");
+                                        augmented_prompt.push_str(&bundle.web);
+                                        augmented_prompt.push_str("\n\n");
+                                    }
+                                    if !bundle.local.is_empty() {
+                                        info!("[*] Local knowledge found for OCR. Augmenting prompt.");
+                                        augmented_prompt.push_str("[LOCAL KNOWLEDGE]\n");
+                                        augmented_prompt.push_str(&bundle.local);
+                                        augmented_prompt.push_str("\n\n");
+                                    }
+                                    augmented_prompt.push_str(prompt);
+
+                                    match LlmClient::query_with_image(&augmented_prompt, &image_b64, &config_clone, ModelUseCase::General).await {
                                         Ok(response) => {
                                             println!("[+] Vision query success");
                                             if let Err(e) = ClipboardManager::write(&response) {
                                                 eprintln!("Clipboard Write Error: {}", e);
                                             }
-                                            // Show text overlay if enabled
                                             if config_clone.visuals.text_overlay_enabled && !response.is_empty() {
                                                 let _ = ui_tx_clone.send(UICommand::SetOverlayText(response.clone()));
                                             }
@@ -217,13 +248,42 @@ async fn run_app() -> anyhow::Result<()> {
                                         Err(e) => {
                                             eprintln!("[-] Vision query failed: {}, falling back to OCR...", e);
                                             if let Ok(text) = crate::ocr::OcrManager::extract_from_screen(x, y, w, h).await {
-                                                match LlmClient::query(&text, &config_clone, ModelUseCase::General).await {
+                                                // Gather context for OCR fallback
+                                                let bundle = match kp_arc.gather_context(&text, &config_clone).await {
+                                                    Ok(b) => b,
+                                                    Err(e) => {
+                                                        let err_msg = format!("Knowledge System Error: {}", e);
+                                                        error!("{}", err_msg);
+                                                        ContextBundle {
+                                                            web: String::new(),
+                                                            local: String::new(),
+                                                            warnings: vec![err_msg],
+                                                        }
+                                                    }
+                                                };
+
+                                                let mut augmented = String::new();
+                                                if !bundle.web.is_empty() {
+                                                    info!("[*] Web context found. Augmenting prompt.");
+                                                    augmented.push_str("[WEB SEARCH RESULTS]\n");
+                                                    augmented.push_str(&bundle.web);
+                                                    augmented.push_str("\n\n");
+                                                }
+                                                if !bundle.local.is_empty() {
+                                                    info!("[*] Local knowledge found. Augmenting prompt.");
+                                                    augmented.push_str("[LOCAL KNOWLEDGE]\n");
+                                                    augmented.push_str(&bundle.local);
+                                                    augmented.push_str("\n\n");
+                                                }
+                                                augmented.push_str("[QUESTION]\n");
+                                                augmented.push_str(&text);
+
+                                                match LlmClient::query(&augmented, &config_clone, ModelUseCase::General).await {
                                                     Ok(response) => {
                                                         println!("[+] OCR fallback success");
                                                         if let Err(e) = ClipboardManager::write(&response) {
                                                             eprintln!("Clipboard Write Error: {}", e);
                                                         }
-                                                        // Show text overlay if enabled
                                                         if config_clone.visuals.text_overlay_enabled && !response.is_empty() {
                                                             let _ = ui_tx_clone.send(UICommand::SetOverlayText(response.clone()));
                                                         }
@@ -250,13 +310,43 @@ async fn run_app() -> anyhow::Result<()> {
                                 Ok(text) => {
                                     println!("[+] OCR Success: \"{}\"", text.trim());
 
-                                    match LlmClient::query(&text, &config_clone, ModelUseCase::General).await {
+                                    // Gather context
+                                    let bundle = match kp_arc.gather_context(&text, &config_clone).await {
+                                        Ok(b) => b,
+                                        Err(e) => {
+                                            let err_msg = format!("Knowledge System Error: {}", e);
+                                            error!("{}", err_msg);
+                                            ContextBundle {
+                                                web: String::new(),
+                                                local: String::new(),
+                                                warnings: vec![err_msg],
+                                            }
+                                        }
+                                    };
+
+                                    // Build augmented prompt
+                                    let mut augmented_prompt = String::new();
+                                    if !bundle.web.is_empty() {
+                                        info!("[*] Web context found. Augmenting prompt.");
+                                        augmented_prompt.push_str("[WEB SEARCH RESULTS]\n");
+                                        augmented_prompt.push_str(&bundle.web);
+                                        augmented_prompt.push_str("\n\n");
+                                    }
+                                    if !bundle.local.is_empty() {
+                                        info!("[*] Local knowledge found. Augmenting prompt.");
+                                        augmented_prompt.push_str("[LOCAL KNOWLEDGE]\n");
+                                        augmented_prompt.push_str(&bundle.local);
+                                        augmented_prompt.push_str("\n\n");
+                                    }
+                                    augmented_prompt.push_str("[QUESTION]\n");
+                                    augmented_prompt.push_str(&text);
+
+                                    match LlmClient::query(&augmented_prompt, &config_clone, ModelUseCase::General).await {
                                         Ok(response) => {
                                             println!("[+] LLM query success");
                                             if let Err(e) = ClipboardManager::write(&response) {
                                                 eprintln!("Clipboard Write Error: {}", e);
                                             }
-                                            // Show text overlay if enabled
                                             if config_clone.visuals.text_overlay_enabled && !response.is_empty() {
                                                 let _ = ui_tx_clone.send(UICommand::SetOverlayText(response.clone()));
                                             }
@@ -428,9 +518,10 @@ async fn run_app() -> anyhow::Result<()> {
                     let c_clone = std::sync::Arc::new(dynamic_config.clone());
                     let tx_clone = ui_tx.clone();
                     let debug_mode = dynamic_config.general.debug;
+                    let kp_clone = knowledge_provider.clone();
                     
                     active_browser_task = Some(tokio::spawn(async move {
-                        if let Err(e) = crate::browser::execute_form_flow(url.as_deref(), p_clone.as_deref(), c_clone.clone(), tx_clone.clone(), is_auto).await {
+                        if let Err(e) = crate::browser::execute_form_flow(url.as_deref(), p_clone.as_deref(), c_clone.clone(), tx_clone.clone(), is_auto, kp_clone).await {
                             if debug_mode { let _ = tx_clone.send(UICommand::SetOverlayText(format!("❌ Browser Error: {}", e))); }
                             let failed_color = parse_hex_color(&c_clone.visuals.form_color_failed);
                             let _ = tx_clone.send(UICommand::SetFormColor(failed_color));

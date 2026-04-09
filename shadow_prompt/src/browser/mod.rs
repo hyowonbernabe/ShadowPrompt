@@ -53,6 +53,7 @@ pub async fn execute_form_flow(
     config: Arc<Config>,
     ui_tx: Sender<UICommand>,
     is_auto: bool,
+    knowledge_provider: Arc<crate::knowledge::KnowledgeProvider>,
 ) -> Result<()> {
     let debug_mode = config.general.debug;
     let ui_tx_clone = ui_tx.clone();
@@ -183,7 +184,38 @@ pub async fn execute_form_flow(
 
         send_ui(format!("🤖 Calculating Page {}...", page_count));
 
-        // 6. Query LLM
+        // 6a. Gather knowledge context from form questions
+        let questions_summary = extract_questions_for_context(form_json);
+        
+        let bundle = match knowledge_provider.gather_context(&questions_summary, &config).await {
+            Ok(b) => b,
+            Err(e) => {
+                let msg = format!("Knowledge System Error: {}", e);
+                eprintln!("[!] {}", msg);
+                crate::knowledge::ContextBundle {
+                    web: String::new(),
+                    local: String::new(),
+                    warnings: vec![msg],
+                }
+            }
+        };
+
+        // Build context string for prompt injection
+        let mut context_section = String::new();
+        if !bundle.web.is_empty() {
+            println!("[*] Web context found for form. Augmenting prompt.");
+            context_section.push_str("[WEB SEARCH RESULTS]\n");
+            context_section.push_str(&bundle.web);
+            context_section.push_str("\n\n");
+        }
+        if !bundle.local.is_empty() {
+            println!("[*] Local knowledge found for form. Augmenting prompt.");
+            context_section.push_str("[LOCAL KNOWLEDGE]\n");
+            context_section.push_str(&bundle.local);
+            context_section.push_str("\n\n");
+        }
+
+        // 6b. Build prompt with context
         let nav_rule = if is_auto {
             "CRITICAL RULE 1: If there is a `navigation` button of type `next`, include a click action for it as the VERY LAST item in your array after all question answers.\nCRITICAL RULE 2: NEVER click a button of type `submit`."
         } else {
@@ -191,27 +223,30 @@ pub async fn execute_form_flow(
         };
 
         let prompt = format!(
-            "You are an automated quiz solver filling out a Google Form.
-The JSON contains `questions` and `navigation` buttons. Answer every unanswered question.
-
-QUESTION TYPES — use exactly these action formats:
-- \"radio\": Click ONE option. Action: {{\"id\":\"<option_id>\",\"action\":\"click\"}}
-- \"checkbox\": Multi-select — click ALL correct options (one action per option). Action: {{\"id\":\"<option_id>\",\"action\":\"click\"}}
-- \"text\": Type answer. Action: {{\"id\":\"<input_id>\",\"action\":\"type\",\"value\":\"<answer>\"}}
-- \"dropdown\" with \"id\" field (native select): Action: {{\"id\":\"<select_id>\",\"action\":\"select_native\",\"value\":\"<exact option text>\"}}
-- \"dropdown\" with \"trigger_id\" field (custom dropdown): Action: {{\"id\":\"<trigger_id>\",\"action\":\"dropdown_select\",\"value\":\"<exact option text>\"}}
-- \"grid_radio\": Matrix — one click per row. Each row in `grid_rows` needs exactly one selected column. Action: {{\"id\":\"<row_col_id>\",\"action\":\"click\"}}
-- \"grid_checkbox\": Matrix with checkboxes — click all applicable options per row. Action: {{\"id\":\"<row_col_id>\",\"action\":\"click\"}}
-- \"date\": Fill each field in `fields` by label (Month, Day, Year with numeric values). Action: {{\"id\":\"<field_id>\",\"action\":\"type\",\"value\":\"<number>\"}}
-- \"time\": Fill each field in `fields` (Hour, Minute). Action: {{\"id\":\"<field_id>\",\"action\":\"type\",\"value\":\"<number>\"}}. For AM/PM field with is_select=true: {{\"id\":\"<ampm_id>\",\"action\":\"select_native\",\"value\":\"<AM or PM>\"}}
-- \"datetime\": Combined date+time — fill all fields in `fields` by label (Month, Day, Year, Hour, Minute). Same actions as \"date\" and \"time\" combined.
-- \"select_option\" (advanced): Direct click on an already-visible `[role=\"option\"]` element. Action: {{\"id\":\"<option_id>\",\"action\":\"select_option\"}}
-
-{nav_rule}
-
-Return ONLY a valid JSON array of actions. No markdown, no explanation, no extra text.
-Form JSON:
+            "CONTEXT (use this to answer questions more accurately):\n{context_section}\n\
+            ---\n\n\
+            You are an automated quiz solver filling out a Google Form. \
+The JSON contains `questions` and `navigation` buttons. Answer every unanswered question. \
+\
+QUESTION TYPES — use exactly these action formats: \
+- \"radio\": Click ONE option. Action: {{\"id\":\"<option_id>\",\"action\":\"click\"}} \
+- \"checkbox\": Multi-select — click ALL correct options (one action per option). Action: {{\"id\":\"<option_id>\",\"action\":\"click\"}} \
+- \"text\": Type answer. Action: {{\"id\":\"<input_id>\",\"action\":\"type\",\"value\":\"<answer>\"}} \
+- \"dropdown\" with \"id\" field (native select): Action: {{\"id\":\"<select_id>\",\"action\":\"select_native\",\"value\":\"<exact option text>\"}} \
+- \"dropdown\" with \"trigger_id\" field (custom dropdown): Action: {{\"id\":\"<trigger_id>\",\"action\":\"dropdown_select\",\"value\":\"<exact option text>\"}} \
+- \"grid_radio\": Matrix — one click per row. Each row in `grid_rows` needs exactly one selected column. Action: {{\"id\":\"<row_col_id>\",\"action\":\"click\"}} \
+- \"grid_checkbox\": Matrix with checkboxes — click all applicable options per row. Action: {{\"id\":\"<row_col_id>\",\"action\":\"click\"}} \
+- \"date\": Fill each field in `fields` by label (Month, Day, Year with numeric values). Action: {{\"id\":\"<field_id>\",\"action\":\"type\",\"value\":\"<number>\"}} \
+- \"time\": Fill each field in `fields` (Hour, Minute). Action: {{\"id\":\"<field_id>\",\"action\":\"type\",\"value\":\"<number>\"}}. For AM/PM field with is_select=true: {{\"id\":\"<ampm_id>\",\"action\":\"select_native\",\"value\":\"<AM or PM>\"}} \
+- \"datetime\": Combined date+time — fill all fields in `fields` by label (Month, Day, Year, Hour, Minute). Same actions as \"date\" and \"time\" combined. \
+- \"select_option\" (advanced): Direct click on an already-visible `[role=\"option\"]` element. Action: {{\"id\":\"<option_id>\",\"action\":\"select_option\"}} \
+\
+{nav_rule} \
+\
+Return ONLY a valid JSON array of actions. No markdown, no explanation, no extra text. \
+Form JSON: \
 {form_json}",
+            context_section = context_section,
             nav_rule = nav_rule,
             form_json = form_json
         );
@@ -269,4 +304,20 @@ Form JSON:
     }
 
     Ok(())
+}
+
+fn extract_questions_for_context(form_json: &str) -> String {
+    let mut questions = Vec::new();
+    
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(form_json) {
+        if let Some(arr) = json.get("questions").and_then(|v| v.as_array()) {
+            for item in arr {
+                if let Some(question) = item.get("question").and_then(|v| v.as_str()) {
+                    questions.push(question.to_string());
+                }
+            }
+        }
+    }
+    
+    questions.join(" ")
 }
