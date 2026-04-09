@@ -187,6 +187,7 @@ pub fn hotkey_field(
 
 /// Validate that all 9 hotkeys are unique. Returns Err with a human-readable
 /// message naming both conflicting keys if any pair matches.
+#[allow(clippy::too_many_arguments)]
 pub fn validate_hotkeys_all(
     wake: &str,
     model: &str,

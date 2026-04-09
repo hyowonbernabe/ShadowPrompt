@@ -26,6 +26,7 @@ pub struct InputManager {
 }
 
 impl InputManager {
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         wake_keys: Vec<Key>,
         model_keys: Vec<Key>,

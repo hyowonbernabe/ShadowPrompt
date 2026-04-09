@@ -1,5 +1,4 @@
 use headless_chrome::Browser;
-use reqwest;
 use serde_json::Value;
 
 #[tokio::main]

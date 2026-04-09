@@ -3,6 +3,7 @@ use crate::config::Config;
 pub struct ModelCapabilities;
 
 impl ModelCapabilities {
+    #[allow(dead_code)]
     pub fn supports_search(config: &Config) -> bool {
         match config.models.provider.as_str() {
             "groq" => config

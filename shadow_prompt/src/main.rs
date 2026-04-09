@@ -393,10 +393,7 @@ async fn run_app() -> anyhow::Result<()> {
                     }
                 },
                 InputEvent::BrowserExec | InputEvent::BrowserExecSingle => {
-                    let is_auto = match event {
-                        InputEvent::BrowserExec => true,
-                        _ => false,
-                    };
+                    let is_auto = matches!(event, InputEvent::BrowserExec);
                     
                     println!("[!] EVENT: Browser Exec Key Pressed (Auto={})", is_auto);
                     // Read clipboard, but don't hard fail if it's empty or invalid yet.
