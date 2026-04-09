@@ -407,10 +407,6 @@ unsafe extern "system" fn form_wnd_proc(
             let _ = EndPaint(hwnd, &ps);
             LRESULT(0)
         }
-        WM_DESTROY => {
-            PostQuitMessage(0);
-            LRESULT(0)
-        }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }
