@@ -195,12 +195,7 @@ impl LlmClient {
         }
 
         let json: Value = res.json().await?;
-        let content = json["choices"][0]["message"]["content"]
-            .as_str()
-            .context("Failed to parse Groq response")?
-            .to_string();
-
-        Ok(content)
+        Self::extract_content(&json)
     }
 
     fn load_system_prompt() -> String {
@@ -238,12 +233,7 @@ impl LlmClient {
         }
 
         let json: Value = res.json().await?;
-        let content = json["choices"][0]["message"]["content"]
-            .as_str()
-            .context("Failed to parse LLM response")?
-            .to_string();
-
-        Ok(content)
+        Self::extract_content(&json)
     }
 
     async fn query_ollama(client: &Client, prompt: &str, config: &Config) -> Result<String> {
@@ -331,7 +321,7 @@ impl LlmClient {
         let groq_config = config.models.groq.as_ref()
             .context("Groq config missing")?;
 
-        let system_prompt = "You are a helpful assistant that analyzes images and answers questions about them. Be concise and accurate.";
+        let system_prompt = Self::load_system_prompt();
 
         let body = json!({
             "model": groq_config.model_id,
@@ -356,19 +346,14 @@ impl LlmClient {
         }
 
         let json: Value = res.json().await?;
-        let content = json["choices"][0]["message"]["content"]
-            .as_str()
-            .context("Failed to parse Groq vision response")?
-            .to_string();
-
-        Ok(content)
+        Self::extract_content(&json)
     }
 
     async fn query_openrouter_with_image(client: &Client, prompt: &str, image_base64: &str, config: &Config) -> Result<String> {
         let openrouter_config = config.models.openrouter.as_ref()
             .context("OpenRouter config missing")?;
 
-        let system_prompt = "You are a helpful assistant that analyzes images and answers questions about them. Be concise and accurate.";
+        let system_prompt = Self::load_system_prompt();
 
         let body = json!({
             "model": openrouter_config.model_id,
@@ -393,12 +378,7 @@ impl LlmClient {
         }
 
         let json: Value = res.json().await?;
-        let content = json["choices"][0]["message"]["content"]
-            .as_str()
-            .context("Failed to parse OpenRouter vision response")?
-            .to_string();
-
-        Ok(content)
+        Self::extract_content(&json)
     }
 
     async fn query_ollama_with_image(client: &Client, prompt: &str, image_base64: &str, config: &Config) -> Result<String> {
@@ -426,5 +406,74 @@ impl LlmClient {
         Ok(response)
     }
 
+    pub fn extract_content(json: &Value) -> Result<String> {
+        let content = &json["choices"][0]["message"]["content"];
 
+        // Case 1: plain string (most models)
+        if let Some(s) = content.as_str() {
+            return Ok(s.to_string());
+        }
+
+        // Case 2: content array (multimodal Gemini responses)
+        if let Some(arr) = content.as_array() {
+            let text = arr
+                .iter()
+                .filter_map(|part| {
+                    if part["type"].as_str() == Some("text") {
+                        part["text"].as_str().map(|s| s.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !text.is_empty() {
+                return Ok(text);
+            }
+        }
+
+        anyhow::bail!("Could not extract text content from LLM response")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_extract_content_string() {
+        let json = json!({
+            "choices": [{"message": {"content": "Paris"}}]
+        });
+        assert_eq!(LlmClient::extract_content(&json).unwrap(), "Paris");
+    }
+
+    #[test]
+    fn test_extract_content_array() {
+        let json = json!({
+            "choices": [{"message": {"content": [
+                {"type": "text", "text": "The answer is"},
+                {"type": "text", "text": "Nitrogen"}
+            ]}}]
+        });
+        assert_eq!(LlmClient::extract_content(&json).unwrap(), "The answer is\nNitrogen");
+    }
+
+    #[test]
+    fn test_extract_content_array_skips_non_text() {
+        let json = json!({
+            "choices": [{"message": {"content": [
+                {"type": "image_url", "image_url": {"url": "data:..."}},
+                {"type": "text", "text": "B) Nitrogen"}
+            ]}}]
+        });
+        assert_eq!(LlmClient::extract_content(&json).unwrap(), "B) Nitrogen");
+    }
+
+    #[test]
+    fn test_extract_content_missing_fails() {
+        let json = json!({"choices": [{"message": {"content": null}}]});
+        assert!(LlmClient::extract_content(&json).is_err());
+    }
 }
