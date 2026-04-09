@@ -14,6 +14,7 @@ mod tos_text;
 mod hotkey_recorder;
 mod color_picker;
 mod capabilities;
+mod prompts;
 pub mod browser;
 
 #[macro_use]
@@ -42,12 +43,13 @@ fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let debug_flag = args.contains(&"--debug".to_string());
     
-    // If debug flag is present, attach console
+    // If debug flag is present, attach console and enable LLM debug logging
     if debug_flag {
         unsafe {
             use windows::Win32::System::Console::AllocConsole;
             let _ = AllocConsole();
         }
+        crate::llm::LlmClient::set_debug(true);
     }
     
     // 1. Setup Wizard (First Run or --setup)
@@ -200,42 +202,24 @@ async fn run_app() -> anyhow::Result<()> {
                             
                             match crate::ocr::OcrManager::capture_as_base64(x, y, w, h).await {
                                 Ok(image_b64) => {
-                                    let prompt = "Read the question in this image exactly as written and answer it. \
-                                                  If the image contains a graph, chart, diagram, or table, interpret it \
-                                                  as part of the question context.";
-                                    
-                                    // Gather context for the image
-                                    let context_prompt = "Image contains a question that needs answering. Search for relevant information.";
-                                    let bundle = match kp_arc.gather_context(context_prompt, &config_clone).await {
-                                        Ok(b) => b,
-                                        Err(e) => {
-                                            let err_msg = format!("Knowledge System Error: {}", e);
-                                            error!("{}", err_msg);
-                                            ContextBundle {
-                                                web: String::new(),
-                                                local: String::new(),
-                                                warnings: vec![err_msg],
-                                            }
+                                    // Save screenshot for debugging if debug mode is enabled (CLI flag or config)
+                                    let args: Vec<String> = std::env::args().collect();
+                                    let debug_enabled = config_clone.general.debug || args.iter().any(|a| a == "--debug");
+                                    if debug_enabled {
+                                        if let Ok(path) = crate::ocr::OcrManager::save_debug_screenshot(&image_b64) {
+                                            println!("[!] Debug screenshot saved to: {}", path.display());
                                         }
-                                    };
-
-                                    // Build augmented prompt
-                                    let mut augmented_prompt = String::new();
-                                    if !bundle.web.is_empty() {
-                                        info!("[*] Web context found for OCR. Augmenting prompt.");
-                                        augmented_prompt.push_str("[WEB SEARCH RESULTS]\n");
-                                        augmented_prompt.push_str(&bundle.web);
-                                        augmented_prompt.push_str("\n\n");
                                     }
-                                    if !bundle.local.is_empty() {
-                                        info!("[*] Local knowledge found for OCR. Augmenting prompt.");
-                                        augmented_prompt.push_str("[LOCAL KNOWLEDGE]\n");
-                                        augmented_prompt.push_str(&bundle.local);
-                                        augmented_prompt.push_str("\n\n");
-                                    }
-                                    augmented_prompt.push_str(prompt);
+                                    // For image queries, skip web search — the image IS the context.
+                                    // The system prompt enforces all output format rules.
+                                    let prompt = crate::prompts::vision_user();
 
-                                    match LlmClient::query_with_image(&augmented_prompt, &image_b64, &config_clone, ModelUseCase::General).await {
+                                    if debug_enabled {
+                                        println!("[DEBUG] Sending vision query (image only, no web search)");
+                                        println!("[DEBUG] Vision prompt: {}", prompt);
+                                    }
+
+                                    match LlmClient::query_with_image(prompt, &image_b64, &config_clone, ModelUseCase::General).await {
                                         Ok(response) => {
                                             println!("[+] Vision query success");
                                             if let Err(e) = ClipboardManager::write(&response) {
@@ -262,21 +246,7 @@ async fn run_app() -> anyhow::Result<()> {
                                                     }
                                                 };
 
-                                                let mut augmented = String::new();
-                                                if !bundle.web.is_empty() {
-                                                    info!("[*] Web context found. Augmenting prompt.");
-                                                    augmented.push_str("[WEB SEARCH RESULTS]\n");
-                                                    augmented.push_str(&bundle.web);
-                                                    augmented.push_str("\n\n");
-                                                }
-                                                if !bundle.local.is_empty() {
-                                                    info!("[*] Local knowledge found. Augmenting prompt.");
-                                                    augmented.push_str("[LOCAL KNOWLEDGE]\n");
-                                                    augmented.push_str(&bundle.local);
-                                                    augmented.push_str("\n\n");
-                                                }
-                                                augmented.push_str("[QUESTION]\n");
-                                                augmented.push_str(&text);
+                                                let augmented = crate::prompts::build_text_query(&bundle.web, &bundle.local, &text);
 
                                                 match LlmClient::query(&augmented, &config_clone, ModelUseCase::General).await {
                                                     Ok(response) => {
@@ -325,21 +295,7 @@ async fn run_app() -> anyhow::Result<()> {
                                     };
 
                                     // Build augmented prompt
-                                    let mut augmented_prompt = String::new();
-                                    if !bundle.web.is_empty() {
-                                        info!("[*] Web context found. Augmenting prompt.");
-                                        augmented_prompt.push_str("[WEB SEARCH RESULTS]\n");
-                                        augmented_prompt.push_str(&bundle.web);
-                                        augmented_prompt.push_str("\n\n");
-                                    }
-                                    if !bundle.local.is_empty() {
-                                        info!("[*] Local knowledge found. Augmenting prompt.");
-                                        augmented_prompt.push_str("[LOCAL KNOWLEDGE]\n");
-                                        augmented_prompt.push_str(&bundle.local);
-                                        augmented_prompt.push_str("\n\n");
-                                    }
-                                    augmented_prompt.push_str("[QUESTION]\n");
-                                    augmented_prompt.push_str(&text);
+                                    let augmented_prompt = crate::prompts::build_text_query(&bundle.web, &bundle.local, &text);
 
                                     match LlmClient::query(&augmented_prompt, &config_clone, ModelUseCase::General).await {
                                         Ok(response) => {
@@ -408,21 +364,7 @@ async fn run_app() -> anyhow::Result<()> {
                             }
                         };
 
-                        let mut augmented_prompt = String::new();
-                        if !bundle.web.is_empty() {
-                            info!("[*] Web context found. Augmenting prompt.");
-                            augmented_prompt.push_str("[WEB SEARCH RESULTS]\n");
-                            augmented_prompt.push_str(&bundle.web);
-                            augmented_prompt.push_str("\n\n");
-                        }
-                        if !bundle.local.is_empty() {
-                            info!("[*] Local knowledge found. Augmenting prompt.");
-                            augmented_prompt.push_str("[LOCAL KNOWLEDGE]\n");
-                            augmented_prompt.push_str(&bundle.local);
-                            augmented_prompt.push_str("\n\n");
-                        }
-                        augmented_prompt.push_str("[QUESTION]\n");
-                        augmented_prompt.push_str(&prompt);
+                        let augmented_prompt = crate::prompts::build_text_query(&bundle.web, &bundle.local, &prompt);
 
                         let warnings = bundle.warnings;
 

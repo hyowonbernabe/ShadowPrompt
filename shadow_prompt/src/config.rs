@@ -97,15 +97,31 @@ impl Default for GeneralConfig {
     }
 }
 
-fn default_browser_pass() -> String { "Ctrl+Shift+8".to_string() }
-fn default_browser_exec() -> String { "Ctrl+Shift+9".to_string() }
-fn default_browser_exec_single() -> String { "Ctrl+Shift+7".to_string() }
-fn default_browser_abort() -> String { "Ctrl+Shift+0".to_string() }
-fn default_browser_incognito() -> String { "Ctrl+Shift+I".to_string() }
+fn default_browser_pass() -> String {
+    "Ctrl+Shift+8".to_string()
+}
+fn default_browser_exec() -> String {
+    "Ctrl+Shift+9".to_string()
+}
+fn default_browser_exec_single() -> String {
+    "Ctrl+Shift+7".to_string()
+}
+fn default_browser_abort() -> String {
+    "Ctrl+Shift+0".to_string()
+}
+fn default_browser_incognito() -> String {
+    "Ctrl+Shift+I".to_string()
+}
 
-fn default_key_cycle_model_general() -> String { "Ctrl+Shift+LeftArrow".to_string() }
-fn default_key_cycle_model_forms() -> String { "Ctrl+Shift+RightArrow".to_string() }
-fn default_key_cycle_provider() -> String { "Ctrl+Shift+UpArrow".to_string() }
+fn default_key_cycle_model_general() -> String {
+    "Ctrl+Shift+LeftArrow".to_string()
+}
+fn default_key_cycle_model_forms() -> String {
+    "Ctrl+Shift+RightArrow".to_string()
+}
+fn default_key_cycle_provider() -> String {
+    "Ctrl+Shift+UpArrow".to_string()
+}
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[allow(dead_code)]
@@ -349,9 +365,9 @@ pub struct GroqConfig {
     pub browser_model_id: String,
     #[serde(default)]
     pub browser_model_choices: Vec<String>,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub supports_search: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub supports_vision: bool,
 }
 
@@ -363,8 +379,8 @@ impl Default for GroqConfig {
             model_choices: Vec::new(),
             browser_model_id: String::new(),
             browser_model_choices: Vec::new(),
-            supports_search: false,
-            supports_vision: false,
+            supports_search: true,
+            supports_vision: true,
         }
     }
 }
@@ -376,14 +392,14 @@ pub struct OpenRouterConfig {
     pub model_id: String,
     #[serde(default)]
     pub model_choices: Vec<String>,
-    /// Model ID for browser/Google Forms queries. Empty = use `model_id`.
+    /// Model ID for Google Forms automation. Leave empty to reuse model_id above.
     #[serde(default)]
     pub browser_model_id: String,
     #[serde(default)]
     pub browser_model_choices: Vec<String>,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub supports_search: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub supports_vision: bool,
 }
 
@@ -581,8 +597,8 @@ mod tests {
         let content = example
             .replace("YOUR_GROQ_API_KEY_HERE", "")
             .replace("YOUR_OPENROUTER_API_KEY_HERE", "");
-        let config: Config = toml::from_str(&content)
-            .expect("config.example.toml should parse without errors");
+        let config: Config =
+            toml::from_str(&content).expect("config.example.toml should parse without errors");
         assert_eq!(config.general.wake_key, "Ctrl+Shift+Space");
         assert_eq!(config.general.panic_key, "Ctrl+Shift+F12");
         assert_eq!(config.general.key_browser_pass, "Ctrl+Shift+8");
@@ -597,7 +613,10 @@ mod tests {
         assert!(config.search.serper_api_key.is_none());
         assert_eq!(config.models.browser_provider, "");
         assert_eq!(config.models.groq.as_ref().unwrap().browser_model_id, "");
-        assert_eq!(config.models.openrouter.as_ref().unwrap().browser_model_id, "");
+        assert_eq!(
+            config.models.openrouter.as_ref().unwrap().browser_model_id,
+            ""
+        );
         assert_eq!(config.models.ollama.as_ref().unwrap().browser_model_id, "");
     }
 
@@ -633,7 +652,8 @@ min_score = 0.5
 [safety]
 daily_spend_limit_usd = 0.5
 "##;
-        let config: Config = toml::from_str(toml).expect("should parse without form indicator fields");
+        let config: Config =
+            toml::from_str(toml).expect("should parse without form indicator fields");
         assert_eq!(config.visuals.form_indicator_position, "bottom-right");
         assert_eq!(config.visuals.form_indicator_offset, 0);
         assert_eq!(config.visuals.form_indicator_x_axis, 0);
@@ -688,7 +708,10 @@ daily_spend_limit_usd = 0.5
         let config: Config = toml::from_str(toml).expect("should parse without browser fields");
         assert_eq!(config.models.browser_provider, "");
         assert_eq!(config.models.groq.as_ref().unwrap().browser_model_id, "");
-        assert_eq!(config.models.openrouter.as_ref().unwrap().browser_model_id, "");
+        assert_eq!(
+            config.models.openrouter.as_ref().unwrap().browser_model_id,
+            ""
+        );
         assert_eq!(config.models.ollama.as_ref().unwrap().browser_model_id, "");
     }
 }

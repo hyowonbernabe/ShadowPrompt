@@ -168,9 +168,9 @@ browser_model_id = ""
 # Array of string models to cycle through when using key_cycle_model_forms
 browser_model_choices = ["llama-3.1-8b-instant", "llama3-70b-8192", "mixtral-8x7b-32768"]
 # Set true if this model supports built-in web search (function calling)
-supports_search = false
+supports_search = true
 # Set true if this model can process images (e.g. llama-3.2-11b-vision-preview)
-supports_vision = false
+supports_vision = true
 
 [models.openrouter]
 api_key  = "YOUR_OPENROUTER_API_KEY_HERE"
@@ -182,9 +182,9 @@ browser_model_id = ""
 # Array of string models to cycle through when using key_cycle_model_forms
 browser_model_choices = ["google/gemma-3-27b-it:free", "anthropic/claude-3.5-sonnet:beta", "openai/gpt-4o-mini"]
 # Set true if this model supports built-in search
-supports_search = false
+supports_search = true
 # Set true if this model can process images (e.g. google/gemini-2.0-flash-exp)
-supports_vision = false
+supports_vision = true
 
 [models.ollama]
 base_url = "http://localhost:11434"

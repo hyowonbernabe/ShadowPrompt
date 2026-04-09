@@ -3,7 +3,10 @@ use reqwest::Client;
 use serde_json::{json, Value};
 use crate::config::Config;
 use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::time::sleep;
+
+static DEBUG: AtomicBool = AtomicBool::new(false);
 
 /// Selects which provider + model ID to use from config.
 #[derive(Debug, Clone, PartialEq)]
@@ -17,6 +20,14 @@ pub enum ModelUseCase {
 pub struct LlmClient;
 
 impl LlmClient {
+    pub fn set_debug(enabled: bool) {
+        DEBUG.store(enabled, Ordering::Relaxed);
+    }
+
+    fn is_debug() -> bool {
+        DEBUG.load(Ordering::Relaxed)
+    }
+
     fn resolve_model_id<'a>(model_id: &'a str, browser_model_id: &'a str, use_case: &ModelUseCase) -> &'a str {
         match use_case {
             ModelUseCase::Browser if !browser_model_id.is_empty() => browser_model_id,
@@ -206,7 +217,7 @@ impl LlmClient {
             .context("Groq config missing")?;
 
         let model_id = Self::resolve_model_id(&groq_config.model_id, &groq_config.browser_model_id, use_case);
-        let system_prompt = Self::load_system_prompt();
+        let system_prompt = Self::get_system_prompt(use_case);
 
         let body = json!({
             "model": model_id,
@@ -239,12 +250,30 @@ impl LlmClient {
             .unwrap_or_else(|_| "You are a concise assistant.".to_string())
     }
 
+    fn load_forms_system_prompt() -> String {
+        let path = crate::config::get_exe_dir()
+            .join("config")
+            .join("forms_system_prompt.txt");
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|_| {
+                "You output ONLY valid JSON arrays of form actions. No markdown, no explanation.".to_string()
+            })
+    }
+
+    /// Returns the correct system prompt for the given use case.
+    fn get_system_prompt(use_case: &ModelUseCase) -> String {
+        match use_case {
+            ModelUseCase::Browser => Self::load_forms_system_prompt(),
+            ModelUseCase::General => Self::load_system_prompt(),
+        }
+    }
+
     async fn query_openrouter(client: &Client, prompt: &str, config: &Config, use_case: &ModelUseCase) -> Result<String> {
         let openrouter_config = config.models.openrouter.as_ref()
             .context("OpenRouter config missing")?;
 
         let model_id = Self::resolve_model_id(&openrouter_config.model_id, &openrouter_config.browser_model_id, use_case);
-        let system_prompt = Self::load_system_prompt();
+        let system_prompt = Self::get_system_prompt(use_case);
 
         let body = json!({
             "model": model_id,
@@ -273,7 +302,7 @@ impl LlmClient {
     async fn query_ollama(client: &Client, prompt: &str, config: &Config, use_case: &ModelUseCase) -> Result<String> {
          let ollama_config = config.models.ollama.as_ref().context("Ollama config missing")?;
          let model_id = Self::resolve_model_id(&ollama_config.model_id, &ollama_config.browser_model_id, use_case);
-         let system_prompt = Self::load_system_prompt();
+         let system_prompt = Self::get_system_prompt(use_case);
 
          let body = json!({
              "model": model_id,
@@ -360,7 +389,7 @@ impl LlmClient {
             .context("Groq config missing")?;
 
         let model_id = Self::resolve_model_id(&groq_config.model_id, &groq_config.browser_model_id, use_case);
-        let system_prompt = Self::load_system_prompt();
+        let system_prompt = Self::get_system_prompt(use_case);
 
         let body = json!({
             "model": model_id,
@@ -393,15 +422,23 @@ impl LlmClient {
             .context("OpenRouter config missing")?;
 
         let model_id = Self::resolve_model_id(&openrouter_config.model_id, &openrouter_config.browser_model_id, use_case);
-        let system_prompt = Self::load_system_prompt();
+        let system_prompt = Self::get_system_prompt(use_case);
+
+        if Self::is_debug() {
+            println!("[DEBUG LLM] OpenRouter vision request");
+            println!("[DEBUG LLM]   model: {}", model_id);
+            println!("[DEBUG LLM]   image: {} b64 chars (~{} KB raw)", image_base64.len(), image_base64.len() * 3 / 4 / 1024);
+            println!("[DEBUG LLM]   prompt ({} chars): {}", prompt.len(), &prompt[..prompt.len().min(400)]);
+            println!("[DEBUG LLM]   system prompt ({} chars): {}", system_prompt.len(), &system_prompt[..system_prompt.len().min(200)]);
+        }
 
         let body = json!({
             "model": model_id,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": format!("data:image/png;base64,{}", image_base64)}}
+                    {"type": "image_url", "image_url": {"url": format!("data:image/png;base64,{}", image_base64)}},
+                    {"type": "text", "text": prompt}
                 ]}
             ]
         });
@@ -414,10 +451,17 @@ impl LlmClient {
 
         if !res.status().is_success() {
              let err_text = res.text().await?;
+             println!("[!] OpenRouter Vision Error: {}", err_text);
              anyhow::bail!("OpenRouter Vision API Error: {}", err_text);
         }
 
         let json: Value = res.json().await?;
+
+        if Self::is_debug() {
+            println!("[DEBUG LLM] OpenRouter vision raw response:");
+            println!("{}", serde_json::to_string_pretty(&json).unwrap_or_else(|_| format!("{:?}", json)));
+        }
+
         Self::extract_content(&json)
     }
 
@@ -426,7 +470,7 @@ impl LlmClient {
             .context("Ollama config missing")?;
 
         let model_id = Self::resolve_model_id(&ollama_config.model_id, &ollama_config.browser_model_id, use_case);
-        let system_prompt = Self::load_system_prompt();
+        let system_prompt = Self::get_system_prompt(use_case);
         let body = json!({
             "model": model_id,
             "prompt": prompt,

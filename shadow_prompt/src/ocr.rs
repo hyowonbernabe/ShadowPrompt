@@ -59,6 +59,26 @@ impl OcrManager {
         let png_bytes = encode_bgra_to_png(&pixels, width, height)?;
         Ok(base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png_bytes))
     }
+
+    pub fn save_debug_screenshot(image_b64: &str) -> Result<std::path::PathBuf> {
+        use base64::Engine;
+        
+        let image_data = base64::engine::general_purpose::STANDARD
+            .decode(image_b64)
+            .context("Failed to decode base64 image")?;
+        
+        let exe_dir = crate::config::get_exe_dir();
+        let debug_dir = exe_dir.join("data").join("logs").join("debug_screenshots");
+        std::fs::create_dir_all(&debug_dir)?;
+        
+        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+        let filename = format!("ocr_capture_{}.png", timestamp);
+        let filepath = debug_dir.join(&filename);
+        
+        std::fs::write(&filepath, &image_data)?;
+        
+        Ok(filepath)
+    }
 }
 
 fn capture_pixels(x: i32, y: i32, width: i32, height: i32) -> Result<Vec<u8>> {
