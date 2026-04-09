@@ -385,9 +385,11 @@ impl LlmClient {
         let ollama_config = config.models.ollama.as_ref()
             .context("Ollama config missing")?;
 
+        let system_prompt = Self::load_system_prompt();
         let body = json!({
             "model": ollama_config.model_id,
             "prompt": prompt,
+            "system": system_prompt,
             "images": [image_base64]
         });
 
