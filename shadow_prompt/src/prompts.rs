@@ -19,7 +19,12 @@ pub enum FormsNav {
 /// Output format rules are enforced by the system prompt.
 pub fn build_vision_query(web: &str, local: &str) -> String {
     let mut prompt = context_section(web, local);
-    prompt.push_str("Answer the question shown in this image.");
+    prompt.push_str(
+        "Before answering: identify and record EVERY number, label, and measurement \
+         visible in this image — including small or edge labels. \
+         Then work through the problem completely. \
+         Output only the final answer per the output rules.",
+    );
     prompt
 }
 
@@ -133,13 +138,14 @@ mod tests {
     #[test]
     fn test_build_vision_query_no_context() {
         let result = build_vision_query("", "");
-        assert_eq!(result, "Answer the question shown in this image.");
+        assert!(result.contains("identify and record EVERY number"));
+        assert!(result.contains("Output only the final answer"));
     }
 
     #[test]
     fn test_build_vision_query_with_context() {
         let result = build_vision_query("web results", "");
         assert!(result.contains("[WEB SEARCH RESULTS]\nweb results"));
-        assert!(result.ends_with("Answer the question shown in this image."));
+        assert!(result.contains("identify and record EVERY number"));
     }
 }
