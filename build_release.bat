@@ -58,10 +58,18 @@ mkdir "%RELEASE_DIR%\config" 2>nul
 mkdir "%RELEASE_DIR%\knowledge" 2>nul
 mkdir "%RELEASE_DIR%\data" 2>nul
 
-:: Copy system prompt if exists
+:: Copy config prompts
 if exist "config\system_prompt.txt" (
     echo [*] Copying system_prompt.txt...
     copy "config\system_prompt.txt" "%RELEASE_DIR%\config\" >nul
+)
+if exist "config\forms_system_prompt.txt" (
+    echo [*] Copying forms_system_prompt.txt...
+    copy "config\forms_system_prompt.txt" "%RELEASE_DIR%\config\" >nul
+)
+if exist "config\config.example.toml" (
+    echo [*] Copying config.example.toml...
+    copy "config\config.example.toml" "%RELEASE_DIR%\config\" >nul
 )
 
 :: Create README for users

@@ -461,6 +461,156 @@ impl LlmClient {
         Self::extract_content(&json)
     }
 
+    /// Query LLM with multiple images (for Google Forms questions that contain images).
+    /// Falls back to text-only if the provider doesn't support vision.
+    pub async fn query_with_multiple_images(
+        prompt: &str,
+        images: &[String],
+        config: &Config,
+        use_case: ModelUseCase,
+    ) -> Result<String> {
+        if images.is_empty() {
+            return Self::query(prompt, config, use_case).await;
+        }
+
+        let connect_timeout = Duration::from_secs(config.http.connect_timeout_secs);
+        let read_timeout = Duration::from_secs(config.http.read_timeout_secs);
+        let client = reqwest::Client::builder()
+            .connect_timeout(connect_timeout)
+            .timeout(read_timeout)
+            .build()?;
+
+        let provider = Self::resolve_provider(
+            &config.models.provider,
+            &config.models.browser_provider,
+            &use_case,
+        );
+
+        match provider {
+            "openrouter" => {
+                Self::query_openrouter_with_multiple_images(&client, prompt, images, config, &use_case).await
+            }
+            "groq" => {
+                // Groq vision API accepts only one image — use the first one
+                Self::query_groq_with_image(&client, prompt, &images[0], config, &use_case).await
+            }
+            "ollama" => {
+                Self::query_ollama_with_multiple_images(&client, prompt, images, config, &use_case).await
+            }
+            "auto" => {
+                // Prefer OpenRouter for multi-image (best multimodal support)
+                if let Some(or) = &config.models.openrouter {
+                    if !or.api_key.is_empty() && or.api_key != "your_openrouter_api_key_here" {
+                        if let Ok(res) = Self::query_openrouter_with_multiple_images(
+                            &client, prompt, images, config, &use_case,
+                        )
+                        .await
+                        {
+                            return Ok(res);
+                        }
+                    }
+                }
+                if let Some(groq) = &config.models.groq {
+                    if !groq.api_key.is_empty() && groq.api_key != "your_groq_api_key_here" {
+                        if let Ok(res) =
+                            Self::query_groq_with_image(&client, prompt, &images[0], config, &use_case)
+                                .await
+                        {
+                            return Ok(res);
+                        }
+                    }
+                }
+                anyhow::bail!("No vision-capable provider available for multi-image forms query")
+            }
+            _ => anyhow::bail!("Provider does not support vision: {}", provider),
+        }
+    }
+
+    async fn query_openrouter_with_multiple_images(
+        client: &Client,
+        prompt: &str,
+        images: &[String],
+        config: &Config,
+        use_case: &ModelUseCase,
+    ) -> Result<String> {
+        let openrouter_config = config.models.openrouter.as_ref()
+            .context("OpenRouter config missing")?;
+
+        let model_id = Self::resolve_model_id(
+            &openrouter_config.model_id,
+            &openrouter_config.browser_model_id,
+            use_case,
+        );
+        let system_prompt = Self::get_system_prompt(use_case);
+
+        // Build content array: all images first, then the text prompt
+        let mut content: Vec<Value> = images
+            .iter()
+            .map(|b64| {
+                json!({
+                    "type": "image_url",
+                    "image_url": {"url": format!("data:image/png;base64,{}", b64)}
+                })
+            })
+            .collect();
+        content.push(json!({"type": "text", "text": prompt}));
+
+        let body = json!({
+            "model": model_id,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content}
+            ]
+        });
+
+        let res = client
+            .post("https://openrouter.ai/api/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", openrouter_config.api_key.trim()))
+            .json(&body)
+            .send()
+            .await?;
+
+        if !res.status().is_success() {
+            let err_text = res.text().await?;
+            anyhow::bail!("OpenRouter Multi-Image API Error: {}", err_text);
+        }
+
+        let json: Value = res.json().await?;
+        Self::extract_content(&json)
+    }
+
+    async fn query_ollama_with_multiple_images(
+        client: &Client,
+        prompt: &str,
+        images: &[String],
+        config: &Config,
+        use_case: &ModelUseCase,
+    ) -> Result<String> {
+        let ollama_config = config.models.ollama.as_ref().context("Ollama config missing")?;
+        let model_id =
+            Self::resolve_model_id(&ollama_config.model_id, &ollama_config.browser_model_id, use_case);
+        let system_prompt = Self::get_system_prompt(use_case);
+
+        let body = json!({
+            "model": model_id,
+            "prompt": prompt,
+            "system": system_prompt,
+            "images": images,
+            "stream": false
+        });
+
+        let url = format!("{}/api/generate", ollama_config.base_url);
+        let res = client.post(&url).json(&body).send().await?;
+
+        if !res.status().is_success() {
+            anyhow::bail!("Ollama Multi-Image Error: {}", res.status());
+        }
+
+        let json: Value = res.json().await?;
+        let response = json["response"].as_str().context("No response field")?.to_string();
+        Ok(response)
+    }
+
     async fn query_ollama_with_image(client: &Client, prompt: &str, image_base64: &str, config: &Config, use_case: &ModelUseCase) -> Result<String> {
         let ollama_config = config.models.ollama.as_ref()
             .context("Ollama config missing")?;

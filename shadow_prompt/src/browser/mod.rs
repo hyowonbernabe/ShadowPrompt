@@ -5,6 +5,7 @@ use crate::config::Config;
 use crate::ui::UICommand;
 use crate::llm::ModelUseCase;
 use anyhow::{anyhow, Result};
+use base64::Engine;
 use headless_chrome::{Browser, LaunchOptions};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -186,7 +187,7 @@ pub async fn execute_form_flow(
 
         // 6a. Gather knowledge context from form questions
         let questions_summary = extract_questions_for_context(form_json);
-        
+
         let bundle = match knowledge_provider.gather_context(&questions_summary, &config).await {
             Ok(b) => b,
             Err(e) => {
@@ -208,7 +209,29 @@ pub async fn execute_form_flow(
         };
         let prompt = crate::prompts::build_forms_prompt(&bundle.web, &bundle.local, form_json, nav);
 
-        let llm_res = crate::llm::LlmClient::query(&prompt, &config, ModelUseCase::Browser).await?;
+        // 6c. If any questions contain image_url fields and the browser model supports vision,
+        //     fetch those images and send a multimodal request instead of text-only.
+        let image_urls = extract_image_urls(form_json);
+        let llm_res = if !image_urls.is_empty()
+            && crate::capabilities::ModelCapabilities::supports_vision_browser(&config)
+        {
+            let http_client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(config.http.read_timeout_secs))
+                .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .build()
+                .unwrap_or_default();
+            let images = fetch_images_as_base64(&image_urls, &http_client).await;
+            println!("[DEBUG] Forms: fetched {}/{} images", images.len(), image_urls.len());
+            crate::llm::LlmClient::query_with_multiple_images(
+                &prompt,
+                &images,
+                &config,
+                ModelUseCase::Browser,
+            )
+            .await?
+        } else {
+            crate::llm::LlmClient::query(&prompt, &config, ModelUseCase::Browser).await?
+        };
 
         // Clean markdown and conversational preamble if present
         let mut raw_actions = llm_res.replace("```json", "").replace("```", "").trim().to_string();
@@ -265,7 +288,7 @@ pub async fn execute_form_flow(
 
 fn extract_questions_for_context(form_json: &str) -> String {
     let mut questions = Vec::new();
-    
+
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(form_json) {
         if let Some(arr) = json.get("questions").and_then(|v| v.as_array()) {
             for item in arr {
@@ -275,6 +298,54 @@ fn extract_questions_for_context(form_json: &str) -> String {
             }
         }
     }
-    
+
     questions.join(" ")
+}
+
+/// Collect every `image_url` field from form questions (set by EXTRACTOR_JS when a question has an img).
+fn extract_image_urls(form_json: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    if let Ok(json) = serde_json::from_str::<Value>(form_json) {
+        if let Some(arr) = json.get("questions").and_then(|v| v.as_array()) {
+            for item in arr {
+                if let Some(url) = item.get("image_url").and_then(|v| v.as_str()) {
+                    if !url.is_empty() {
+                        urls.push(url.to_string());
+                    }
+                }
+            }
+        }
+    }
+    urls
+}
+
+/// Fetch each URL and return successfully-encoded base64 strings.
+/// Handles inline `data:image/...;base64,<data>` URLs without an HTTP round-trip.
+async fn fetch_images_as_base64(urls: &[String], client: &reqwest::Client) -> Vec<String> {
+    let mut results = Vec::new();
+    for url in urls {
+        // Inline data URL — extract the base64 payload directly
+        if let Some(rest) = url.strip_prefix("data:") {
+            if let Some(comma_pos) = rest.find(',') {
+                let payload = &rest[comma_pos + 1..];
+                results.push(payload.to_string());
+                continue;
+            }
+        }
+
+        // Regular HTTP(S) URL — fetch and encode
+        match client.get(url).send().await {
+            Ok(res) if res.status().is_success() => match res.bytes().await {
+                Ok(bytes) => {
+                    results.push(
+                        base64::engine::general_purpose::STANDARD.encode(&bytes),
+                    );
+                }
+                Err(e) => log::warn!("Image byte read failed ({}): {}", url, e),
+            },
+            Ok(res) => log::warn!("Image fetch HTTP {} ({})", res.status(), url),
+            Err(e) => log::warn!("Image fetch error ({}): {}", url, e),
+        }
+    }
+    results
 }
