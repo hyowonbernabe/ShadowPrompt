@@ -249,6 +249,9 @@ impl SetupWizard {
             SetupPage::Downloads => SetupPage::Credits,
             SetupPage::Credits => SetupPage::Credits,
         };
+
+        // Persist config after every confirmed page advance (crash safety)
+        let _ = self.config.save();
     }
 
     fn prev_page(&mut self) {
