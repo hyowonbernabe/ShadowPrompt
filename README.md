@@ -159,7 +159,6 @@ After setup, you can edit `config/config.toml` directly:
 wake_key = "Ctrl+Shift+Space"    # OCR mode
 model_key = "Ctrl+Shift+V"       # Query AI
 panic_key = "Ctrl+Shift+F12"     # Emergency exit
-use_rag = true                   # Enable local knowledge
 
 [models]
 provider = "groq"                # Options: groq, openrouter, ollama

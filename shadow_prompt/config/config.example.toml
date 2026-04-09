@@ -7,7 +7,6 @@ mode = "stealth"
 wake_key = "Ctrl+Shift+Space"    # OCR capture mode
 model_key = "Ctrl+Shift+V"       # Send clipboard to AI
 panic_key = "Ctrl+Shift+F12"     # Emergency exit
-use_rag = true
 
 [visuals]
 indicator_color = "#FF0000"
