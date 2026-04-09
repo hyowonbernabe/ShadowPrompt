@@ -1,5 +1,6 @@
 use anyhow::{Result, Context};
 use std::fs;
+use std::sync::{Arc, Mutex};
 
 use glob::glob;
 use fastembed::{TextEmbedding, InitOptions, EmbeddingModel};
@@ -24,7 +25,7 @@ struct RagIndex {
 }
 
 pub struct RagSystem {
-    embedding_model: Option<TextEmbedding>,
+    embedding_model: Option<Arc<Mutex<TextEmbedding>>>,
     config: Config,
     cached_index: tokio::sync::RwLock<Option<RagIndex>>,
     is_operational: bool,
@@ -41,7 +42,7 @@ impl RagSystem {
         options.cache_dir = get_exe_dir().join("data").join("models");
 
         let (model, is_operational, init_error) = match TextEmbedding::try_new(options) {
-            Ok(m) => (Some(m), true, None),
+            Ok(m) => (Some(Arc::new(Mutex::new(m))), true, None),
             Err(e) => {
                 let err_msg = e.to_string();
                 eprintln!("[!] Failed to initialize FastEmbed: {}", err_msg);
@@ -142,7 +143,7 @@ impl RagSystem {
         }
 
         let embedding_model = match &self.embedding_model {
-            Some(m) => m,
+            Some(m) => Arc::clone(m),
             None => return Ok(0),
         };
 
@@ -176,7 +177,11 @@ impl RagSystem {
         if !docs_to_embed.is_empty() {
             println!("[RAG] Found {} new/modified documents. Generating embeddings...", docs_to_embed.len());
             let texts: Vec<String> = docs_to_embed.iter().map(|(_, c, _)| c.clone()).collect();
-            let embeddings = embedding_model.embed(texts, None)?;
+            let model_ref = Arc::clone(&embedding_model);
+            let embeddings = tokio::task::spawn_blocking(move || {
+                let m = model_ref.lock().unwrap();
+                m.embed(texts, None)
+            }).await??;
 
             for (i, embedding) in embeddings.into_iter().enumerate() {
                 let (path, content, modified) = &docs_to_embed[i];
@@ -224,7 +229,7 @@ impl RagSystem {
         }
 
         let embedding_model = match &self.embedding_model {
-            Some(m) => m,
+            Some(m) => Arc::clone(m),
             None => return Ok(vec![]),
         };
 
@@ -246,7 +251,7 @@ impl RagSystem {
 
             if index_file_path.exists() {
                 // Load Index
-                // Note: We might be doing double work if multiple threads race here, 
+                // Note: We might be doing double work if multiple threads race here,
                 // but for this use case it's acceptable simplicity vs complexity of double-checked locking with async.
                 if let Ok(content) = fs::read_to_string(&index_file_path) {
                      if let Ok(index) = serde_json::from_str::<RagIndex>(&content) {
@@ -261,6 +266,16 @@ impl RagSystem {
             }
         }
 
+        // Embed the query outside the cache lock to avoid holding an async lock
+        // across a blocking ONNX inference call.
+        let model_ref = Arc::clone(&embedding_model);
+        let text_owned = text.to_string();
+        let query_embeddings = tokio::task::spawn_blocking(move || {
+            let m = model_ref.lock().unwrap();
+            m.embed(vec![text_owned], None)
+        }).await??;
+        let query_vec = &query_embeddings[0];
+
         // Now query from cache
         let cache = self.cached_index.read().await;
         let index = match &*cache {
@@ -271,10 +286,6 @@ impl RagSystem {
         if index.documents.is_empty() {
             return Ok(vec![]);
         }
-
-        // Embed Query
-        let query_embeddings = embedding_model.embed(vec![text.to_string()], None)?;
-        let query_vec = &query_embeddings[0];
 
         // Calculate Cosine Similarity
         let mut scores: Vec<(f32, &Document)> = index.documents.iter().map(|doc| {
