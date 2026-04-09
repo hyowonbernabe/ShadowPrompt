@@ -390,7 +390,8 @@ impl LlmClient {
             "model": ollama_config.model_id,
             "prompt": prompt,
             "system": system_prompt,
-            "images": [image_base64]
+            "images": [image_base64],
+            "stream": false
         });
 
         let url = format!("{}/api/generate", ollama_config.base_url);
