@@ -1,74 +1,177 @@
-# ShadowPrompt Configuration Example
-# Copy this file to config.toml and fill in your API keys
-# Or run the Setup Wizard which will create config.toml for you
+# ShadowPrompt Configuration Reference
+# =====================================
+# Copy this file to config.toml and fill in your values,
+# OR run the Setup Wizard (shadow_prompt.exe --setup) which writes config.toml for you.
+#
+# After editing, kill and relaunch ShadowPrompt for changes to take effect.
 
 [general]
+# Application mode. Currently only "stealth" is supported.
 mode = "stealth"
-wake_key = "Ctrl+Shift+Space"    # OCR capture mode
-model_key = "Ctrl+Shift+V"       # Send clipboard to AI
-panic_key = "Ctrl+Shift+F12"     # Emergency exit
+
+# --- Core Hotkeys ---
+# Format: modifier(s) + key, e.g. "Ctrl+Shift+Space", "Ctrl+Alt+F1"
+# Supported modifiers: Ctrl, Shift, Alt
+# Supported keys: A-Z, 0-9, F1-F12, Space, Enter, Esc, Tab, Backspace
+# All hotkeys must be unique.
+
+# Enter OCR screen-capture selection mode
+wake_key = "Ctrl+Shift+Space"
+
+# Send clipboard contents to AI for answering
+model_key = "Ctrl+Shift+V"
+
+# Emergency exit — clears clipboard and quits immediately
+panic_key = "Ctrl+Shift+F12"
+
+# Print debug info (not needed in normal use; requires --debug flag or debug feature)
+debug = false
+
+# --- Headless Browser Hotkeys ---
+# These control the Google Forms automation feature.
+
+# Copy password from clipboard and hold it in memory for browser injection
+key_browser_pass = "Ctrl+Shift+8"
+
+# Execute form flow automatically (all pages)
+key_browser_exec = "Ctrl+Shift+9"
+
+# Execute form flow on current page only
+key_browser_exec_single = "Ctrl+Shift+7"
+
+# Abort a running headless browser task
+key_browser_abort = "Ctrl+Shift+0"
+
+# Launch incognito Chrome/Edge with remote debugging enabled
+key_browser_incognito = "Ctrl+Shift+I"
 
 [visuals]
+# Indicator pixel color when an error or processing fallback occurs (hex RGB)
 indicator_color = "#FF0000"
+
+# Indicator pixel color when the app is idle and ready
 ready_color = "#00FF00"
+
+# Corner where the status indicator pixel appears
+# Options: "top-right", "top-left", "bottom-right", "bottom-left"
 position = "top-right"
-size = 5
+
+# Size of the indicator pixel in screen pixels
+size = 3
+
+# Offset from the corner in pixels (positive = inward)
 offset = 0
+
+# Manual X/Y position override in pixels (0 = use position + offset)
 x_axis = 0
 y_axis = 0
-color_mcq_a = "#00FFFF"          # Cyan - Answer A
-color_mcq_b = "#FF00FF"          # Magenta - Answer B
-color_mcq_c = "#FFFF00"          # Yellow - Answer C
-color_mcq_d = "#000000"          # Black - Answer D
-color_mcq_none = "#FFFFFF"       # White - No MCQ detected
+
+# --- MCQ Indicator Colors ---
+# When an MCQ answer is detected, the indicator changes color to signal the choice.
+color_mcq_a = "#00FFFF"    # Cyan    — Answer A
+color_mcq_b = "#FF00FF"    # Magenta — Answer B
+color_mcq_c = "#FFFF00"    # Yellow  — Answer C
+color_mcq_d = "#000000"    # Black   — Answer D
+color_mcq_none = "#FFFFFF" # White   — No MCQ / ambiguous
+
+# Indicator color while the AI is processing a request
 color_processing = "#FF0000"
+
+# Whether to change the mouse cursor while processing (not yet implemented)
 cursor_change = false
 
-# Text Overlay (Answer Display)
+# --- True/False Indicator Colors ---
+color_true  = "#00FF00"   # Green    — True
+color_false = "#800000"   # Dark red — False
+
+# --- Text Answer Overlay ---
+# A floating text window shown at the screen edge with the AI's answer.
+
+# Enable or disable the text overlay entirely
 text_overlay_enabled = true
-text_overlay_position = "bottom-right"  # Options: top-left, top-right, bottom-left, bottom-right
-text_overlay_font_size = 16
-text_overlay_bg_opacity = 200  # 0-255
-text_overlay_text_opacity = 255  # 0-255
+
+# Where to show the overlay
+# Options: "top-right", "top-left", "bottom-right", "bottom-left"
+text_overlay_position = "bottom-right"
+
+# Offset from the screen edge in pixels
+text_overlay_offset = 10
+
+# Manual X/Y override (0 = use position + offset)
+text_overlay_x_axis = 0
+text_overlay_y_axis = 0
+
+# Font size in points
+text_overlay_font_size = 8
+
+# Background opacity: 0 = fully transparent, 255 = opaque
+text_overlay_bg_opacity = 0
+
+# Text opacity: 0 = invisible, 255 = fully opaque
+text_overlay_text_opacity = 255
+
+# Hotkey to toggle the overlay and indicator pixel visibility
+hide_key = "Ctrl+Shift+H"
 
 [models]
-# Options: "groq", "openrouter", "ollama"
-provider = "groq"
+# Which provider to use.
+# Options: "groq", "openrouter", "ollama", "auto"
+# "auto" cascades: Groq → OpenRouter → Ollama, using the first that succeeds.
+provider = "auto"
 
 [models.groq]
-api_key = "YOUR_GROQ_API_KEY_HERE"
+api_key  = "YOUR_GROQ_API_KEY_HERE"
 model_id = "llama-3.1-8b-instant"
-# Set to true if your model has built-in search (e.g., function calling models)
+# Set true if this model supports built-in web search (function calling)
 supports_search = false
-# Set to true if your model can process images (e.g., llama-3.2-11b-vision-preview)
+# Set true if this model can process images (e.g. llama-3.2-11b-vision-preview)
 supports_vision = false
 
 [models.openrouter]
-api_key = "YOUR_OPENROUTER_API_KEY_HERE"
+api_key  = "YOUR_OPENROUTER_API_KEY_HERE"
 model_id = "google/gemma-3-27b-it:free"
-# Set to true if your model has built-in search
+# Set true if this model supports built-in search
 supports_search = false
-# Set to true if your model can process images (e.g., google/gemini-2.0-flash-exp)
+# Set true if this model can process images (e.g. google/gemini-2.0-flash-exp)
 supports_vision = false
 
 [models.ollama]
 base_url = "http://localhost:11434"
 model_id = "llama3"
-# Set to true if your model has built-in search
+# Set true if this model supports built-in search
 supports_search = false
-# Set to true if your model can process images (e.g., llava)
+# Set true if this model can process images (e.g. llava)
 supports_vision = false
 
 [search]
+# Whether to augment queries with live web search results
 enabled = true
+# Maximum number of search results to include in the prompt
 max_results = 3
+# Search engine to use: "serper" (recommended) or "duckduckgo" (free, may rate-limit)
+engine = "serper"
+# Serper.dev API key (only needed when engine = "serper")
+# Get a free key at https://serper.dev
+serper_api_key = ""
 
 [rag]
+# Whether to search local knowledge files and include matching excerpts in prompts
 enabled = true
+# Path to the folder containing knowledge files (relative to exe directory)
 knowledge_path = "knowledge"
+# Path to the RAG vector index (relative to exe directory)
 index_path = "data/rag_index"
+# Maximum number of knowledge chunks to include in a prompt
 max_results = 3
+# Minimum cosine similarity score to include a result (0.0–1.0)
 min_score = 0.5
 
 [safety]
+# Maximum USD spend per day across all providers (not yet enforced — reserved for future use)
 daily_spend_limit_usd = 0.5
+
+[http]
+# Seconds to wait when establishing a connection to an LLM provider
+connect_timeout_secs = 10
+# Seconds to wait for a response once connected
+read_timeout_secs = 30

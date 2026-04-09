@@ -498,3 +498,24 @@ pub fn ensure_directories() -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_example_toml_parses() {
+        let example = include_str!("../../config/config.example.toml");
+        // Replace placeholder API keys so parsing doesn't fail on validation
+        let content = example
+            .replace("YOUR_GROQ_API_KEY_HERE", "")
+            .replace("YOUR_OPENROUTER_API_KEY_HERE", "");
+        let config: Config = toml::from_str(&content)
+            .expect("config.example.toml should parse without errors");
+        assert_eq!(config.general.wake_key, "Ctrl+Shift+Space");
+        assert_eq!(config.general.panic_key, "Ctrl+Shift+F12");
+        assert_eq!(config.general.key_browser_pass, "Ctrl+Shift+8");
+        assert_eq!(config.visuals.hide_key, "Ctrl+Shift+H");
+        assert_eq!(config.http.connect_timeout_secs, 10);
+    }
+}
