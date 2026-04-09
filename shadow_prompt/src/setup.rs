@@ -207,6 +207,14 @@ impl SetupWizard {
     }
 
     fn next_page(&mut self) {
+        // Clear in-flight test connections on page navigation
+        self.groq_test_rx = None;
+        self.openrouter_test_rx = None;
+        self.ollama_test_rx = None;
+        self.groq_test_result = None;
+        self.openrouter_test_result = None;
+        self.ollama_test_result = None;
+
         // Sync provider field before leaving LLM page
         if self.current_page == SetupPage::LLMProvider {
             self.sync_provider_field();
@@ -244,6 +252,14 @@ impl SetupWizard {
     }
 
     fn prev_page(&mut self) {
+        // Clear in-flight test connections on page navigation
+        self.groq_test_rx = None;
+        self.openrouter_test_rx = None;
+        self.ollama_test_rx = None;
+        self.groq_test_result = None;
+        self.openrouter_test_result = None;
+        self.ollama_test_result = None;
+
         self.current_page = match self.current_page {
             SetupPage::Landing => SetupPage::Landing,
             SetupPage::TermsOfService => SetupPage::Landing,
