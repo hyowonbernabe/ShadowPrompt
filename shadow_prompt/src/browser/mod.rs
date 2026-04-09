@@ -3,6 +3,7 @@ pub mod injector;
 
 use crate::config::Config;
 use crate::ui::UICommand;
+use crate::llm::ModelUseCase;
 use anyhow::{anyhow, Result};
 use headless_chrome::{Browser, LaunchOptions};
 use std::sync::mpsc::Sender;
@@ -204,7 +205,7 @@ Form JSON:\n{}",
             )
         };
 
-        let llm_res = crate::llm::LlmClient::query(&prompt, &config).await?;
+        let llm_res = crate::llm::LlmClient::query(&prompt, &config, ModelUseCase::Browser).await?;
 
         // Clean markdown if present
         let raw_actions = llm_res.replace("```json", "").replace("```", "").trim().to_string();
