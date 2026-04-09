@@ -184,26 +184,35 @@ pub async fn execute_form_flow(
         send_ui(format!("🤖 Calculating Page {}...", page_count));
 
         // 6. Query LLM
-        let prompt = if is_auto {
-            format!(
-                "You are an automated quiz solver filling out a Google Form. 
-Read the following JSON. It contains `questions` and `navigation` buttons. 
-CRITICAL RULE 1: If there is a `navigation` button of type `next`, you MUST include an action to click it as the VERY LAST item in your array after answering all questions on this page.
-CRITICAL RULE 2: You MUST NEVER click a button of type `submit`. If you see `submit`, do not interact with it.
-Return ONLY a JSON array of actions to take. Actions must be strictly formatted as: [{{\"id\": \"element_id\", \"action\": \"click\"}}, {{\"id\": \"element_id\", \"action\": \"type\", \"value\": \"text here\"}}]. Do NOT return markdown or explanation.
-Form JSON:\n{}",
-                form_json
-            )
+        let nav_rule = if is_auto {
+            "CRITICAL RULE 1: If there is a `navigation` button of type `next`, include a click action for it as the VERY LAST item in your array after all question answers.\nCRITICAL RULE 2: NEVER click a button of type `submit`."
         } else {
-            format!(
-                "You are an automated quiz solver filling out a Google Form. 
-Read the following JSON. It contains `questions` and `navigation` buttons. 
-CRITICAL RULE 1: You are in SINGLE-PAGE MODE. You MUST NOT interact with ANY navigation buttons. Do NOT click `next` or `submit`.
-Return ONLY a JSON array of actions to take to answer the questions on this page. Actions must be strictly formatted as: [{{\"id\": \"element_id\", \"action\": \"click\"}}, {{\"id\": \"element_id\", \"action\": \"type\", \"value\": \"text here\"}}]. Do NOT return markdown or explanation.
-Form JSON:\n{}",
-                form_json
-            )
+            "CRITICAL RULE: SINGLE-PAGE MODE. Do NOT interact with ANY navigation buttons. Do not click `next` or `submit`."
         };
+
+        let prompt = format!(
+            "You are an automated quiz solver filling out a Google Form.
+The JSON contains `questions` and `navigation` buttons. Answer every unanswered question.
+
+QUESTION TYPES — use exactly these action formats:
+- \"radio\": Click ONE option. Action: {{\"id\":\"<option_id>\",\"action\":\"click\"}}
+- \"checkbox\": Multi-select — click ALL correct options (one action per option). Action: {{\"id\":\"<option_id>\",\"action\":\"click\"}}
+- \"text\": Type answer. Action: {{\"id\":\"<input_id>\",\"action\":\"type\",\"value\":\"<answer>\"}}
+- \"dropdown\" with \"id\" field (native select): Action: {{\"id\":\"<select_id>\",\"action\":\"select_native\",\"value\":\"<exact option text>\"}}
+- \"dropdown\" with \"trigger_id\" field (custom dropdown): Action: {{\"id\":\"<trigger_id>\",\"action\":\"dropdown_select\",\"value\":\"<exact option text>\"}}
+- \"grid_radio\": Matrix — one click per row. Each row in `grid_rows` needs exactly one selected column. Action: {{\"id\":\"<row_col_id>\",\"action\":\"click\"}}
+- \"grid_checkbox\": Matrix with checkboxes — click all applicable options per row. Action: {{\"id\":\"<row_col_id>\",\"action\":\"click\"}}
+- \"date\": Fill each field in `fields` by label (Month, Day, Year with numeric values). Action: {{\"id\":\"<field_id>\",\"action\":\"type\",\"value\":\"<number>\"}}
+- \"time\": Fill each field in `fields` (Hour, Minute). Action: {{\"id\":\"<field_id>\",\"action\":\"type\",\"value\":\"<number>\"}}. For AM/PM field with is_select=true: {{\"id\":\"<ampm_id>\",\"action\":\"select_native\",\"value\":\"AM\"}}
+
+{nav_rule}
+
+Return ONLY a valid JSON array of actions. No markdown, no explanation, no extra text.
+Form JSON:
+{form_json}",
+            nav_rule = nav_rule,
+            form_json = form_json
+        );
 
         let llm_res = crate::llm::LlmClient::query(&prompt, &config, ModelUseCase::Browser).await?;
 
