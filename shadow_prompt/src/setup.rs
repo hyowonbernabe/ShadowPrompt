@@ -850,6 +850,11 @@ impl SetupWizard {
     /// - Multiple providers configured → "auto" (cascade mode)
     /// - Exactly one → that provider's name
     /// - None → "auto" (will fail gracefully at runtime)
+    ///
+    /// Note: This wizard is one-time-setup only. If a provider is unchecked here,
+    /// its credentials remain in config.toml but are not used (provider field
+    /// controls routing). Manual removal from config.toml is needed to fully
+    /// disable a previously configured provider.
     fn sync_provider_field(&mut self) {
         let groq_ok = self.provider_state.groq_enabled
             && self.config.models.groq.as_ref()
@@ -859,7 +864,10 @@ impl SetupWizard {
             && self.config.models.openrouter.as_ref()
                 .map(|o| !o.api_key.is_empty())
                 .unwrap_or(false);
-        let ollama_ok = self.provider_state.ollama_enabled;
+        let ollama_ok = self.provider_state.ollama_enabled
+            && self.config.models.ollama.as_ref()
+                .map(|o| !o.base_url.is_empty())
+                .unwrap_or(false);
 
         let enabled_count = [groq_ok, or_ok, ollama_ok].iter().filter(|&&b| b).count();
 
