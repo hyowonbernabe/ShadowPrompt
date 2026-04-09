@@ -193,6 +193,11 @@ impl SetupWizard {
     }
 
     fn next_page(&mut self) {
+        // Sync provider field before leaving LLM page
+        if self.current_page == SetupPage::LLMProvider {
+            self.sync_provider_field();
+        }
+
         // Validate before advancing
         if self.current_page == SetupPage::Hotkeys {
             if let Err(e) = validate_hotkeys_all(
@@ -839,6 +844,36 @@ impl SetupWizard {
             ui.add_space(8.0);
             ui.hyperlink_to("GitHub Repository", "https://github.com/hyowonbernabe/ShadowPrompt");
         });
+    }
+
+    /// Derive config.models.provider from which providers have valid credentials.
+    /// - Multiple providers configured → "auto" (cascade mode)
+    /// - Exactly one → that provider's name
+    /// - None → "auto" (will fail gracefully at runtime)
+    fn sync_provider_field(&mut self) {
+        let groq_ok = self.provider_state.groq_enabled
+            && self.config.models.groq.as_ref()
+                .map(|g| !g.api_key.is_empty())
+                .unwrap_or(false);
+        let or_ok = self.provider_state.openrouter_enabled
+            && self.config.models.openrouter.as_ref()
+                .map(|o| !o.api_key.is_empty())
+                .unwrap_or(false);
+        let ollama_ok = self.provider_state.ollama_enabled;
+
+        let enabled_count = [groq_ok, or_ok, ollama_ok].iter().filter(|&&b| b).count();
+
+        self.config.models.provider = if enabled_count > 1 {
+            "auto".to_string()
+        } else if groq_ok {
+            "groq".to_string()
+        } else if or_ok {
+            "openrouter".to_string()
+        } else if ollama_ok {
+            "ollama".to_string()
+        } else {
+            "auto".to_string()
+        };
     }
 
     // --- Download Logic ---
