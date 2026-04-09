@@ -136,8 +136,12 @@ async fn run_app() -> anyhow::Result<()> {
     let b_abort_keys = parse_keys(&config.general.key_browser_abort);
     let b_incognito_keys = parse_keys(&config.general.key_browser_incognito);
 
+    let cycle_gen_keys = parse_keys(&config.general.key_cycle_model_general);
+    let cycle_form_keys = parse_keys(&config.general.key_cycle_model_forms);
+    let cycle_provider_keys = parse_keys(&config.general.key_cycle_provider);
+
     println!("[*] Listening for Hotkeys...");
-    InputManager::start(wake_keys, model_keys, panic_keys, hide_keys, b_pass_keys, b_exec_keys, b_exec_single_keys, b_abort_keys, b_incognito_keys, tx);
+    InputManager::start(wake_keys, model_keys, panic_keys, hide_keys, b_pass_keys, b_exec_keys, b_exec_single_keys, b_abort_keys, b_incognito_keys, cycle_gen_keys, cycle_form_keys, cycle_provider_keys, tx);
 
     // 4. Main Event Loop
     println!("[*] ShadowPrompt is running. Press Panic Key to exit.");
@@ -148,6 +152,17 @@ async fn run_app() -> anyhow::Result<()> {
     
     let mut active_browser_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut stored_password: Option<String> = None;
+
+    let mut dynamic_config = config.clone();
+    
+    // State Trackers
+    let providers = vec!["openrouter", "groq", "ollama", "auto"];
+    let mut provider_idx = providers.iter().position(|&p| p == dynamic_config.models.provider).unwrap_or(0);
+    
+    let mut or_gen_idx = 0;
+    let mut or_form_idx = 0;
+    let mut groq_gen_idx = 0;
+    let mut groq_form_idx = 0;
 
     loop {
         // Check for Input Events (Non-blocking or blocking depending on design)
@@ -172,9 +187,9 @@ async fn run_app() -> anyhow::Result<()> {
                     println!("[*] OCR Region Captured: x={}, y={}, w={}, h={}", x, y, w, h);
                     let _ = ui_tx.send(UICommand::SetColor(0x0000FFFF));
 
-                    let config_clone = config.clone();
+                    let config_clone = dynamic_config.clone();
                     let ui_tx_clone = ui_tx.clone();
-                    let ready_color = parse_hex_color(&config.visuals.ready_color);
+                    let ready_color = parse_hex_color(&dynamic_config.visuals.ready_color);
                     
                     tokio::spawn(async move {
                         let supports_vision = ModelCapabilities::supports_vision(&config_clone);
@@ -265,13 +280,13 @@ async fn run_app() -> anyhow::Result<()> {
                 },
                 InputEvent::Model => {
                     println!("[!] EVENT: Model Key Pressed (Clipboard Trigger)");
-                    let processing_color = parse_hex_color(&config.visuals.color_processing);
+                    let processing_color = parse_hex_color(&dynamic_config.visuals.color_processing);
                     let _ = ui_tx.send(UICommand::SetColor(processing_color)); 
                     let _ = ui_tx.send(UICommand::ClearOverlayText);
                     
-                    let config_clone = config.clone();
+                    let config_clone = dynamic_config.clone();
                     let ui_tx_clone = ui_tx.clone();
-                    let ready_color = parse_hex_color(&config.visuals.ready_color);
+                    let ready_color = parse_hex_color(&dynamic_config.visuals.ready_color);
                     let kp_arc = knowledge_provider.clone();
 
                     tokio::spawn(async move {
@@ -378,20 +393,20 @@ async fn run_app() -> anyhow::Result<()> {
                     println!("[!] EVENT: Browser Pass Key Pressed");
                     if let Ok(text) = ClipboardManager::read() {
                         stored_password = Some(text);
-                        if config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("🔑 Password locked.".to_string())); }
+                        if dynamic_config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("🔑 Password locked.".to_string())); }
                     } else {
-                        if config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("❌ No password on clipboard.".to_string())); }
+                        if dynamic_config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("❌ No password on clipboard.".to_string())); }
                     }
                 },
                 InputEvent::BrowserAbort => {
                     println!("[!] EVENT: Browser Abort Key Pressed");
                     if let Some(handle) = active_browser_task.take() {
                         handle.abort();
-                        let aborted_color = parse_hex_color(&config.visuals.form_color_aborted);
+                        let aborted_color = parse_hex_color(&dynamic_config.visuals.form_color_aborted);
                         let _ = ui_tx.send(UICommand::SetFormColor(aborted_color));
-                        if config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("🛑 Headless Browser Aborted.".to_string())); }
+                        if dynamic_config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("🛑 Headless Browser Aborted.".to_string())); }
                     } else {
-                        if config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("ℹ️ No active browser task to abort.".to_string())); }
+                        if dynamic_config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("ℹ️ No active browser task to abort.".to_string())); }
                     }
                 },
                 InputEvent::BrowserExec | InputEvent::BrowserExecSingle => {
@@ -404,15 +419,15 @@ async fn run_app() -> anyhow::Result<()> {
                         _ => None,
                     };
 
-                    if config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("🧠 Initializing browser...".to_string())); }
+                    if dynamic_config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("🧠 Initializing browser...".to_string())); }
                     // Set form indicator to running/processing state
-                    let form_run_color = parse_hex_color(&config.visuals.color_processing);
+                    let form_run_color = parse_hex_color(&dynamic_config.visuals.color_processing);
                     let _ = ui_tx.send(UICommand::SetFormColor(form_run_color));
 
                     let p_clone = stored_password.clone();
-                    let c_clone = std::sync::Arc::new(config.clone());
+                    let c_clone = std::sync::Arc::new(dynamic_config.clone());
                     let tx_clone = ui_tx.clone();
-                    let debug_mode = config.general.debug;
+                    let debug_mode = dynamic_config.general.debug;
                     
                     active_browser_task = Some(tokio::spawn(async move {
                         if let Err(e) = crate::browser::execute_form_flow(url.as_deref(), p_clone.as_deref(), c_clone.clone(), tx_clone.clone(), is_auto).await {
@@ -428,10 +443,10 @@ async fn run_app() -> anyhow::Result<()> {
                 },
                 InputEvent::BrowserIncognito => {
                     println!("[!] EVENT: Browser Incognito Key Pressed");
-                    if config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("🌐 Launching Debug Incognito...".to_string())); }
+                    if dynamic_config.general.debug { let _ = ui_tx.send(UICommand::SetOverlayText("🌐 Launching Debug Incognito...".to_string())); }
                     
                     let tx_clone = ui_tx.clone();
-                    let debug_mode = config.general.debug;
+                    let debug_mode = dynamic_config.general.debug;
                     tokio::spawn(async move {
                         if let Err(e) = crate::browser::launch_incognito_debugger() {
                             if debug_mode { let _ = tx_clone.send(UICommand::SetOverlayText(format!("❌ Failed to launch Chrome: {}", e))); }
@@ -439,6 +454,125 @@ async fn run_app() -> anyhow::Result<()> {
                             if debug_mode { let _ = tx_clone.send(UICommand::SetOverlayText("✅ Incognito Debugger Ready.".to_string())); }
                         }
                     });
+                },
+                InputEvent::CycleProvider => {
+                    provider_idx = (provider_idx + 1) % providers.len();
+                    dynamic_config.models.provider = providers[provider_idx].to_string();
+                    let text = format!("Provider: {}", dynamic_config.models.provider.to_uppercase());
+                    let _ = ui_tx.send(UICommand::SetOverlayText(text));
+                    
+                    let ui_tx_clone = ui_tx.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        let _ = ui_tx_clone.send(UICommand::ClearOverlayText);
+                    });
+                },
+                InputEvent::CycleModelGeneral => {
+                    let provider = dynamic_config.models.provider.as_str();
+                    let mut text = String::new();
+                    
+                    match provider {
+                        "openrouter" => {
+                            if let Some(mut or_cfg) = dynamic_config.models.openrouter.clone() {
+                                if !or_cfg.model_choices.is_empty() {
+                                    or_gen_idx = (or_gen_idx + 1) % or_cfg.model_choices.len();
+                                    if or_cfg.model_choices[or_gen_idx].is_empty() {
+                                        or_gen_idx = (or_gen_idx + 1) % or_cfg.model_choices.len();
+                                    }
+                                    let chosen = or_cfg.model_choices[or_gen_idx].clone();
+                                    if !chosen.is_empty() {
+                                        or_cfg.model_id = chosen.clone();
+                                        dynamic_config.models.openrouter = Some(or_cfg);
+                                        text = format!("OR OCR: {}", chosen);
+                                    }
+                                }
+                            }
+                        },
+                        "groq" => {
+                            if let Some(mut groq_cfg) = dynamic_config.models.groq.clone() {
+                                if !groq_cfg.model_choices.is_empty() {
+                                    groq_gen_idx = (groq_gen_idx + 1) % groq_cfg.model_choices.len();
+                                    if groq_cfg.model_choices[groq_gen_idx].is_empty() {
+                                        groq_gen_idx = (groq_gen_idx + 1) % groq_cfg.model_choices.len();
+                                    }
+                                    let chosen = groq_cfg.model_choices[groq_gen_idx].clone();
+                                    if !chosen.is_empty() {
+                                        groq_cfg.model_id = chosen.clone();
+                                        dynamic_config.models.groq = Some(groq_cfg);
+                                        text = format!("Groq OCR: {}", chosen);
+                                    }
+                                }
+                            }
+                        },
+                        _ => {
+                            text = format!("Cycle not supported for {}", provider);
+                        }
+                    }
+                    
+                    if !text.is_empty() {
+                        let _ = ui_tx.send(UICommand::SetOverlayText(text));
+                        let ui_tx_clone = ui_tx.clone();
+                        tokio::spawn(async move {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                            let _ = ui_tx_clone.send(UICommand::ClearOverlayText);
+                        });
+                    }
+                },
+                InputEvent::CycleModelForms => {
+                    let active_provider = if dynamic_config.models.browser_provider.is_empty() {
+                        dynamic_config.models.provider.as_str()
+                    } else {
+                        dynamic_config.models.browser_provider.as_str()
+                    };
+                    
+                    let mut text = String::new();
+                    
+                    match active_provider {
+                        "openrouter" => {
+                            if let Some(mut or_cfg) = dynamic_config.models.openrouter.clone() {
+                                if !or_cfg.browser_model_choices.is_empty() {
+                                    or_form_idx = (or_form_idx + 1) % or_cfg.browser_model_choices.len();
+                                    if or_cfg.browser_model_choices[or_form_idx].is_empty() {
+                                        or_form_idx = (or_form_idx + 1) % or_cfg.browser_model_choices.len();
+                                    }
+                                    let chosen = or_cfg.browser_model_choices[or_form_idx].clone();
+                                    if !chosen.is_empty() {
+                                        or_cfg.browser_model_id = chosen.clone();
+                                        dynamic_config.models.openrouter = Some(or_cfg);
+                                        text = format!("OR Form: {}", chosen);
+                                    }
+                                }
+                            }
+                        },
+                        "groq" => {
+                            if let Some(mut groq_cfg) = dynamic_config.models.groq.clone() {
+                                if !groq_cfg.browser_model_choices.is_empty() {
+                                    groq_form_idx = (groq_form_idx + 1) % groq_cfg.browser_model_choices.len();
+                                    if groq_cfg.browser_model_choices[groq_form_idx].is_empty() {
+                                        groq_form_idx = (groq_form_idx + 1) % groq_cfg.browser_model_choices.len();
+                                    }
+                                    let chosen = groq_cfg.browser_model_choices[groq_form_idx].clone();
+                                    if !chosen.is_empty() {
+                                        groq_cfg.browser_model_id = chosen.clone();
+                                        dynamic_config.models.groq = Some(groq_cfg);
+                                        text = format!("Groq Form: {}", chosen);
+                                    }
+                                }
+                            }
+                        },
+                        _ => {
+                            text = format!("Cycle not supported for {}", active_provider);
+                        }
+                    }
+                    
+                    if !text.is_empty() {
+                        let _ = ui_tx.send(UICommand::SetOverlayText(text));
+                        let ui_tx_clone = ui_tx.clone();
+                        tokio::spawn(async move {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                            let _ = ui_tx_clone.send(UICommand::ClearOverlayText);
+                        });
+                    }
                 }
             }
         }

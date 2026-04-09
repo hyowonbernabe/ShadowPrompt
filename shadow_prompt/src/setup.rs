@@ -115,6 +115,12 @@ pub struct SetupWizard {
     browser_incognito_recorder: HotkeyRecorder,
     hotkey_error: Option<String>,
 
+    // Model Choice Buffers
+    groq_choices_input: String,
+    groq_browser_choices_input: String,
+    or_choices_input: String,
+    or_browser_choices_input: String,
+
     // Downloads
     downloading: bool,
     download_progress: f32,
@@ -137,6 +143,11 @@ impl SetupWizard {
     pub fn new() -> Self {
         let config = Config::load().unwrap_or_default();
         let provider_state = ProviderState::from_config(&config);
+        
+        let groq_choices_input = config.models.groq.as_ref().map(|g| g.model_choices.join(", ")).unwrap_or_default();
+        let groq_browser_choices_input = config.models.groq.as_ref().map(|g| g.browser_model_choices.join(", ")).unwrap_or_default();
+        let or_choices_input = config.models.openrouter.as_ref().map(|g| g.model_choices.join(", ")).unwrap_or_default();
+        let or_browser_choices_input = config.models.openrouter.as_ref().map(|g| g.browser_model_choices.join(", ")).unwrap_or_default();
 
         Self {
             current_page: SetupPage::Landing,
@@ -153,6 +164,10 @@ impl SetupWizard {
             browser_abort_recorder: HotkeyRecorder::new(),
             browser_incognito_recorder: HotkeyRecorder::new(),
             hotkey_error: None,
+            groq_choices_input,
+            groq_browser_choices_input,
+            or_choices_input,
+            or_browser_choices_input,
             downloading: false,
             download_progress: 0.0,
             download_status: "Ready to download.".to_string(),
@@ -531,12 +546,24 @@ impl SetupWizard {
                     ui.add(egui::TextEdit::singleline(&mut groq.model_id).desired_width(200.0));
                 });
                 ui.horizontal(|ui| {
+                    ui.label("Rotation Models:");
+                    if ui.add(egui::TextEdit::singleline(&mut self.groq_choices_input).hint_text("Comma separated (optional)").desired_width(200.0)).changed() {
+                        groq.model_choices = self.groq_choices_input.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                    }
+                });
+                ui.horizontal(|ui| {
                     ui.label("Form Model ID:");
                     ui.add(
                         egui::TextEdit::singleline(&mut groq.browser_model_id)
                             .hint_text("Leave blank to reuse Model ID above")
                             .desired_width(200.0)
                     );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Form Rotation Models:");
+                    if ui.add(egui::TextEdit::singleline(&mut self.groq_browser_choices_input).hint_text("Comma separated (optional)").desired_width(200.0)).changed() {
+                        groq.browser_model_choices = self.groq_browser_choices_input.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                    }
                 });
                 ui.add_space(4.0);
 
@@ -589,12 +616,24 @@ impl SetupWizard {
                     ui.add(egui::TextEdit::singleline(&mut or.model_id).desired_width(200.0));
                 });
                 ui.horizontal(|ui| {
+                    ui.label("Rotation Models:");
+                    if ui.add(egui::TextEdit::singleline(&mut self.or_choices_input).hint_text("Comma separated (optional)").desired_width(200.0)).changed() {
+                        or.model_choices = self.or_choices_input.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                    }
+                });
+                ui.horizontal(|ui| {
                     ui.label("Form Model ID:");
                     ui.add(
                         egui::TextEdit::singleline(&mut or.browser_model_id)
                             .hint_text("Leave blank to reuse Model ID above")
                             .desired_width(200.0)
                     );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Form Rotation Models:");
+                    if ui.add(egui::TextEdit::singleline(&mut self.or_browser_choices_input).hint_text("Comma separated (optional)").desired_width(200.0)).changed() {
+                        or.browser_model_choices = self.or_browser_choices_input.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                    }
                 });
                 ui.add_space(4.0);
                 let testing = self.openrouter_test_rx.is_some();

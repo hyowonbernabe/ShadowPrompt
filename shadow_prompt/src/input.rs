@@ -15,6 +15,9 @@ pub enum InputEvent {
     BrowserExecSingle,
     BrowserAbort,
     BrowserIncognito,
+    CycleModelGeneral,
+    CycleModelForms,
+    CycleProvider,
 }
 
 #[allow(dead_code)]
@@ -37,6 +40,9 @@ impl InputManager {
         b_exec_single_keys: Vec<Key>,
         b_abort_keys: Vec<Key>,
         b_incognito_keys: Vec<Key>,
+        cycle_gen_keys: Vec<Key>,
+        cycle_form_keys: Vec<Key>,
+        cycle_provider_keys: Vec<Key>,
         sender: Sender<InputEvent>,
     ) {
         thread::spawn(move || {
@@ -88,6 +94,18 @@ impl InputManager {
                             p1 = None;
                         } else if check_combo(&pressed_keys, &b_incognito_keys) {
                             let _ = sender.send(InputEvent::BrowserIncognito);
+                            is_selecting = false;
+                            p1 = None;
+                        } else if check_combo(&pressed_keys, &cycle_gen_keys) {
+                            let _ = sender.send(InputEvent::CycleModelGeneral);
+                            is_selecting = false;
+                            p1 = None;
+                        } else if check_combo(&pressed_keys, &cycle_form_keys) {
+                            let _ = sender.send(InputEvent::CycleModelForms);
+                            is_selecting = false;
+                            p1 = None;
+                        } else if check_combo(&pressed_keys, &cycle_provider_keys) {
+                            let _ = sender.send(InputEvent::CycleProvider);
                             is_selecting = false;
                             p1 = None;
                         }

@@ -45,6 +45,16 @@ key_browser_abort = "Ctrl+Shift+0"
 # Launch incognito Chrome/Edge with remote debugging enabled
 key_browser_incognito = "Ctrl+Shift+I"
 
+# --- Dynamic Model Rotation Hotkeys ---
+# Cycle between the configured providers in order
+key_cycle_provider = "Ctrl+Shift+UpArrow"
+
+# Cycle through the available OCR/Clipboard models (model_choices)
+key_cycle_model_general = "Ctrl+Shift+LeftArrow"
+
+# Cycle through the available Google Forms models (browser_model_choices)
+key_cycle_model_forms = "Ctrl+Shift+RightArrow"
+
 [visuals]
 # Indicator pixel color when an error or processing fallback occurs (hex RGB)
 indicator_color = "#FF0000"
@@ -151,8 +161,12 @@ browser_provider = ""
 [models.groq]
 api_key  = "YOUR_GROQ_API_KEY_HERE"
 model_id = "llama-3.1-8b-instant"
+# Array of string models to cycle through when using key_cycle_model_general
+model_choices = ["llama-3.1-8b-instant", "llama3-70b-8192", "mixtral-8x7b-32768"]
 # Model used for Google Forms automation. Leave empty to reuse model_id above.
 browser_model_id = ""
+# Array of string models to cycle through when using key_cycle_model_forms
+browser_model_choices = ["llama-3.1-8b-instant", "llama3-70b-8192", "mixtral-8x7b-32768"]
 # Set true if this model supports built-in web search (function calling)
 supports_search = false
 # Set true if this model can process images (e.g. llama-3.2-11b-vision-preview)
@@ -161,8 +175,12 @@ supports_vision = false
 [models.openrouter]
 api_key  = "YOUR_OPENROUTER_API_KEY_HERE"
 model_id = "google/gemma-3-27b-it:free"
+# Array of string models to cycle through when using key_cycle_model_general
+model_choices = ["google/gemma-3-27b-it:free", "anthropic/claude-3.5-sonnet:beta", "openai/gpt-4o-mini"]
 # Model used for Google Forms automation. Leave empty to reuse model_id above.
 browser_model_id = ""
+# Array of string models to cycle through when using key_cycle_model_forms
+browser_model_choices = ["google/gemma-3-27b-it:free", "anthropic/claude-3.5-sonnet:beta", "openai/gpt-4o-mini"]
 # Set true if this model supports built-in search
 supports_search = false
 # Set true if this model can process images (e.g. google/gemini-2.0-flash-exp)

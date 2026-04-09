@@ -20,6 +20,12 @@ pub fn parse_keys(config_str: &str) -> Vec<Key> {
             "backspace" => keys.push(Key::Backspace),
             "capslock" => keys.push(Key::CapsLock),
 
+            // Arrows
+            "leftarrow" | "left" => keys.push(Key::LeftArrow),
+            "rightarrow" | "right" => keys.push(Key::RightArrow),
+            "uparrow" | "up" => keys.push(Key::UpArrow),
+            "downarrow" | "down" => keys.push(Key::DownArrow),
+
             // F-Keys
             "f1" => keys.push(Key::F1),
             "f2" => keys.push(Key::F2),

@@ -66,6 +66,13 @@ pub struct GeneralConfig {
     pub key_browser_abort: String,
     #[serde(default = "default_browser_incognito")]
     pub key_browser_incognito: String,
+
+    #[serde(default = "default_key_cycle_model_general")]
+    pub key_cycle_model_general: String,
+    #[serde(default = "default_key_cycle_model_forms")]
+    pub key_cycle_model_forms: String,
+    #[serde(default = "default_key_cycle_provider")]
+    pub key_cycle_provider: String,
 }
 
 impl Default for GeneralConfig {
@@ -83,6 +90,9 @@ impl Default for GeneralConfig {
             key_browser_exec_single: default_browser_exec_single(),
             key_browser_abort: default_browser_abort(),
             key_browser_incognito: default_browser_incognito(),
+            key_cycle_model_general: default_key_cycle_model_general(),
+            key_cycle_model_forms: default_key_cycle_model_forms(),
+            key_cycle_provider: default_key_cycle_provider(),
         }
     }
 }
@@ -92,6 +102,10 @@ fn default_browser_exec() -> String { "Ctrl+Shift+9".to_string() }
 fn default_browser_exec_single() -> String { "Ctrl+Shift+7".to_string() }
 fn default_browser_abort() -> String { "Ctrl+Shift+0".to_string() }
 fn default_browser_incognito() -> String { "Ctrl+Shift+I".to_string() }
+
+fn default_key_cycle_model_general() -> String { "Ctrl+Shift+LeftArrow".to_string() }
+fn default_key_cycle_model_forms() -> String { "Ctrl+Shift+RightArrow".to_string() }
+fn default_key_cycle_provider() -> String { "Ctrl+Shift+UpArrow".to_string() }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[allow(dead_code)]
@@ -328,9 +342,13 @@ impl Default for ModelConfig {
 pub struct GroqConfig {
     pub api_key: String,
     pub model_id: String,
+    #[serde(default)]
+    pub model_choices: Vec<String>,
     /// Model ID for browser/Google Forms queries. Empty = use `model_id`.
     #[serde(default)]
     pub browser_model_id: String,
+    #[serde(default)]
+    pub browser_model_choices: Vec<String>,
     #[serde(default)]
     pub supports_search: bool,
     #[serde(default)]
@@ -342,7 +360,9 @@ impl Default for GroqConfig {
         Self {
             api_key: "".to_string(),
             model_id: "llama-3.1-8b-instant".to_string(),
+            model_choices: Vec::new(),
             browser_model_id: String::new(),
+            browser_model_choices: Vec::new(),
             supports_search: false,
             supports_vision: false,
         }
@@ -354,9 +374,13 @@ impl Default for GroqConfig {
 pub struct OpenRouterConfig {
     pub api_key: String,
     pub model_id: String,
+    #[serde(default)]
+    pub model_choices: Vec<String>,
     /// Model ID for browser/Google Forms queries. Empty = use `model_id`.
     #[serde(default)]
     pub browser_model_id: String,
+    #[serde(default)]
+    pub browser_model_choices: Vec<String>,
     #[serde(default)]
     pub supports_search: bool,
     #[serde(default)]
