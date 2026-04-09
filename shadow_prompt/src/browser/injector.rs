@@ -25,7 +25,11 @@ pub const EXTRACTOR_JS: &str = r#"
 
             // --- GRID RADIO: multiple radiogroups = one per row in a matrix ---
             var radioGroups = Array.from(item.querySelectorAll('[role="radiogroup"]'));
-            if (radioGroups.length > 1) {
+            var isLabeledGrid = radioGroups.length > 1 &&
+                radioGroups.every(function(g) {
+                    return g.getAttribute('aria-label') || g.getAttribute('aria-labelledby');
+                });
+            if (isLabeledGrid) {
                 qd.type = 'grid_radio';
                 qd.grid_rows = [];
                 var colHeaders = [];
@@ -52,10 +56,10 @@ pub const EXTRACTOR_JS: &str = r#"
             }
 
             // --- RADIO: single radiogroup = standard multiple choice ---
-            else if (radioGroups.length === 1) {
+            else if (radioGroups.length >= 1) {
                 qd.type = 'radio';
                 qd.options = [];
-                radioGroups[0].querySelectorAll('[role="radio"]').forEach(function(opt, optIdx) {
+                Array.from(item.querySelectorAll('[role="radio"]')).forEach(function(opt, optIdx) {
                     if (opt.getAttribute('aria-checked') === 'true') isAnswered = true;
                     var label = opt.getAttribute('aria-label') || opt.getAttribute('data-value') || opt.innerText;
                     var oid = opt.id || (cid + '_opt_' + optIdx);
@@ -120,10 +124,14 @@ pub const EXTRACTOR_JS: &str = r#"
                         });
                     } else {
                         var lb = item.querySelector('[role="listbox"]');
-                        var trigger = item.querySelector('[role="button"]') || lb;
-                        var tid = (trigger ? trigger.id : null) || (cid + '_trigger');
-                        if (trigger) trigger.id = tid;
-                        qd.trigger_id = tid;
+                        var trigger = item.querySelector('[role="button"]');
+                        if (trigger) {
+                            var tid = trigger.id || (cid + '_trigger');
+                            trigger.id = tid;
+                            qd.trigger_id = tid;
+                        } else {
+                            qd.trigger_id = null;
+                        }
                         if (lb && lb.getAttribute('aria-activedescendant')) isAnswered = true;
                         item.querySelectorAll('[role="option"]').forEach(function(opt, optIdx) {
                             var optLabel = opt.getAttribute('aria-label') || opt.innerText.trim();
@@ -175,7 +183,7 @@ pub const EXTRACTOR_JS: &str = r#"
                 }
             }
 
-            if (!isAnswered) { result.push(qd); }
+            if (!isAnswered && qd.type !== 'unknown') { result.push(qd); }
         });
 
         var navButtons = [];
