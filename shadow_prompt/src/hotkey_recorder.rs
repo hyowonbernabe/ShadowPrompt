@@ -185,36 +185,63 @@ pub fn hotkey_field(
     changed
 }
 
-/// Validate hotkeys don't conflict
+/// Validate that all 9 hotkeys are unique. Returns Err with a human-readable
+/// message naming both conflicting keys if any pair matches.
+pub fn validate_hotkeys_all(
+    wake: &str,
+    model: &str,
+    panic: &str,
+    hide: &str,
+    b_pass: &str,
+    b_exec: &str,
+    b_exec_single: &str,
+    b_abort: &str,
+    b_incognito: &str,
+) -> Result<(), String> {
+    let keys = [
+        ("Wake",                wake),
+        ("Model",               model),
+        ("Panic",               panic),
+        ("Hide",                hide),
+        ("Browser Pass",        b_pass),
+        ("Browser Exec",        b_exec),
+        ("Browser Exec Single", b_exec_single),
+        ("Browser Abort",       b_abort),
+        ("Browser Incognito",   b_incognito),
+    ];
+
+    for i in 0..keys.len() {
+        for j in (i + 1)..keys.len() {
+            let (name_a, key_a) = keys[i];
+            let (name_b, key_b) = keys[j];
+            if !key_a.is_empty() && !key_b.is_empty()
+                && key_a.to_lowercase() == key_b.to_lowercase()
+            {
+                return Err(format!(
+                    "{} and {} hotkeys cannot be the same (both: {})",
+                    name_a, name_b, key_a
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Kept for any existing call sites — delegates to validate_hotkeys_all.
+#[allow(dead_code)]
 pub fn validate_hotkeys(
     wake: &str,
     model: &str,
     panic: &str,
     hide: Option<&str>,
 ) -> Result<(), String> {
-    if wake == model {
-        return Err("Wake and Model hotkeys cannot be the same".to_string());
-    }
-    if wake == panic {
-        return Err("Wake and Panic hotkeys cannot be the same".to_string());
-    }
-    if model == panic {
-        return Err("Model and Panic hotkeys cannot be the same".to_string());
-    }
-    if let Some(hide_key) = hide {
-        if !hide_key.is_empty() {
-            if wake == hide_key {
-                return Err("Wake and Hide hotkeys cannot be the same".to_string());
-            }
-            if model == hide_key {
-                return Err("Model and Hide hotkeys cannot be the same".to_string());
-            }
-            if panic == hide_key {
-                return Err("Panic and Hide hotkeys cannot be the same".to_string());
-            }
-        }
-    }
-    Ok(())
+    validate_hotkeys_all(
+        wake,
+        model,
+        panic,
+        hide.unwrap_or(""),
+        "", "", "", "", "",
+    )
 }
 
 fn key_to_string(key: egui::Key) -> String {
@@ -328,5 +355,55 @@ mod tests {
         recorder.peak_modifiers.ctrl = true;
         recorder.cancel();
         assert!(!recorder.peak_modifiers.ctrl);
+    }
+
+    #[test]
+    fn test_validate_all_hotkeys_no_conflict() {
+        let result = validate_hotkeys_all(
+            "Ctrl+Shift+Space",
+            "Ctrl+Shift+V",
+            "Ctrl+Shift+F12",
+            "Ctrl+Shift+H",
+            "Ctrl+Shift+8",
+            "Ctrl+Shift+9",
+            "Ctrl+Shift+7",
+            "Ctrl+Shift+0",
+            "Ctrl+Shift+I",
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_all_hotkeys_browser_conflict() {
+        // browser exec and browser pass are the same
+        let result = validate_hotkeys_all(
+            "Ctrl+Shift+Space",
+            "Ctrl+Shift+V",
+            "Ctrl+Shift+F12",
+            "Ctrl+Shift+H",
+            "Ctrl+Shift+8",  // b_pass
+            "Ctrl+Shift+8",  // b_exec — same as b_pass!
+            "Ctrl+Shift+7",
+            "Ctrl+Shift+0",
+            "Ctrl+Shift+I",
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_all_hotkeys_main_vs_browser_conflict() {
+        // wake key matches browser abort
+        let result = validate_hotkeys_all(
+            "Ctrl+Shift+Space", // wake
+            "Ctrl+Shift+V",
+            "Ctrl+Shift+F12",
+            "Ctrl+Shift+H",
+            "Ctrl+Shift+8",
+            "Ctrl+Shift+9",
+            "Ctrl+Shift+7",
+            "Ctrl+Shift+Space", // b_abort — same as wake!
+            "Ctrl+Shift+I",
+        );
+        assert!(result.is_err());
     }
 }

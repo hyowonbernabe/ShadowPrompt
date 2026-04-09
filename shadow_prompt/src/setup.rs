@@ -2,7 +2,7 @@ use std::sync::mpsc::{self, Receiver};
 use eframe::egui;
 use crate::config::Config;
 use crate::tos_text::{TOS_TEXT, TOS_VERSION};
-use crate::hotkey_recorder::{HotkeyRecorder, hotkey_field, validate_hotkeys};
+use crate::hotkey_recorder::{HotkeyRecorder, hotkey_field, validate_hotkeys_all};
 use crate::color_picker::{color_picker, color_picker_compact};
 use std::path::Path;
 use crate::llm::LlmClient;
@@ -195,11 +195,16 @@ impl SetupWizard {
     fn next_page(&mut self) {
         // Validate before advancing
         if self.current_page == SetupPage::Hotkeys {
-            if let Err(e) = validate_hotkeys(
+            if let Err(e) = validate_hotkeys_all(
                 &self.config.general.wake_key,
                 &self.config.general.model_key,
                 &self.config.general.panic_key,
-                Some(&self.config.visuals.hide_key),
+                &self.config.visuals.hide_key,
+                &self.config.general.key_browser_pass,
+                &self.config.general.key_browser_exec,
+                &self.config.general.key_browser_exec_single,
+                &self.config.general.key_browser_abort,
+                &self.config.general.key_browser_incognito,
             ) {
                 self.hotkey_error = Some(e);
                 return;
