@@ -161,10 +161,20 @@ async fn run_app() -> anyhow::Result<()> {
     let providers = ["openrouter", "groq", "ollama", "auto"];
     let mut provider_idx = providers.iter().position(|&p| p == dynamic_config.models.provider).unwrap_or(0);
     
-    let mut or_gen_idx = 0;
-    let mut or_form_idx = 0;
-    let mut groq_gen_idx = 0;
-    let mut groq_form_idx = 0;
+    // Initialize cycle indices to the position of the currently configured model so the
+    // first cycle press always moves to the *next* model rather than an arbitrary one.
+    let mut or_gen_idx = dynamic_config.models.openrouter.as_ref()
+        .and_then(|c| c.model_choices.iter().position(|m| m == &c.model_id))
+        .unwrap_or(0);
+    let mut or_form_idx = dynamic_config.models.openrouter.as_ref()
+        .and_then(|c| c.browser_model_choices.iter().position(|m| m == &c.browser_model_id))
+        .unwrap_or(0);
+    let mut groq_gen_idx = dynamic_config.models.groq.as_ref()
+        .and_then(|c| c.model_choices.iter().position(|m| m == &c.model_id))
+        .unwrap_or(0);
+    let mut groq_form_idx = dynamic_config.models.groq.as_ref()
+        .and_then(|c| c.browser_model_choices.iter().position(|m| m == &c.browser_model_id))
+        .unwrap_or(0);
 
     loop {
         // Check for Input Events (Non-blocking or blocking depending on design)
