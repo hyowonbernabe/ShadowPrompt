@@ -218,8 +218,15 @@ Form JSON:
 
         let llm_res = crate::llm::LlmClient::query(&prompt, &config, ModelUseCase::Browser).await?;
 
-        // Clean markdown if present
-        let raw_actions = llm_res.replace("```json", "").replace("```", "").trim().to_string();
+        // Clean markdown and conversational preamble if present
+        let mut raw_actions = llm_res.replace("```json", "").replace("```", "").trim().to_string();
+        if let Some(start) = raw_actions.find('[') {
+            if let Some(end) = raw_actions.rfind(']') {
+                if end >= start {
+                    raw_actions = raw_actions[start..=end].to_string();
+                }
+            }
+        }
         
         println!("\n[DEBUG] LLM OUTPUT:\n{}", raw_actions);
 
@@ -244,7 +251,7 @@ Form JSON:
         }
 
         // We do a naive check: if the LLM output contained the `nav_next_btn` ID, we assume it pressed Next.
-        if raw_actions.contains("\"nav_next_btn\"") || raw_actions.contains("\"action\":\"click\"") && form_json.contains("\"nav_next_btn\"") {
+        if raw_actions.contains("\"nav_next_btn\"") || (raw_actions.contains("\"action\":\"click\"") && form_json.contains("\"nav_next_btn\"")) {
             send_ui("⏳ Waiting for Next Page...".to_string());
             // Wait for autosave flush and DOM Page transition
             sleep(Duration::from_secs(3)).await;

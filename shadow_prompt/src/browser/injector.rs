@@ -250,7 +250,6 @@ pub fn build_injector_call(raw_actions_json: &str) -> String {
                         target.value = action.value || "";
                         target.dispatchEvent(new Event('change', {{ bubbles: true }}));
                     }} else if (action.action === "select_option") {{
-                        // Direct click on a visible [role="option"] (when already open)
                         target.click();
                     }} else if (action.action === "dropdown_select") {{
                         target.click();
@@ -267,6 +266,10 @@ pub fn build_injector_call(raw_actions_json: &str) -> String {
                             }}
                         }}
                     }}
+                    
+                    // Give Google Forms validation/React a moment to process the event
+                    // before we instantly click the next button
+                    await new Promise(function(r) {{ setTimeout(r, 50); }});
                 }}
                 return "Success";
             }} catch(e) {{
