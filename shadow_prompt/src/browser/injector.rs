@@ -36,6 +36,7 @@ pub const EXTRACTOR_JS: &str = r#"
                 radioGroups[0].querySelectorAll('[role="radio"]').forEach(function(opt) {
                     colHeaders.push(opt.getAttribute('aria-label') || '');
                 });
+                var gridAnsweredRows = 0;
                 radioGroups.forEach(function(group, rowIdx) {
                     var rowLabel = group.getAttribute('aria-label') || '';
                     if (!rowLabel) {
@@ -44,15 +45,18 @@ pub const EXTRACTOR_JS: &str = r#"
                     }
                     if (!rowLabel) rowLabel = 'Row ' + (rowIdx + 1);
                     var rowOpts = [];
+                    var rowHasAnswer = false;
                     group.querySelectorAll('[role="radio"]').forEach(function(opt, colIdx) {
-                        if (opt.getAttribute('aria-checked') === 'true') isAnswered = true;
+                        if (opt.getAttribute('aria-checked') === 'true') rowHasAnswer = true;
                         var optLabel = opt.getAttribute('aria-label') || colHeaders[colIdx] || ('Col ' + (colIdx + 1));
                         var oid = opt.id || (cid + '_r' + rowIdx + '_c' + colIdx);
                         opt.id = oid;
                         rowOpts.push({ text: optLabel, id: oid });
                     });
+                    if (rowHasAnswer) gridAnsweredRows++;
                     qd.grid_rows.push({ row_text: rowLabel, options: rowOpts });
                 });
+                if (gridAnsweredRows === radioGroups.length && radioGroups.length > 0) isAnswered = true;
             }
 
             // --- RADIO: single radiogroup = standard multiple choice ---
@@ -77,6 +81,7 @@ pub const EXTRACTOR_JS: &str = r#"
                     if (cbGroups.length > 1) {
                         qd.type = 'grid_checkbox';
                         qd.grid_rows = [];
+                        var gridCbAnsweredRows = 0;
                         cbGroups.forEach(function(group, rowIdx) {
                             var rowLabel = group.getAttribute('aria-label') || '';
                             if (!rowLabel) {
@@ -85,15 +90,18 @@ pub const EXTRACTOR_JS: &str = r#"
                             }
                             if (!rowLabel) rowLabel = 'Row ' + (rowIdx + 1);
                             var rowOpts = [];
+                            var rowHasAnswer = false;
                             group.querySelectorAll('[role="checkbox"]').forEach(function(opt, colIdx) {
-                                if (opt.getAttribute('aria-checked') === 'true') isAnswered = true;
+                                if (opt.getAttribute('aria-checked') === 'true') rowHasAnswer = true;
                                 var optLabel = opt.getAttribute('aria-label') || ('Col ' + (colIdx + 1));
                                 var oid = opt.id || (cid + '_r' + rowIdx + '_c' + colIdx);
                                 opt.id = oid;
                                 rowOpts.push({ text: optLabel, id: oid });
                             });
+                            if (rowHasAnswer) gridCbAnsweredRows++;
                             qd.grid_rows.push({ row_text: rowLabel, options: rowOpts });
                         });
+                        if (gridCbAnsweredRows === cbGroups.length && cbGroups.length > 0) isAnswered = true;
                     }
                     // --- CHECKBOX: flat multi-select list ---
                     else {
