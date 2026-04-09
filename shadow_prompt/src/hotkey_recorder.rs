@@ -227,22 +227,6 @@ pub fn validate_hotkeys_all(
     Ok(())
 }
 
-/// Kept for any existing call sites — delegates to validate_hotkeys_all.
-#[allow(dead_code)]
-pub fn validate_hotkeys(
-    wake: &str,
-    model: &str,
-    panic: &str,
-    hide: Option<&str>,
-) -> Result<(), String> {
-    validate_hotkeys_all(
-        wake,
-        model,
-        panic,
-        hide.unwrap_or(""),
-        "", "", "", "", "",
-    )
-}
 
 fn key_to_string(key: egui::Key) -> String {
     match key {
@@ -388,6 +372,9 @@ mod tests {
             "Ctrl+Shift+I",
         );
         assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("Browser Pass"), "Error should name 'Browser Pass': {}", err);
+        assert!(err.contains("Browser Exec"), "Error should name 'Browser Exec': {}", err);
     }
 
     #[test]
