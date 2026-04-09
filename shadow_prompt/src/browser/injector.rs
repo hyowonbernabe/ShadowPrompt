@@ -93,7 +93,7 @@ pub fn build_injector_call(raw_actions_json: &str) -> String {
                 let actions = {actions};
                 for (let action of actions) {{
                     let target = document.getElementById(action.id);
-                    
+
                     if (!target && action.id) {{
                         let all = document.querySelectorAll('[role="radio"], [role="checkbox"]');
                         for(let i=0; i<all.length; i++) {{
@@ -103,7 +103,7 @@ pub fn build_injector_call(raw_actions_json: &str) -> String {
                             }}
                         }}
                     }}
-                    
+
                     if (target) {{
                         if (action.action === "click" || action.action === "check") {{
                             if (target.getAttribute('aria-checked') !== 'true') {{
@@ -124,4 +124,58 @@ pub fn build_injector_call(raw_actions_json: &str) -> String {
         "#,
         actions = raw_actions_json
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_injector_call_contains_click_handler() {
+        let out = build_injector_call(r#"[{"id":"x","action":"click"}]"#);
+        assert!(out.contains("click") && out.contains("check"));
+    }
+
+    #[test]
+    fn test_build_injector_call_contains_type_handler() {
+        let out = build_injector_call(r#"[{"id":"x","action":"type","value":"hi"}]"#);
+        assert!(out.contains("type") && out.contains("dispatchEvent"));
+    }
+
+    #[test]
+    fn test_build_injector_call_contains_select_native_handler() {
+        let out = build_injector_call(r#"[{"id":"x","action":"select_native","value":"A"}]"#);
+        assert!(out.contains("select_native"));
+    }
+
+    #[test]
+    fn test_build_injector_call_contains_dropdown_select_handler() {
+        let out = build_injector_call(r#"[{"id":"x","action":"dropdown_select","value":"A"}]"#);
+        assert!(out.contains("dropdown_select"));
+    }
+
+    #[test]
+    fn test_extractor_js_handles_grid_radio() {
+        assert!(EXTRACTOR_JS.contains("grid_radio"));
+    }
+
+    #[test]
+    fn test_extractor_js_handles_grid_checkbox() {
+        assert!(EXTRACTOR_JS.contains("grid_checkbox"));
+    }
+
+    #[test]
+    fn test_extractor_js_handles_dropdown() {
+        assert!(EXTRACTOR_JS.contains("dropdown"));
+    }
+
+    #[test]
+    fn test_extractor_js_handles_date() {
+        assert!(EXTRACTOR_JS.contains("'date'") || EXTRACTOR_JS.contains("\"date\""));
+    }
+
+    #[test]
+    fn test_extractor_js_handles_time() {
+        assert!(EXTRACTOR_JS.contains("'time'") || EXTRACTOR_JS.contains("\"time\""));
+    }
 }
