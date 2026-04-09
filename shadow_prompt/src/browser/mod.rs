@@ -216,8 +216,15 @@ Form JSON:\n{}",
 
         // 7. Inject Actions
         let injection_script = injector::build_injector_call(&raw_actions);
-        tab.evaluate(&injection_script, true)
+        let inject_res = tab.evaluate(&injection_script, true)
             .map_err(|e| anyhow!("Injection Script Error: {}", e))?;
+        if let Some(val) = inject_res.value {
+            if let Some(s) = val.as_str() {
+                if s.starts_with("ERROR:") {
+                    println!("[WARN] Injector JS error: {}", s);
+                }
+            }
+        }
 
         // 8. Determine if we should loop
         if !is_auto {

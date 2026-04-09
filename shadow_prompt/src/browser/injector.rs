@@ -242,11 +242,16 @@ pub fn build_injector_call(raw_actions_json: &str) -> String {
                         target.value = action.value || "";
                         target.dispatchEvent(new Event('change', {{ bubbles: true }}));
                     }} else if (action.action === "select_option") {{
+                        // Direct click on a visible [role="option"] (when already open)
                         target.click();
                     }} else if (action.action === "dropdown_select") {{
                         target.click();
-                        await new Promise(function(r) {{ setTimeout(r, 350); }});
-                        var opts = document.querySelectorAll('[role="option"]');
+                        var opts = [];
+                        for (var t = 0; t < 20; t++) {{
+                            await new Promise(function(r) {{ setTimeout(r, 100); }});
+                            opts = document.querySelectorAll('[role="option"]');
+                            if (opts.length > 0) {{ break; }}
+                        }}
                         for (var j = 0; j < opts.length; j++) {{
                             if (opts[j].innerText.trim() === (action.value || "").trim()) {{
                                 opts[j].click();
