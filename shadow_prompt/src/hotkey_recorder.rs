@@ -15,8 +15,7 @@ pub struct RecordedHotkey {
 pub struct HotkeyRecorder {
     is_recording: bool,
     current_keys: HashSet<egui::Key>,
-    current_modifiers: egui::Modifiers,
-    pub peak_modifiers: egui::Modifiers,
+    pub(super) peak_modifiers: egui::Modifiers,
     recorded_result: Option<RecordedHotkey>,
 }
 
@@ -31,7 +30,6 @@ impl HotkeyRecorder {
         Self {
             is_recording: false,
             current_keys: HashSet::new(),
-            current_modifiers: egui::Modifiers::NONE,
             peak_modifiers: egui::Modifiers::NONE,
             recorded_result: None,
         }
@@ -41,14 +39,12 @@ impl HotkeyRecorder {
         self.is_recording = true;
         self.recorded_result = None;
         self.current_keys.clear();
-        self.current_modifiers = egui::Modifiers::NONE;
         self.peak_modifiers = egui::Modifiers::NONE;
     }
 
     pub fn cancel(&mut self) {
         self.is_recording = false;
         self.current_keys.clear();
-        self.current_modifiers = egui::Modifiers::NONE;
         self.peak_modifiers = egui::Modifiers::NONE;
     }
 
@@ -59,8 +55,6 @@ impl HotkeyRecorder {
         }
 
         ctx.input(|i| {
-            self.current_modifiers = i.modifiers;
-
             // Accumulate peak: once a modifier is seen, it stays for this session
             if i.modifiers.ctrl  { self.peak_modifiers.ctrl  = true; }
             if i.modifiers.shift { self.peak_modifiers.shift = true; }
@@ -311,9 +305,6 @@ mod tests {
         recorder.peak_modifiers.shift = true;
         recorder.current_keys.insert(egui::Key::V);
 
-        // Even if current modifiers have been released (ctrl=false), peak still has them
-        recorder.current_modifiers = egui::Modifiers::NONE;
-
         assert!(recorder.has_valid_combination());
         let display = recorder.get_current_display();
         assert_eq!(display, "Ctrl+Shift+V");
@@ -328,5 +319,14 @@ mod tests {
         assert!(!recorder.peak_modifiers.ctrl);
         assert!(!recorder.peak_modifiers.shift);
         assert!(!recorder.peak_modifiers.alt);
+    }
+
+    #[test]
+    fn test_cancel_resets_peak() {
+        let mut recorder = HotkeyRecorder::new();
+        recorder.start_recording();
+        recorder.peak_modifiers.ctrl = true;
+        recorder.cancel();
+        assert!(!recorder.peak_modifiers.ctrl);
     }
 }
