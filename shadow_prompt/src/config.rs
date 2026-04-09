@@ -566,6 +566,9 @@ mod tests {
         assert_eq!(config.visuals.form_indicator_position, "bottom-right");
         assert_eq!(config.visuals.form_color_failed, "#FF00FF");
         assert_eq!(config.visuals.form_color_aborted, "#FFA500");
+        assert_eq!(config.visuals.form_indicator_offset, 0);
+        assert_eq!(config.visuals.form_indicator_x_axis, 0);
+        assert_eq!(config.visuals.form_indicator_y_axis, 0);
         assert_eq!(config.http.connect_timeout_secs, 10);
         assert!(config.search.serper_api_key.is_none());
         assert_eq!(config.models.browser_provider, "");
