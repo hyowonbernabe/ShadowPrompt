@@ -203,7 +203,9 @@ QUESTION TYPES — use exactly these action formats:
 - \"grid_radio\": Matrix — one click per row. Each row in `grid_rows` needs exactly one selected column. Action: {{\"id\":\"<row_col_id>\",\"action\":\"click\"}}
 - \"grid_checkbox\": Matrix with checkboxes — click all applicable options per row. Action: {{\"id\":\"<row_col_id>\",\"action\":\"click\"}}
 - \"date\": Fill each field in `fields` by label (Month, Day, Year with numeric values). Action: {{\"id\":\"<field_id>\",\"action\":\"type\",\"value\":\"<number>\"}}
-- \"time\": Fill each field in `fields` (Hour, Minute). Action: {{\"id\":\"<field_id>\",\"action\":\"type\",\"value\":\"<number>\"}}. For AM/PM field with is_select=true: {{\"id\":\"<ampm_id>\",\"action\":\"select_native\",\"value\":\"AM\"}}
+- \"time\": Fill each field in `fields` (Hour, Minute). Action: {{\"id\":\"<field_id>\",\"action\":\"type\",\"value\":\"<number>\"}}. For AM/PM field with is_select=true: {{\"id\":\"<ampm_id>\",\"action\":\"select_native\",\"value\":\"<AM or PM>\"}}
+- \"datetime\": Combined date+time — fill all fields in `fields` by label (Month, Day, Year, Hour, Minute). Same actions as \"date\" and \"time\" combined.
+- \"select_option\" (advanced): Direct click on an already-visible `[role=\"option\"]` element. Action: {{\"id\":\"<option_id>\",\"action\":\"select_option\"}}
 
 {nav_rule}
 
