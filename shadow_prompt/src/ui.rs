@@ -28,6 +28,7 @@ pub enum UICommand {
     SetOverlayText(String),
     ClearOverlayText,
     UpdateOverlayConfig(i32, u8, u8),
+    SetFormColor(u32),
 }
 
 static mut CURRENT_COLOR: u32 = 0x0000FF00;
@@ -36,6 +37,8 @@ static mut OVERLAY_TEXT: String = String::new();
 static mut OVERLAY_FONT_SIZE: i32 = 16;
 static mut OVERLAY_BG_OPACITY: u8 = 200;
 static mut OVERLAY_TEXT_OPACITY: u8 = 255;
+static mut FORM_COLOR: u32 = 0x00FF00FF;          // Initial value irrelevant (window starts hidden)
+static mut FORM_INDICATOR_VISIBLE: bool = false;
 
 pub struct UIManager;
 
@@ -59,6 +62,19 @@ impl UIManager {
                     ..Default::default()
                 };
                 RegisterClassW(&wc);
+
+                // 1b. Form Indicator Window Class
+                let form_class_name = w!("ShadowPromptFormIndicator");
+                let wc_form = WNDCLASSW {
+                    hCursor: HCURSOR::default(),
+                    hIcon: HICON::default(),
+                    lpszClassName: form_class_name,
+                    hInstance: instance,
+                    lpfnWndProc: Some(form_wnd_proc),
+                    style: CS_HREDRAW | CS_VREDRAW,
+                    ..Default::default()
+                };
+                RegisterClassW(&wc_form);
 
                 // 2. Debug Overlay Window Class (Black Box)
                 let wc_debug = WNDCLASSW {
@@ -126,6 +142,19 @@ impl UIManager {
 
                 y -= user_y;
 
+                // Form Indicator position
+                let form_offset = config.form_indicator_offset;
+                let form_x_axis = config.form_indicator_x_axis;
+                let form_y_axis = config.form_indicator_y_axis;
+                let (mut form_x, mut form_y) = match config.form_indicator_position.as_str() {
+                    "top-left"     => (form_offset, form_offset),
+                    "bottom-left"  => (form_offset, screen_h - size - form_offset),
+                    "bottom-right" => (screen_w - size - form_offset, screen_h - size - form_offset),
+                    _              => (screen_w - size - form_offset, form_offset), // top-right
+                };
+                form_x += form_x_axis;
+                form_y -= form_y_axis;
+
                 // Create Indicator 1 (Main)
                 let hwnd = CreateWindowExW(
                     WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED,
@@ -143,6 +172,22 @@ impl UIManager {
                 )
                 .unwrap_or(HWND::default());
 
+                // Create Form Indicator Window (hidden initially)
+                let hwnd_form = CreateWindowExW(
+                    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED,
+                    form_class_name,
+                    w!(""),
+                    WS_POPUP, // Not visible initially — no WS_VISIBLE
+                    form_x,
+                    form_y,
+                    size,
+                    size,
+                    HWND::default(),
+                    HMENU::default(),
+                    instance,
+                    None,
+                )
+                .unwrap_or(HWND::default());
 
                 // Create Debug Window (Hidden initially)
                 let hwnd_debug = CreateWindowExW(
@@ -215,6 +260,9 @@ impl UIManager {
                 // Opacity for Text Overlay - use color key for transparent background
                 let _ = SetLayeredWindowAttributes(hwnd_overlay, COLORREF(0), 255, LWA_COLORKEY);
 
+                // Opacity for Form Indicator (fully opaque)
+                let _ = SetLayeredWindowAttributes(hwnd_form, COLORREF(0), 255, LWA_ALPHA);
+
                 // Loop
                 loop {
                     let mut msg = MSG::default();
@@ -255,8 +303,12 @@ impl UIManager {
                                 if IS_HIDDEN {
                                     let _ = ShowWindow(hwnd, SW_HIDE);
                                     let _ = ShowWindow(hwnd_overlay, SW_HIDE);
+                                    let _ = ShowWindow(hwnd_form, SW_HIDE);
                                 } else {
                                     let _ = ShowWindow(hwnd, SW_SHOW);
+                                    if FORM_INDICATOR_VISIBLE {
+                                        let _ = ShowWindow(hwnd_form, SW_SHOW);
+                                    }
                                 }
                             }
                             UICommand::SetOverlayText(text) => {
@@ -273,6 +325,14 @@ impl UIManager {
                                 OVERLAY_BG_OPACITY = bg_opacity;
                                 OVERLAY_TEXT_OPACITY = text_opacity;
                                 let _ = InvalidateRect(hwnd_overlay, None, false);
+                            }
+                            UICommand::SetFormColor(c) => {
+                                FORM_COLOR = c;
+                                FORM_INDICATOR_VISIBLE = true;
+                                if !IS_HIDDEN {
+                                    let _ = ShowWindow(hwnd_form, SW_SHOW);
+                                    let _ = InvalidateRect(hwnd_form, None, false);
+                                }
                             }
                         }
                     }
@@ -324,6 +384,31 @@ unsafe extern "system" fn debug_wnd_proc(
             FillRect(hdc, &ps.rcPaint, brush);
             let _ = DeleteObject(brush);
             let _ = EndPaint(hwnd, &ps);
+            LRESULT(0)
+        }
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
+unsafe extern "system" fn form_wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    match msg {
+        WM_PAINT => {
+            let mut ps = PAINTSTRUCT::default();
+            let hdc = BeginPaint(hwnd, &mut ps);
+            let color = COLORREF(FORM_COLOR);
+            let brush = CreateSolidBrush(color);
+            FillRect(hdc, &ps.rcPaint, brush);
+            let _ = DeleteObject(brush);
+            let _ = EndPaint(hwnd, &ps);
+            LRESULT(0)
+        }
+        WM_DESTROY => {
+            PostQuitMessage(0);
             LRESULT(0)
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
