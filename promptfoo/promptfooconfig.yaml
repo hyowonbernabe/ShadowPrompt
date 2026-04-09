@@ -1,0 +1,266 @@
+description: "ShadowPrompt system prompt evaluation — question type handling"
+
+# Chat prompt: system_prompt.txt + user question
+prompts:
+  - file://prompt.json
+
+providers:
+  - id: openrouter:google/gemini-2.5-flash-preview
+    label: "Gemini Flash"
+    config:
+      temperature: 0.0   # deterministic for reproducible evals
+      max_tokens: 512
+
+# Shared across all tests
+defaultTest:
+  vars:
+    # Loads the actual deployed system prompt — if you change it, re-run evals
+    system_prompt: "file://../shadow_prompt/config/system_prompt.txt"
+  options:
+    # Use same model for llm-rubric grading (avoids extra cost from default GPT-4o grader)
+    provider: openrouter:google/gemini-2.5-flash-preview
+  assert:
+    # Format compliance: no filler preamble
+    - type: not-contains
+      value: "The answer is"
+    - type: not-contains
+      value: "Sure,"
+    - type: not-contains
+      value: "Here is"
+    - type: not-contains
+      value: "Based on"
+
+tests:
+  # ── TRUE / FALSE ─────────────────────────────────────────────────────────────
+  - description: "True/False — water freezes at 0°C (True)"
+    vars:
+      question: "Water freezes at 0°C at standard pressure. True or False."
+    assert:
+      - type: regex
+        value: "^True$"
+
+  - description: "True/False — Earth is largest planet (False)"
+    vars:
+      question: "The Earth is the largest planet in the solar system. True or False."
+    assert:
+      - type: regex
+        value: "^False$"
+
+  # ── MCQ SINGLE ANSWER ────────────────────────────────────────────────────────
+  - description: "MCQ single — chemical symbol for gold (A) Au)"
+    vars:
+      question: |
+        What is the chemical symbol for gold?
+        A) Au
+        B) Ag
+        C) Fe
+        D) Cu
+    assert:
+      - type: regex
+        value: "^A\\)"
+      - type: llm-rubric
+        value: "Selects only option A (Au). Does not select any other option."
+
+  - description: "MCQ single — closest planet to Sun (C) Mercury)"
+    vars:
+      question: |
+        Which planet is closest to the Sun?
+        A) Earth
+        B) Venus
+        C) Mercury
+        D) Mars
+    assert:
+      - type: icontains
+        value: "C)"
+      - type: not-contains
+        value: "A)"
+      - type: not-contains
+        value: "B)"
+      - type: not-contains
+        value: "D)"
+
+  # ── MCQ MULTI-ANSWER ─────────────────────────────────────────────────────────
+  - description: "MCQ multi — noble gases (A+C, select all that apply)"
+    vars:
+      question: |
+        Select all that apply: Which of the following are noble gases?
+        A) Helium
+        B) Oxygen
+        C) Neon
+        D) Nitrogen
+    assert:
+      - type: icontains
+        value: "A)"
+      - type: icontains
+        value: "C)"
+      - type: not-contains
+        value: "B)"
+      - type: not-contains
+        value: "D)"
+      - type: llm-rubric
+        value: "Includes both A (Helium) and C (Neon). Does not include B (Oxygen) or D (Nitrogen)."
+
+  - description: "MCQ multi — prime numbers (A+C, which of the following are correct)"
+    vars:
+      question: |
+        Which of the following are prime numbers?
+        A) 2
+        B) 4
+        C) 7
+        D) 9
+    assert:
+      - type: icontains
+        value: "A)"
+      - type: icontains
+        value: "C)"
+      - type: not-contains
+        value: "B)"
+      - type: not-contains
+        value: "D)"
+
+  - description: "MCQ multi — does NOT stop at one answer when multiple correct"
+    vars:
+      question: |
+        Mark all that apply: Which continents are in the Southern Hemisphere?
+        A) Europe
+        B) Australia
+        C) Antarctica
+        D) Asia
+    assert:
+      - type: icontains
+        value: "B)"
+      - type: icontains
+        value: "C)"
+      - type: llm-rubric
+        value: "Returns at least two answers (B and C). Does not return only one answer."
+
+  # ── UNLABELED OPTIONS (Google Forms style) ───────────────────────────────────
+  - description: "Unlabeled — most abundant gas in atmosphere (Nitrogen)"
+    vars:
+      question: |
+        Which gas makes up most of Earth's atmosphere?
+        Oxygen
+        Nitrogen
+        Carbon Dioxide
+        Hydrogen
+    assert:
+      - type: icontains
+        value: "Nitrogen"
+      - type: llm-rubric
+        value: "Names Nitrogen as the answer. Does not use MCQ letter labels (A, B, C, D)."
+
+  - description: "Unlabeled — multi-word option not split (Carbon Dioxide)"
+    vars:
+      question: |
+        Which gas do plants absorb during photosynthesis?
+        Oxygen
+        Carbon Dioxide
+        Nitrogen
+        Argon
+    assert:
+      - type: icontains
+        value: "Carbon Dioxide"
+      - type: llm-rubric
+        value: "Identifies Carbon Dioxide as a single two-word answer, not as separate words."
+
+  # ── SHORT ANSWER ─────────────────────────────────────────────────────────────
+  - description: "Short answer — capital of Japan"
+    vars:
+      question: "What is the capital of Japan?"
+    assert:
+      - type: icontains
+        value: "Tokyo"
+      - type: javascript
+        value: "output.trim().split(/\\s+/).length <= 5"
+
+  - description: "Short answer — no explanation unless asked"
+    vars:
+      question: "Who wrote Hamlet?"
+    assert:
+      - type: icontains
+        value: "Shakespeare"
+      - type: javascript
+        value: "output.trim().split(/\\s+/).length <= 6"
+
+  # ── FILL IN THE BLANK ────────────────────────────────────────────────────────
+  - description: "Fill in blank — powerhouse of the cell"
+    vars:
+      question: "The powerhouse of the cell is the ________."
+    assert:
+      - type: icontains
+        value: "mitochondria"
+      - type: javascript
+        value: "output.trim().split(/\\s+/).length <= 4"
+
+  - description: "Fill in blank — output only the missing phrase"
+    vars:
+      question: "The speed of light is approximately ________ km/s."
+    assert:
+      - type: regex
+        value: "300[,.]?000|3 ?[xX×] ?10"
+      - type: javascript
+        value: "output.trim().split(/\\s+/).length <= 6"
+
+  # ── NUMERIC ──────────────────────────────────────────────────────────────────
+  - description: "Numeric — simple calculation"
+    vars:
+      question: "What is 15% of 200?"
+    assert:
+      - type: icontains
+        value: "30"
+      - type: javascript
+        value: "output.trim().split(/\\s+/).length <= 4"
+
+  # ── CONTEXT SECTIONS ─────────────────────────────────────────────────────────
+  - description: "Context — uses [WEB SEARCH RESULTS] to answer"
+    vars:
+      question: |
+        [WEB SEARCH RESULTS]
+        - The Eiffel Tower is located in Paris, France, on the Champ de Mars.
+        - It was built by Gustave Eiffel and completed in 1889 for the World's Fair.
+
+        [QUESTION]
+        Who built the Eiffel Tower?
+    assert:
+      - type: icontains
+        value: "Eiffel"
+      - type: llm-rubric
+        value: "Uses the web search results to attribute the Eiffel Tower to Gustave Eiffel."
+
+  - description: "Context — [LOCAL KNOWLEDGE] used when web absent"
+    vars:
+      question: |
+        [LOCAL KNOWLEDGE]
+        [Document 1]: The ShadowPrompt panic key immediately clears the clipboard and exits the application.
+
+        [QUESTION]
+        What does the panic key do in ShadowPrompt?
+    assert:
+      - type: icontains
+        value: "clipboard"
+      - type: llm-rubric
+        value: "Correctly states that the panic key clears the clipboard and exits."
+
+  # ── FORMAT COMPLIANCE ────────────────────────────────────────────────────────
+  - description: "Format — MCQ answer has no markdown bold or asterisks"
+    vars:
+      question: |
+        What color is the sky on a clear day?
+        A) Red
+        B) Blue
+        C) Green
+        D) Yellow
+    assert:
+      - type: not-contains
+        value: "**"
+      - type: not-contains
+        value: "__"
+      - type: icontains
+        value: "B)"
+
+  - description: "Format — True/False has no explanation"
+    vars:
+      question: "Photosynthesis produces oxygen. True or False."
+    assert:
+      - type: regex
+        value: "^True$"
