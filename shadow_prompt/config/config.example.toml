@@ -152,7 +152,8 @@ max_results = 3
 engine = "serper"
 # Serper.dev API key (only needed when engine = "serper")
 # Get a free key at https://serper.dev
-serper_api_key = ""
+# Leave commented out (or absent) to disable Serper; uncomment and fill in to enable.
+# serper_api_key = "YOUR_SERPER_API_KEY_HERE"
 
 [rag]
 # Whether to search local knowledge files and include matching excerpts in prompts
