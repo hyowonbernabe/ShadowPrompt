@@ -204,8 +204,10 @@ impl LlmClient {
     }
 
     fn load_system_prompt() -> String {
-        std::fs::read_to_string("config/system_prompt.txt")
-            .or_else(|_| std::fs::read_to_string("../config/system_prompt.txt"))
+        let path = crate::config::get_exe_dir()
+            .join("config")
+            .join("system_prompt.txt");
+        std::fs::read_to_string(&path)
             .unwrap_or_else(|_| "You are a concise assistant.".to_string())
     }
 
