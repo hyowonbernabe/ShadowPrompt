@@ -1,86 +1,199 @@
 pub const EXTRACTOR_JS: &str = r#"
 (function() {
     try {
-        let result = [];
-        let titleNode = document.querySelector('.F9yp7e, .vQ43Ie, div[role="heading"][aria-level="1"]');
-        let title = titleNode ? titleNode.innerText : document.title;
-        
-        let items = document.querySelectorAll('div[role="listitem"]');
-        items.forEach((item, idx) => {
-            let questionData = { index: idx, type: "unknown", container_id: item.getAttribute('data-item-id') || ("qContainer_" + idx) };
-            item.id = questionData.container_id;
-            
-            let heading = item.querySelector('div[role="heading"]');
-            if (heading) {
-                questionData.text = heading.innerText;
-            } else {
-                questionData.text = item.innerText.split('\n')[0]; // fallback
-            }
-            
-            let img = item.querySelector('img');
-            if (img) { questionData.image_url = img.src; }
-            
-            let links = [];
-            item.querySelectorAll('a').forEach(a => links.push({ text: a.innerText, href: a.href }));
-            if (links.length > 0) { questionData.links = links; }
+        var result = [];
+        var titleNode = document.querySelector('.F9yp7e, .vQ43Ie, div[role="heading"][aria-level="1"]');
+        var title = titleNode ? titleNode.innerText : document.title;
 
-            let isAnswered = false;
+        var items = document.querySelectorAll('div[role="listitem"]');
+        items.forEach(function(item, idx) {
+            var cid = item.getAttribute('data-item-id') || ('qContainer_' + idx);
+            item.id = cid;
+            var qd = { index: idx, type: 'unknown', container_id: cid };
 
-            let options = item.querySelectorAll('[role="radio"], [role="checkbox"]');
-            if (options.length > 0) {
-                questionData.type = options[0].getAttribute('role'); // "radio" or "checkbox"
-                questionData.options = [];
-                options.forEach((opt, optIdx) => {
-                    if (opt.getAttribute('aria-checked') === 'true') {
-                        isAnswered = true;
-                    }
-                    let label = opt.getAttribute('aria-label') || opt.getAttribute('data-value') || opt.innerText;
-                    let optId = opt.id;
-                    if (!optId) {
-                        optId = questionData.container_id + "_opt_" + optIdx;
-                        opt.id = optId; // Assign strictly unique ID to the DOM element
-                    }
-                    questionData.options.push({ text: label, id: optId });
+            var heading = item.querySelector('div[role="heading"]');
+            qd.text = heading ? heading.innerText : item.innerText.split('\n')[0];
+
+            var img = item.querySelector('img');
+            if (img) qd.image_url = img.src;
+
+            var links = [];
+            item.querySelectorAll('a').forEach(function(a) { links.push({ text: a.innerText, href: a.href }); });
+            if (links.length > 0) qd.links = links;
+
+            var isAnswered = false;
+
+            // --- GRID RADIO: multiple radiogroups = one per row in a matrix ---
+            var radioGroups = Array.from(item.querySelectorAll('[role="radiogroup"]'));
+            if (radioGroups.length > 1) {
+                qd.type = 'grid_radio';
+                qd.grid_rows = [];
+                var colHeaders = [];
+                radioGroups[0].querySelectorAll('[role="radio"]').forEach(function(opt) {
+                    colHeaders.push(opt.getAttribute('aria-label') || '');
                 });
-            } else {
-                let textInput = item.querySelector('input[type="text"], input[type="url"], input[type="email"], input[type="number"], textarea');
-                if (textInput) {
-                    if (textInput.value && textInput.value.trim() !== '') {
-                        isAnswered = true;
+                radioGroups.forEach(function(group, rowIdx) {
+                    var rowLabel = group.getAttribute('aria-label') || '';
+                    if (!rowLabel) {
+                        var lby = group.getAttribute('aria-labelledby');
+                        if (lby) { var lel = document.getElementById(lby); if (lel) rowLabel = lel.innerText.trim(); }
                     }
-                    questionData.type = "text";
-                    let inputId = textInput.id;
-                    if (!inputId) {
-                        inputId = questionData.container_id + "_input";
-                        textInput.id = inputId;
+                    if (!rowLabel) rowLabel = 'Row ' + (rowIdx + 1);
+                    var rowOpts = [];
+                    group.querySelectorAll('[role="radio"]').forEach(function(opt, colIdx) {
+                        if (opt.getAttribute('aria-checked') === 'true') isAnswered = true;
+                        var optLabel = opt.getAttribute('aria-label') || colHeaders[colIdx] || ('Col ' + (colIdx + 1));
+                        var oid = opt.id || (cid + '_r' + rowIdx + '_c' + colIdx);
+                        opt.id = oid;
+                        rowOpts.push({ text: optLabel, id: oid });
+                    });
+                    qd.grid_rows.push({ row_text: rowLabel, options: rowOpts });
+                });
+            }
+
+            // --- RADIO: single radiogroup = standard multiple choice ---
+            else if (radioGroups.length === 1) {
+                qd.type = 'radio';
+                qd.options = [];
+                radioGroups[0].querySelectorAll('[role="radio"]').forEach(function(opt, optIdx) {
+                    if (opt.getAttribute('aria-checked') === 'true') isAnswered = true;
+                    var label = opt.getAttribute('aria-label') || opt.getAttribute('data-value') || opt.innerText;
+                    var oid = opt.id || (cid + '_opt_' + optIdx);
+                    opt.id = oid;
+                    qd.options.push({ text: label, id: oid });
+                });
+            }
+
+            else {
+                var allCheckboxes = Array.from(item.querySelectorAll('[role="checkbox"]'));
+
+                if (allCheckboxes.length > 0) {
+                    // --- GRID CHECKBOX: multiple named groups each containing checkboxes ---
+                    var cbGroups = Array.from(item.querySelectorAll('[role="group"][aria-labelledby], [role="group"][aria-label]'));
+                    if (cbGroups.length > 1) {
+                        qd.type = 'grid_checkbox';
+                        qd.grid_rows = [];
+                        cbGroups.forEach(function(group, rowIdx) {
+                            var rowLabel = group.getAttribute('aria-label') || '';
+                            if (!rowLabel) {
+                                var lby = group.getAttribute('aria-labelledby');
+                                if (lby) { var lel = document.getElementById(lby); if (lel) rowLabel = lel.innerText.trim(); }
+                            }
+                            if (!rowLabel) rowLabel = 'Row ' + (rowIdx + 1);
+                            var rowOpts = [];
+                            group.querySelectorAll('[role="checkbox"]').forEach(function(opt, colIdx) {
+                                if (opt.getAttribute('aria-checked') === 'true') isAnswered = true;
+                                var optLabel = opt.getAttribute('aria-label') || ('Col ' + (colIdx + 1));
+                                var oid = opt.id || (cid + '_r' + rowIdx + '_c' + colIdx);
+                                opt.id = oid;
+                                rowOpts.push({ text: optLabel, id: oid });
+                            });
+                            qd.grid_rows.push({ row_text: rowLabel, options: rowOpts });
+                        });
                     }
-                    questionData.id = inputId;
+                    // --- CHECKBOX: flat multi-select list ---
+                    else {
+                        qd.type = 'checkbox';
+                        qd.options = [];
+                        allCheckboxes.forEach(function(opt, optIdx) {
+                            if (opt.getAttribute('aria-checked') === 'true') isAnswered = true;
+                            var label = opt.getAttribute('aria-label') || opt.getAttribute('data-value') || opt.innerText;
+                            var oid = opt.id || (cid + '_opt_' + optIdx);
+                            opt.id = oid;
+                            qd.options.push({ text: label, id: oid });
+                        });
+                    }
+                }
+
+                // --- DROPDOWN: native <select> or custom [role="listbox"] ---
+                else if (item.querySelector('[role="listbox"], select')) {
+                    qd.type = 'dropdown';
+                    qd.options = [];
+                    var sel = item.querySelector('select');
+                    if (sel) {
+                        var sid = sel.id || (cid + '_select');
+                        sel.id = sid;
+                        qd.id = sid;
+                        Array.from(sel.options).forEach(function(opt) {
+                            if (opt.selected && opt.value !== '') isAnswered = true;
+                            if (opt.value !== '') qd.options.push({ text: opt.text, value: opt.value });
+                        });
+                    } else {
+                        var lb = item.querySelector('[role="listbox"]');
+                        var trigger = item.querySelector('[role="button"]') || lb;
+                        var tid = (trigger ? trigger.id : null) || (cid + '_trigger');
+                        if (trigger) trigger.id = tid;
+                        qd.trigger_id = tid;
+                        if (lb && lb.getAttribute('aria-activedescendant')) isAnswered = true;
+                        item.querySelectorAll('[role="option"]').forEach(function(opt, optIdx) {
+                            var optLabel = opt.getAttribute('aria-label') || opt.innerText.trim();
+                            var oid = opt.id || (cid + '_opt_' + optIdx);
+                            opt.id = oid;
+                            qd.options.push({ text: optLabel, id: oid });
+                        });
+                    }
+                }
+
+                else {
+                    // --- DATE / TIME / DATETIME ---
+                    var dateInps = Array.from(item.querySelectorAll(
+                        'input[type="date"], input[aria-label*="year" i], input[aria-label*="month" i], input[aria-label*="day" i]'
+                    ));
+                    var timeInps = Array.from(item.querySelectorAll(
+                        'input[type="time"], input[aria-label*="hour" i], input[aria-label*="minute" i]'
+                    ));
+                    if (dateInps.length > 0 || timeInps.length > 0) {
+                        qd.type = (dateInps.length > 0 && timeInps.length > 0) ? 'datetime' : (dateInps.length > 0 ? 'date' : 'time');
+                        qd.fields = [];
+                        dateInps.concat(timeInps).forEach(function(inp, fIdx) {
+                            var flabel = inp.getAttribute('aria-label') || inp.placeholder || ('field_' + fIdx);
+                            var fid = inp.id || (cid + '_field_' + fIdx);
+                            inp.id = fid;
+                            if (inp.value) isAnswered = true;
+                            qd.fields.push({ label: flabel, id: fid });
+                        });
+                        var ampmSel = item.querySelector('select[aria-label*="AM" i], select[aria-label*="PM" i]');
+                        if (ampmSel) {
+                            var amid = ampmSel.id || (cid + '_ampm');
+                            ampmSel.id = amid;
+                            qd.fields.push({ label: 'AM/PM', id: amid, is_select: true });
+                        }
+                    }
+                    // --- TEXT: short answer or paragraph ---
+                    else {
+                        var textInput = item.querySelector(
+                            'input[type="text"], input[type="url"], input[type="email"], input[type="number"], textarea'
+                        );
+                        if (textInput) {
+                            if (textInput.value && textInput.value.trim() !== '') isAnswered = true;
+                            qd.type = 'text';
+                            var iid = textInput.id || (cid + '_input');
+                            textInput.id = iid;
+                            qd.id = iid;
+                        }
+                    }
                 }
             }
-            
-            if (!isAnswered) {
-                result.push(questionData);
+
+            if (!isAnswered) { result.push(qd); }
+        });
+
+        var navButtons = [];
+        document.querySelectorAll('div[role="button"]').forEach(function(btn) {
+            var text = btn.innerText.trim().toLowerCase();
+            var label = (btn.getAttribute('aria-label') || '').toLowerCase();
+            if (text === 'next' || label === 'next') {
+                var nbid = btn.id || 'nav_next_btn'; btn.id = nbid;
+                navButtons.push({ type: 'next', id: nbid, text: btn.innerText.trim() });
+            } else if (text === 'submit' || label === 'submit') {
+                var sbid = btn.id || 'nav_submit_btn'; btn.id = sbid;
+                navButtons.push({ type: 'submit', id: sbid, text: btn.innerText.trim() });
             }
         });
-        
-        let navButtons = [];
-        document.querySelectorAll('div[role="button"]').forEach(btn => {
-            let text = btn.innerText.trim().toLowerCase();
-            let label = (btn.getAttribute('aria-label') || "").toLowerCase();
-            if (text === "next" || label === "next") {
-                let btnId = btn.id || "nav_next_btn";
-                btn.id = btnId;
-                navButtons.push({ type: "next", id: btnId, text: btn.innerText.trim() });
-            } else if (text === "submit" || label === "submit") {
-                let btnId = btn.id || "nav_submit_btn";
-                btn.id = btnId;
-                navButtons.push({ type: "submit", id: btnId, text: btn.innerText.trim() });
-            }
-        });
-        
-        return JSON.stringify({ title, questions: result, navigation: navButtons });
+
+        return JSON.stringify({ title: title, questions: result, navigation: navButtons });
     } catch(e) {
-        return "ERROR: " + e.toString();
+        return 'ERROR: ' + e.toString();
     }
 })();
 "#;
