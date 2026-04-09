@@ -484,7 +484,31 @@ impl SetupWizard {
         ui.label("You can configure multiple providers. ShadowPrompt will automatically fall back to the next available provider if one fails.");
         ui.add_space(8.0);
         ui.label(egui::RichText::new("Tip: Click 'Test Connection' to verify your API key works.").color(egui::Color32::GRAY).small());
-        ui.add_space(12.0);
+        // --- Browser / Form Model Provider ---
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("Google Forms Provider").strong());
+        ui.label("Provider used for Google Forms automation. Leave as default to use the same provider as above.");
+        ui.horizontal(|ui| {
+            ui.label("Form Provider:");
+            egui::ComboBox::from_id_salt("browser_provider_combo")
+                .selected_text(if self.config.models.browser_provider.is_empty() {
+                    "Same as above"
+                } else {
+                    &self.config.models.browser_provider
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.config.models.browser_provider, String::new(), "Same as above");
+                    ui.selectable_value(&mut self.config.models.browser_provider, "auto".to_string(), "auto");
+                    ui.selectable_value(&mut self.config.models.browser_provider, "groq".to_string(), "groq");
+                    ui.selectable_value(&mut self.config.models.browser_provider, "openrouter".to_string(), "openrouter");
+                    ui.selectable_value(&mut self.config.models.browser_provider, "ollama".to_string(), "ollama");
+                });
+        });
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(8.0);
 
         // --- Groq ---
         ui.group(|ui| {
@@ -506,8 +530,16 @@ impl SetupWizard {
                     ui.label("Model:");
                     ui.add(egui::TextEdit::singleline(&mut groq.model_id).desired_width(200.0));
                 });
+                ui.horizontal(|ui| {
+                    ui.label("Form Model ID:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut groq.browser_model_id)
+                            .hint_text("Leave blank to reuse Model ID above")
+                            .desired_width(200.0)
+                    );
+                });
                 ui.add_space(4.0);
-                
+
                 // Test Connection button
                 let groq_enabled = self.provider_state.groq_enabled;
                 if groq_enabled {
@@ -556,6 +588,14 @@ impl SetupWizard {
                     ui.label("Model:");
                     ui.add(egui::TextEdit::singleline(&mut or.model_id).desired_width(200.0));
                 });
+                ui.horizontal(|ui| {
+                    ui.label("Form Model ID:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut or.browser_model_id)
+                            .hint_text("Leave blank to reuse Model ID above")
+                            .desired_width(200.0)
+                    );
+                });
                 ui.add_space(4.0);
                 let testing = self.openrouter_test_rx.is_some();
                 if ui.add_enabled(!testing, egui::Button::new("Test OpenRouter Connection")).clicked() {
@@ -601,6 +641,14 @@ impl SetupWizard {
                 ui.horizontal(|ui| {
                     ui.label("Model:");
                     ui.add(egui::TextEdit::singleline(&mut ol.model_id).desired_width(150.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Form Model ID:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut ol.browser_model_id)
+                            .hint_text("Leave blank to reuse Model ID above")
+                            .desired_width(200.0)
+                    );
                 });
                 ui.add_space(4.0);
                 let testing = self.ollama_test_rx.is_some();
