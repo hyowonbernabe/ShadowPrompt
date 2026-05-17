@@ -8,8 +8,17 @@ use crate::llm::capabilities;
 use crate::llm::messages::{ContentPart, ImageUrl, Message};
 use crate::llm::LlmClient;
 
-// 8x8 red PNG, base64 encoded. Single solid color so the answer is unambiguous.
-const RED_8X8_PNG_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX/AAD///9BHTQRAAAADElEQVQI12NgIAUAABAAAdL+5IAAAAAASUVORK5CYII=";
+/// Generate a 64x64 solid-red PNG at runtime. Some providers reject sub-32px
+/// inputs, so we don't rely on a tiny hardcoded blob.
+fn red_square_data_url() -> anyhow::Result<String> {
+    use base64::Engine;
+    use image::{ImageBuffer, Rgba};
+    let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_pixel(64, 64, Rgba([255, 0, 0, 255]));
+    let mut buf = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&buf);
+    Ok(format!("data:image/png;base64,{b64}"))
+}
 
 pub async fn run(cfg: Config) -> anyhow::Result<()> {
     let model = cfg.openrouter.model_id.clone();
@@ -59,7 +68,13 @@ async fn probe_text(llm: &LlmClient) {
 
 async fn probe_vision(llm: &LlmClient) {
     section("VISION");
-    let url = format!("data:image/png;base64,{RED_8X8_PNG_B64}");
+    let url = match red_square_data_url() {
+        Ok(u) => u,
+        Err(e) => {
+            verdict(false, &format!("could not build probe image: {e}"));
+            return;
+        }
+    };
     let msgs = vec![
         Message::System {
             content: "Reply with exactly one color name.".to_string(),
@@ -114,7 +129,7 @@ async fn probe_reasoning(llm: &LlmClient) {
     {
         Ok(r) => {
             // Correct answer is 11:12 — but accept anything reasonable; user judges.
-            verdict(true, &format!("'{}' (expected 11:12; {}ms)", r.trim(), t.elapsed().as_millis()));
+            verdict(true, &format!("'{}' (expected 11:00; {}ms)", r.trim(), t.elapsed().as_millis()));
         }
         Err(e) => verdict(false, &format!("{e}")),
     }
