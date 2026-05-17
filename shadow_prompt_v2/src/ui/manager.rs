@@ -20,9 +20,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetSystemMetrics, GetWindowLongPtrW, PostQuitMessage, PostThreadMessageW, RegisterClassExW,
     SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage,
     GWLP_USERDATA, HWND_TOPMOST, LWA_ALPHA, LWA_COLORKEY, MSG, SM_CXSCREEN, SM_CYSCREEN,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE, WM_DESTROY, WM_PAINT,
-    WM_USER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-    WS_EX_TRANSPARENT, WS_POPUP,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE, WM_DESTROY,
+    WM_PAINT, WM_USER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_VISIBLE, WINDOW_EX_STYLE, WINDOW_STYLE,
 };
 
 use super::commands::{FormIndicatorState, IndicatorState, UICommand};
@@ -102,21 +102,23 @@ fn run_ui_thread(visuals: VisualsConfig, ready_tx: mpsc::Sender<u32>) -> anyhow:
         let screen_w = GetSystemMetrics(SM_CXSCREEN);
         let screen_h = GetSystemMetrics(SM_CYSCREEN);
 
+        let ind_ex = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
+        let overlay_ex = ind_ex | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT;
+
         let ind_size = visuals.indicator_size.max(1) as i32;
         let (ix, iy) = corner_pos(&visuals.indicator_corner, visuals.indicator_offset, ind_size, ind_size, screen_w, screen_h);
-        let hwnd_indicator = create_layered_window(&class_name, ix, iy, ind_size, ind_size, hinstance.into());
+        let hwnd_indicator = create_window(&class_name, ind_ex, WS_POPUP | WS_VISIBLE, ix, iy, ind_size, ind_size, hinstance.into());
         let _ = SetLayeredWindowAttributes(hwnd_indicator, COLORREF(0), 255, LWA_ALPHA);
 
         let (fx, fy) = corner_pos(&visuals.form_indicator_corner, visuals.form_indicator_offset, ind_size, ind_size, screen_w, screen_h);
-        let hwnd_form = create_layered_window(&class_name, fx, fy, ind_size, ind_size, hinstance.into());
+        let hwnd_form = create_window(&class_name, ind_ex, WS_POPUP, fx, fy, ind_size, ind_size, hinstance.into());
         let _ = SetLayeredWindowAttributes(hwnd_form, COLORREF(0), 255, LWA_ALPHA);
 
-        // Overlay sized minimally; auto-resizes to text bounds in WM_PAINT.
         let (ox, oy) = overlay_anchor(&visuals.overlay_corner, visuals.overlay_offset, screen_w, screen_h);
-        let hwnd_overlay = create_layered_window(&class_name, ox, oy, 10, visuals.overlay_font_size.max(1) as i32, hinstance.into());
+        let hwnd_overlay = create_window(&class_name, overlay_ex, WS_POPUP, ox, oy, 10, visuals.overlay_font_size.max(1) as i32, hinstance.into());
         let _ = SetLayeredWindowAttributes(hwnd_overlay, COLORREF(0), 255, LWA_COLORKEY);
 
-        let hwnd_debug = create_layered_window(&class_name, 0, 0, 1, 1, hinstance.into());
+        let hwnd_debug = create_window(&class_name, overlay_ex, WS_POPUP, 0, 0, 1, 1, hinstance.into());
         let _ = SetLayeredWindowAttributes(hwnd_debug, COLORREF(0), 180, LWA_ALPHA);
 
         let mut ctx = Box::new(UiCtx {
@@ -202,14 +204,15 @@ fn topmost(hwnd: HWND) {
     }
 }
 
-fn create_layered_window(class: &[u16], x: i32, y: i32, w: i32, h: i32, hinstance: windows::Win32::Foundation::HINSTANCE) -> HWND {
+#[allow(clippy::too_many_arguments)]
+fn create_window(class: &[u16], ex: WINDOW_EX_STYLE, style: WINDOW_STYLE, x: i32, y: i32, w: i32, h: i32, hinstance: windows::Win32::Foundation::HINSTANCE) -> HWND {
     unsafe {
         let title: Vec<u16> = "ShadowPromptWin\0".encode_utf16().collect();
         CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+            ex,
             PCWSTR(class.as_ptr()),
             PCWSTR(title.as_ptr()),
-            WS_POPUP,
+            style,
             x, y, w, h,
             None, None,
             hinstance,

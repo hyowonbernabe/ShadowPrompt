@@ -46,7 +46,7 @@ form_color_aborted   = "#FF8800"
 overlay_enabled  = true
 overlay_corner   = "top_left"
 overlay_offset   = [12, 12]
-overlay_font_size = 16
+overlay_font_size = 13
 
 [http]
 connect_timeout_secs = 10
