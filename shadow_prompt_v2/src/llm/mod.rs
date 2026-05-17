@@ -8,6 +8,13 @@ pub mod retry;
 pub mod system_prompts;
 
 use std::sync::Arc;
+use std::time::Duration;
+
+use messages::{ContentPart, Message};
+use request::build;
+use response::Response;
+
+const ENDPOINT: &str = "https://openrouter.ai/api/v1/chat/completions";
 
 #[derive(Clone)]
 pub struct LlmClient {
@@ -17,14 +24,64 @@ pub struct LlmClient {
 }
 
 impl LlmClient {
-    pub fn new(api_key: String, model_id: String) -> anyhow::Result<Self> {
+    pub fn new(api_key: String, model_id: String, connect_secs: u64, read_secs: u64) -> anyhow::Result<Self> {
         let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
+            .connect_timeout(Duration::from_secs(connect_secs))
+            .timeout(Duration::from_secs(read_secs))
             .build()?;
         Ok(Self {
             http: Arc::new(http),
             api_key: Arc::from(api_key),
             model_id: Arc::from(model_id),
         })
+    }
+
+    /// Single round-trip: system + user text → assistant text. No history.
+    pub async fn answer_text(&self, system: &str, user: &str) -> anyhow::Result<String> {
+        let msgs = vec![
+            Message::System { content: system.to_string() },
+            Message::User { content: vec![ContentPart::Text { text: user.to_string() }] },
+        ];
+        self.call(msgs).await
+    }
+
+    /// Multi-message exchange (used by Forms with images + history).
+    pub async fn call(&self, messages: Vec<Message>) -> anyhow::Result<String> {
+        let caps = capabilities::for_model(&self.model_id);
+        let body = build(&self.model_id, &messages, caps);
+        let body = serde_json::to_string(&body)?;
+        let http = self.http.clone();
+        let api_key = self.api_key.clone();
+
+        retry::with_retry(|| {
+            let http = http.clone();
+            let api_key = api_key.clone();
+            let body = body.clone();
+            async move {
+                let resp = http
+                    .post(ENDPOINT)
+                    .bearer_auth(&*api_key)
+                    .header("Content-Type", "application/json")
+                    .header("HTTP-Referer", "https://github.com/hyowonbernabe/ShadowPrompt")
+                    .header("X-Title", "ShadowPrompt")
+                    .body(body)
+                    .send()
+                    .await?;
+                let status = resp.status();
+                let text = resp.text().await?;
+                if !status.is_success() {
+                    anyhow::bail!("openrouter {status}: {text}");
+                }
+                let parsed: Response = serde_json::from_str(&text)
+                    .map_err(|e| anyhow::anyhow!("parse response: {e}; body={text}"))?;
+                parsed
+                    .choices
+                    .into_iter()
+                    .next()
+                    .map(|c| c.message.content)
+                    .ok_or_else(|| anyhow::anyhow!("no choices in response"))
+            }
+        })
+        .await
     }
 }

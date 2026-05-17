@@ -54,17 +54,34 @@ pub fn run() -> anyhow::Result<()> {
 }
 
 fn run_daemon(cfg: config::Config, _args: Cli) -> anyhow::Result<()> {
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
     rt.block_on(async move {
         let ui_tx = ui::start(cfg.visuals.clone())?;
         let mut input_rx = input::start(cfg.hotkeys.clone())?;
+
+        let llm = llm::LlmClient::new(
+            cfg.openrouter.api_key.clone(),
+            cfg.openrouter.model_id.clone(),
+            cfg.http.connect_timeout_secs,
+            cfg.http.read_timeout_secs,
+        )?;
+
+        let action_ctx = actions::ActionContext {
+            config: Arc::new(cfg),
+            llm: Arc::new(llm),
+            ui_tx: ui_tx.clone(),
+            active_task: Arc::new(Mutex::new(None)),
+        };
+
         log::info!("daemon loop running; awaiting input events");
-        let _ = &cfg;
         while let Some(event) = input_rx.recv().await {
-            log::info!("event: {:?}", event);
-            let _ = &ui_tx;
+            log::debug!("event: {:?}", event);
+            actions::dispatch(action_ctx.clone(), event).await;
         }
         Ok::<(), anyhow::Error>(())
     })
