@@ -71,7 +71,7 @@ max_image_long_edge_px = 1568
 enabled = true
 # Subject folder names under knowledge/. The _default/ folder is always loaded
 # in addition (if it exists). Empty list = only _default/ loads.
-active_subjects = []
+active_subjects = ["methods_of_research", "structure_of_programming_language"]
 # Anthropic prompt-cache TTL. "5m" (cheaper write, 1.25x) or "1h" (2x but
 # covers long idle gaps). Each cache hit refreshes the timer, so as long as
 # you query at least once every 5 min the cache never re-writes.

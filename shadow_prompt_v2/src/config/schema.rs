@@ -29,7 +29,10 @@ impl Default for KnowledgeConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            active_subjects: Vec::new(),
+            active_subjects: vec![
+                "methods_of_research".to_string(),
+                "structure_of_programming_language".to_string(),
+            ],
             cache_ttl: default_ttl(),
             max_chars: default_max_chars(),
         }
