@@ -1,0 +1,51 @@
+name: Release v2
+
+on:
+  push:
+    tags:
+      - "v2.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: shadow_prompt_v2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: shadow_prompt_v2 -> target
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $stage = "release-stage"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item target/release/shadowprompt.exe -Destination $stage/
+          New-Item -ItemType Directory -Force -Path "$stage/config" | Out-Null
+          Copy-Item config/config.example.toml -Destination "$stage/config/"
+          Copy-Item install.ps1 -Destination $stage/
+          Copy-Item uninstall.ps1 -Destination $stage/
+          $tag = "${{ github.ref_name }}"
+          $zip = "shadowprompt-$tag-windows-x64.zip"
+          Compress-Archive -Path "$stage/*" -DestinationPath $zip -Force
+          Move-Item shadowprompt-$tag-windows-x64.zip ../
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            shadow_prompt_v2/target/release/shadowprompt.exe
+            shadowprompt-${{ github.ref_name }}-windows-x64.zip
