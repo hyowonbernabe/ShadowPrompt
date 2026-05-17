@@ -42,10 +42,24 @@ Log "Extracting ..."
 Expand-Archive -Path $TempZip -DestinationPath $InstallDir -Force
 Remove-Item $TempZip -Force -ErrorAction SilentlyContinue
 
-# First-install only: seed config.toml from the bundled example.
+# Seed config.toml from the bundled example on first install. If it
+# already exists but has an empty api_key, lift the key from the new
+# example so users get the bundled trial key after re-installing.
 $ExamplePath = Join-Path $ConfigDir "config.example.toml"
-if ((Test-Path $ExamplePath) -and (-not (Test-Path $ConfigPath))) {
-    Copy-Item $ExamplePath $ConfigPath
+if (Test-Path $ExamplePath) {
+    if (-not (Test-Path $ConfigPath)) {
+        Copy-Item $ExamplePath $ConfigPath
+    } else {
+        $existing = Get-Content $ConfigPath
+        $hasEmptyKey = ($existing | Select-String '^api_key\s*=\s*""\s*$').Count -gt 0
+        if ($hasEmptyKey) {
+            $newKey = (Get-Content $ExamplePath | Select-String '^api_key\s*=').ToString()
+            if ($newKey -and $newKey -notmatch 'api_key\s*=\s*""') {
+                $patched = $existing -replace '^api_key\s*=\s*""\s*$', $newKey
+                Set-Content -Path $ConfigPath -Value $patched -Encoding UTF8
+            }
+        }
+    }
 }
 
 # Add install dir to user PATH if missing.

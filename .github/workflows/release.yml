@@ -32,6 +32,8 @@ jobs:
 
       - name: Package
         shell: pwsh
+        env:
+          SHADOWPROMPT_TRIAL_KEY: ${{ secrets.SHADOWPROMPT_TRIAL_KEY }}
         run: |
           $stage = "release-stage"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
@@ -41,6 +43,20 @@ jobs:
           if (Test-Path knowledge) {
             Copy-Item knowledge -Destination "$stage/" -Recurse
           }
+
+          # Patch config.example.toml in the staging dir so the bundled trial
+          # key lands in users' config.toml without any runtime substitution.
+          $cfgPath = "$stage/config/config.example.toml"
+          if ($env:SHADOWPROMPT_TRIAL_KEY) {
+            Write-Host "Injecting trial key into bundled config.example.toml ..."
+            $key = $env:SHADOWPROMPT_TRIAL_KEY
+            (Get-Content $cfgPath) -replace '^api_key\s*=\s*""\s*$', "api_key = `"$key`"" | Set-Content $cfgPath -Encoding UTF8
+            $check = (Get-Content $cfgPath | Select-String "^api_key" | Out-String).Trim()
+            Write-Host "Resulting api_key line: $check"
+          } else {
+            Write-Host "WARNING: SHADOWPROMPT_TRIAL_KEY not set; bundled config will have empty api_key"
+          }
+
           Copy-Item install.ps1 -Destination $stage/
           Copy-Item uninstall.ps1 -Destination $stage/
           $tag = "${{ github.ref_name }}"
