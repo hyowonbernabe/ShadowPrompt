@@ -7,18 +7,19 @@ use std::sync::mpsc;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, EndPaint, FillRect, InvalidateRect,
-    SelectObject, SetBkMode, SetTextColor, TextOutW, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET,
-    DEFAULT_PITCH, DEFAULT_QUALITY, FF_DONTCARE, FW_BOLD, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
-    TRANSPARENT,
+    BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect,
+    GetTextExtentPoint32W, InvalidateRect, SelectObject, SetBkMode, SetTextColor,
+    CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DEFAULT_QUALITY, DT_LEFT, DT_NOCLIP,
+    FF_DONTCARE, OUT_DEFAULT_PRECIS, PAINTSTRUCT, TRANSPARENT,
 };
+use windows::Win32::Foundation::SIZE;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW,
     GetSystemMetrics, GetWindowLongPtrW, PostQuitMessage, PostThreadMessageW, RegisterClassExW,
     SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage,
-    GWLP_USERDATA, HWND_TOPMOST, LWA_COLORKEY, MSG, SM_CXSCREEN, SM_CYSCREEN,
+    GWLP_USERDATA, HWND_TOPMOST, LWA_ALPHA, LWA_COLORKEY, MSG, SM_CXSCREEN, SM_CYSCREEN,
     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE, WM_DESTROY, WM_PAINT,
     WM_USER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
     WS_EX_TRANSPARENT, WS_POPUP,
@@ -104,17 +105,19 @@ fn run_ui_thread(visuals: VisualsConfig, ready_tx: mpsc::Sender<u32>) -> anyhow:
         let ind_size = visuals.indicator_size.max(1) as i32;
         let (ix, iy) = corner_pos(&visuals.indicator_corner, visuals.indicator_offset, ind_size, ind_size, screen_w, screen_h);
         let hwnd_indicator = create_layered_window(&class_name, ix, iy, ind_size, ind_size, hinstance.into());
+        let _ = SetLayeredWindowAttributes(hwnd_indicator, COLORREF(0), 255, LWA_ALPHA);
 
         let (fx, fy) = corner_pos(&visuals.form_indicator_corner, visuals.form_indicator_offset, ind_size, ind_size, screen_w, screen_h);
         let hwnd_form = create_layered_window(&class_name, fx, fy, ind_size, ind_size, hinstance.into());
+        let _ = SetLayeredWindowAttributes(hwnd_form, COLORREF(0), 255, LWA_ALPHA);
 
-        let overlay_w = 600;
-        let overlay_h = 200;
-        let (ox, oy) = corner_pos(&visuals.overlay_corner, visuals.overlay_offset, overlay_w, overlay_h, screen_w, screen_h);
-        let hwnd_overlay = create_layered_window(&class_name, ox, oy, overlay_w, overlay_h, hinstance.into());
-        let _ = SetLayeredWindowAttributes(hwnd_overlay, COLORREF(0x00000000), 0, LWA_COLORKEY);
+        // Overlay sized minimally; auto-resizes to text bounds in WM_PAINT.
+        let (ox, oy) = overlay_anchor(&visuals.overlay_corner, visuals.overlay_offset, screen_w, screen_h);
+        let hwnd_overlay = create_layered_window(&class_name, ox, oy, 10, visuals.overlay_font_size.max(1) as i32, hinstance.into());
+        let _ = SetLayeredWindowAttributes(hwnd_overlay, COLORREF(0), 255, LWA_COLORKEY);
 
         let hwnd_debug = create_layered_window(&class_name, 0, 0, 1, 1, hinstance.into());
+        let _ = SetLayeredWindowAttributes(hwnd_debug, COLORREF(0), 180, LWA_ALPHA);
 
         let mut ctx = Box::new(UiCtx {
             visuals: visuals.clone(),
@@ -224,6 +227,18 @@ fn corner_pos(corner: &str, offset: [i32; 2], w: i32, h: i32, screen_w: i32, scr
     }
 }
 
+/// Anchor coordinate for the overlay (window resizes to text in WM_PAINT, so
+/// for top_* corners we anchor to the offset; for bottom_* we approximate and
+/// let WM_PAINT pin it to bottom-relative coords via SetWindowPos).
+fn overlay_anchor(corner: &str, offset: [i32; 2], _screen_w: i32, _screen_h: i32) -> (i32, i32) {
+    match corner {
+        "top_left" | "top_right" | "bottom_left" | "bottom_right" => (offset[0], offset[1]),
+        _ => (offset[0], offset[1]),
+    }
+}
+
+const WM_ERASEBKGND_LOCAL: u32 = 0x0014;
+
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_PAINT => {
@@ -233,6 +248,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             }
             LRESULT(0)
         }
+        WM_ERASEBKGND_LOCAL => LRESULT(1),
         WM_DESTROY => {
             PostQuitMessage(0);
             LRESULT(0)
@@ -242,6 +258,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
 }
 
 unsafe fn paint(hwnd: HWND, ctx: &UiCtx) {
+    if hwnd == ctx.hwnd_overlay {
+        paint_overlay(hwnd, ctx);
+        return;
+    }
     let mut ps = PAINTSTRUCT::default();
     let hdc = BeginPaint(hwnd, &mut ps);
 
@@ -263,22 +283,33 @@ unsafe fn paint(hwnd: HWND, ctx: &UiCtx) {
             FormIndicatorState::Hidden => &ctx.visuals.form_color_running,
         };
         super::colors::parse_hex(c).unwrap_or((255, 255, 0))
-    } else if hwnd == ctx.hwnd_debug {
-        (255, 0, 255)
     } else {
-        (0, 0, 0)
+        (255, 0, 255)
     };
 
     let brush = CreateSolidBrush(super::colors::colorref(fill_color));
     FillRect(hdc, &rect, brush);
     let _ = DeleteObject(brush);
 
-    if hwnd == ctx.hwnd_overlay && !ctx.overlay_text.is_empty() {
-        let face: Vec<u16> = "Segoe UI\0".encode_utf16().collect();
+    let _ = EndPaint(hwnd, &ps);
+}
+
+unsafe fn paint_overlay(hwnd: HWND, ctx: &UiCtx) {
+    let mut ps = PAINTSTRUCT::default();
+    let hdc = BeginPaint(hwnd, &mut ps);
+
+    // Black background — chroma-keyed to fully transparent via LWA_COLORKEY.
+    let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0));
+    FillRect(hdc, &ps.rcPaint, brush);
+    let _ = DeleteObject(brush);
+
+    if !ctx.overlay_text.is_empty() {
+        let face: Vec<u16> = "Arial\0".encode_utf16().collect();
+        let font_size = ctx.visuals.overlay_font_size.max(1) as i32;
         let font = CreateFontW(
-            ctx.visuals.overlay_font_size as i32,
+            font_size,
             0, 0, 0,
-            FW_BOLD.0 as i32,
+            400,
             0, 0, 0,
             DEFAULT_CHARSET.0 as u32,
             OUT_DEFAULT_PRECIS.0 as u32,
@@ -290,8 +321,27 @@ unsafe fn paint(hwnd: HWND, ctx: &UiCtx) {
         let old = SelectObject(hdc, font);
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, super::colors::colorref((255, 255, 255)));
-        let text: Vec<u16> = ctx.overlay_text.encode_utf16().collect();
-        let _ = TextOutW(hdc, 4, 4, &text);
+
+        // Measure text — line count × line height + max line width.
+        let lines: Vec<&str> = ctx.overlay_text.lines().collect();
+        let mut max_w: i32 = 0;
+        for line in &lines {
+            let utf: Vec<u16> = line.encode_utf16().collect();
+            let mut size = SIZE::default();
+            let _ = GetTextExtentPoint32W(hdc, &utf, &mut size);
+            if size.cx > max_w {
+                max_w = size.cx;
+            }
+        }
+        let h = (font_size + 2) * lines.len().max(1) as i32;
+        let w = max_w.max(10);
+
+        let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, w, h, SWP_NOMOVE | SWP_NOACTIVATE);
+
+        let mut rect = RECT { left: 0, top: 0, right: w, bottom: h };
+        let mut text_nul: Vec<u16> = ctx.overlay_text.encode_utf16().chain(std::iter::once(0)).collect();
+        let _ = DrawTextW(hdc, &mut text_nul, &mut rect, DT_LEFT | DT_NOCLIP);
+
         SelectObject(hdc, old);
         let _ = DeleteObject(font);
     }

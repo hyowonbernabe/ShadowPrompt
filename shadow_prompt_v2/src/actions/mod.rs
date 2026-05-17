@@ -32,9 +32,17 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
         InputEvent::ClipboardQuery => spawn_exclusive(ctx, |c| async move {
             clipboard_query::execute(c).await
         }).await,
-        InputEvent::OcrQuery => spawn_exclusive(ctx, |c| async move {
-            ocr_query::execute(c).await
+        InputEvent::OcrQuery => {
+            // Enter selecting mode: indicator shows processing color; actual
+            // capture fires when OcrRegion arrives.
+            let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Processing));
+        }
+        InputEvent::OcrRegion { x, y, w, h } => spawn_exclusive(ctx, move |c| async move {
+            ocr_query::execute(c, x, y, w, h).await
         }).await,
+        InputEvent::OcrCancel => {
+            let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Ready));
+        }
         InputEvent::FormsAuto => spawn_exclusive(ctx, |c| async move {
             forms_run::execute(c, true).await
         }).await,
@@ -68,9 +76,6 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
             }
         }
         InputEvent::PanicKill => crate::lifecycle::panic::execute(),
-        InputEvent::OcrRegionPoint { .. } => {
-            // Mouse-driven region capture: handled inside ocr_query session.
-        }
     }
 }
 

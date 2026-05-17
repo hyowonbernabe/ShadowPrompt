@@ -1,7 +1,8 @@
-// Insta-delete: wipe clipboard, kill spawned Chrome procs, remove PATH entry,
-// spawn detached cleanup script that deletes the install dir, then exit.
+// Insta-delete: wipe clipboard, remove PATH entry, spawn detached hidden
+// PowerShell that deletes install dir + exe, then exit. No console flash.
 
 use std::os::windows::process::CommandExt;
+use std::path::Path;
 use std::process::Command;
 
 use crate::browser::PROFILE_MARKER;
@@ -20,18 +21,26 @@ pub fn execute() -> anyhow::Result<()> {
 
     let install_dir = exe_dir()?;
     let exe = std::env::current_exe()?;
-
     let _ = path_cleanup::remove_from_user_path(&install_dir);
 
-    let script = format!(
-        "timeout /T 1 /NOBREAK >NUL & del /F /Q \"{exe}\" & rmdir /S /Q \"{dir}\"",
-        exe = exe.display(),
-        dir = install_dir.display()
+    let exe_s = normalize_path(&exe).replace('\'', "''");
+    let dir_s = normalize_path(&install_dir).replace('\'', "''");
+
+    let ps = format!(
+        "Start-Sleep -Milliseconds 800; \
+         Remove-Item -Force -ErrorAction SilentlyContinue '{exe_s}'; \
+         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '{dir_s}'"
     );
-    Command::new("cmd")
-        .args(["/C", &script])
+
+    Command::new("powershell.exe")
+        .args(["-WindowStyle", "Hidden", "-NoProfile", "-NonInteractive", "-Command", &ps])
         .creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW)
         .spawn()?;
 
     std::process::exit(0);
+}
+
+fn normalize_path(p: &Path) -> String {
+    let s = p.to_string_lossy().into_owned();
+    s.strip_prefix(r"\\?\").map(String::from).unwrap_or(s)
 }

@@ -32,8 +32,18 @@ pub async fn execute_form_flow(llm: Arc<LlmClient>, mode: FormsMode) -> anyhow::
     let tabs = browser.get_tabs().lock().unwrap().clone();
     let tab = tabs
         .iter()
-        .find(|t| t.get_url().contains("docs.google.com/forms"))
-        .ok_or_else(|| anyhow::anyhow!("no Google Forms tab open in debug Chrome"))?
+        .find(|t| {
+            let u = t.get_url();
+            u.contains("docs.google.com/forms") || u.contains("forms.gle") || u.contains("/forms/d/")
+        })
+        .or_else(|| tabs.iter().find(|t| t.get_url().contains("docs.google.com")))
+        .ok_or_else(|| {
+            let urls: Vec<String> = tabs.iter().map(|t| t.get_url()).collect();
+            anyhow::anyhow!(
+                "no Google Forms tab open in debug Chrome. Navigate to a form in the debug window first. Open tabs: {:?}",
+                urls
+            )
+        })?
         .clone();
 
     let mut history: Vec<Message> = vec![Message::System {

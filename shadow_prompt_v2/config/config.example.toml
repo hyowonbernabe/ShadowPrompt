@@ -28,7 +28,7 @@ panic_kill          = "ctrl+shift+f12"
 [visuals]
 # Pixel indicator
 indicator_corner = "top_right"  # top_left | top_right | bottom_left | bottom_right
-indicator_size   = 2            # pixels
+indicator_size   = 4            # pixels
 indicator_offset = [4, 4]       # [x, y] from corner
 
 color_ready      = "#00FF00"
@@ -44,9 +44,9 @@ form_color_aborted   = "#FF8800"
 
 # Text overlay
 overlay_enabled  = true
-overlay_corner   = "bottom_right"
-overlay_offset   = [20, 20]
-overlay_font_size = 14
+overlay_corner   = "top_left"
+overlay_offset   = [12, 12]
+overlay_font_size = 16
 
 [http]
 connect_timeout_secs = 10

@@ -10,14 +10,12 @@ pub use events::InputEvent;
 use crate::config::schema::HotkeysConfig;
 use bindings::{build, insta_delete_combo, Binding};
 use parser::KeyCombo;
-use rdev::{listen, Event, EventType, Key};
+use rdev::{listen, Button, Event, EventType, Key};
 use state_machine::{InstaDeleteState, Transition};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
-/// Spawn the input listener OS thread + a tick worker for state-machine timeouts.
-/// Returns a receiver of InputEvent.
 pub fn start(cfg: HotkeysConfig) -> anyhow::Result<UnboundedReceiver<InputEvent>> {
     let bindings = build(&cfg)?;
     let insta = insta_delete_combo(&cfg)?;
@@ -53,6 +51,9 @@ struct ListenerState {
     tx: UnboundedSender<InputEvent>,
     mods: Mutex<Mods>,
     last_fire: Mutex<Option<(KeyCombo, Instant)>>,
+    cursor: Mutex<(i32, i32)>,
+    selecting: Mutex<bool>,
+    p1: Mutex<Option<(i32, i32)>>,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -71,6 +72,9 @@ impl ListenerState {
             tx,
             mods: Mutex::new(Mods::default()),
             last_fire: Mutex::new(None),
+            cursor: Mutex::new((0, 0)),
+            selecting: Mutex::new(false),
+            p1: Mutex::new(None),
         }
     }
 
@@ -78,7 +82,40 @@ impl ListenerState {
         match ev.event_type {
             EventType::KeyPress(k) => self.on_press(k),
             EventType::KeyRelease(k) => self.on_release(k),
+            EventType::MouseMove { x, y } => {
+                *self.cursor.lock().unwrap() = (x as i32, y as i32);
+            }
+            EventType::ButtonPress(Button::Left) => self.on_left_click(),
             _ => {}
+        }
+    }
+
+    fn on_left_click(&self) {
+        if !*self.selecting.lock().unwrap() {
+            return;
+        }
+        let cur = *self.cursor.lock().unwrap();
+        let mut p1 = self.p1.lock().unwrap();
+        match *p1 {
+            None => {
+                *p1 = Some(cur);
+                log::debug!("ocr region: P1 at {:?}", cur);
+            }
+            Some((x1, y1)) => {
+                let (x2, y2) = cur;
+                let x = x1.min(x2);
+                let y = y1.min(y2);
+                let w = (x1 - x2).abs();
+                let h = (y1 - y2).abs();
+                *p1 = None;
+                *self.selecting.lock().unwrap() = false;
+                log::debug!("ocr region: P2 at {:?}; rect {}x{} @ ({},{})", cur, w, h, x, y);
+                if w > 0 && h > 0 {
+                    let _ = self.tx.send(InputEvent::OcrRegion { x, y, w, h });
+                } else {
+                    let _ = self.tx.send(InputEvent::OcrCancel);
+                }
+            }
         }
     }
 
@@ -100,7 +137,25 @@ impl ListenerState {
 
         for b in &self.bindings {
             if self.matches(&b.combo, k, mods) && self.debounce(&b.combo) {
-                let _ = self.tx.send((b.make_event)());
+                let event = (b.make_event)();
+                // Special-case: OcrQuery enters region-selection mode.
+                match &event {
+                    InputEvent::OcrQuery => {
+                        *self.p1.lock().unwrap() = None;
+                        *self.selecting.lock().unwrap() = true;
+                    }
+                    InputEvent::Abort => {
+                        let was_selecting = *self.selecting.lock().unwrap();
+                        *self.selecting.lock().unwrap() = false;
+                        *self.p1.lock().unwrap() = None;
+                        if was_selecting {
+                            let _ = self.tx.send(InputEvent::OcrCancel);
+                            return;
+                        }
+                    }
+                    _ => {}
+                }
+                let _ = self.tx.send(event);
                 return;
             }
         }
@@ -125,7 +180,6 @@ impl ListenerState {
         c.key == k && c.ctrl == m.ctrl && c.shift == m.shift && c.alt == m.alt && c.win == m.win
     }
 
-    /// 200ms debounce so OS auto-repeat doesn't spam events.
     fn debounce(&self, c: &KeyCombo) -> bool {
         let mut last = self.last_fire.lock().unwrap();
         let now = Instant::now();

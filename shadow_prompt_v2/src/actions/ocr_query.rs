@@ -1,5 +1,4 @@
-// Vision query: capture fullscreen → vision LLM → clipboard + overlay.
-// (Region selection is deferred; full screen with vision is sufficient for v2 MVP.)
+// Vision query: capture screen region → vision LLM → clipboard + overlay.
 
 use super::ActionContext;
 use crate::capture::{clipboard, image, screen};
@@ -7,10 +6,10 @@ use crate::llm::messages::{ContentPart, Message};
 use crate::llm::system_prompts::ANSWER_MODE_GENERAL;
 use crate::ui::commands::{IndicatorState, UICommand};
 
-pub async fn execute(ctx: ActionContext) -> anyhow::Result<()> {
+pub async fn execute(ctx: ActionContext, x: i32, y: i32, w: i32, h: i32) -> anyhow::Result<()> {
     let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Processing));
 
-    let png = tokio::task::spawn_blocking(screen::capture_fullscreen).await??;
+    let png = tokio::task::spawn_blocking(move || screen::capture_region(x, y, w, h)).await??;
     let part = tokio::task::spawn_blocking(move || image::prepare_for_request(&png)).await??;
 
     let messages = vec![
