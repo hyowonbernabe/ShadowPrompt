@@ -1,0 +1,61 @@
+# ShadowPrompt v2 — example config.
+# Copy to config.toml and fill in your OpenRouter API key.
+
+[openrouter]
+# Get a key at https://openrouter.ai/keys
+api_key = ""
+
+# Default model. Must support image inputs (multimodal).
+# Examples:
+#   anthropic/claude-sonnet-4.6
+#   anthropic/claude-opus-4.7
+#   google/gemini-2.5-pro
+#   openai/gpt-4o
+model_id = "anthropic/claude-sonnet-4.6"
+
+[hotkeys]
+clipboard_query     = "ctrl+shift+v"
+ocr_query           = "ctrl+shift+space"
+forms_auto          = "ctrl+shift+9"
+forms_single        = "ctrl+shift+7"
+abort               = "ctrl+shift+0"
+launch_debugger     = "ctrl+shift+i"
+hide_toggle         = "ctrl+shift+h"
+restart_daemon      = "ctrl+shift+r"
+insta_delete        = "ctrl+shift+delete"
+panic_kill          = "ctrl+shift+f12"
+
+[visuals]
+# Pixel indicator
+indicator_corner = "top_right"  # top_left | top_right | bottom_left | bottom_right
+indicator_size   = 2            # pixels
+indicator_offset = [4, 4]       # [x, y] from corner
+
+color_ready      = "#00FF00"
+color_processing = "#FF0000"
+color_error      = "#FF00FF"
+
+# Form indicator (second pixel for Forms status)
+form_indicator_corner = "top_left"
+form_indicator_offset = [4, 4]
+form_color_running   = "#FFFF00"
+form_color_failed    = "#FF00FF"
+form_color_aborted   = "#FF8800"
+
+# Text overlay
+overlay_enabled  = true
+overlay_corner   = "bottom_right"
+overlay_offset   = [20, 20]
+overlay_font_size = 14
+
+[http]
+connect_timeout_secs = 10
+read_timeout_secs    = 120
+
+[forms]
+# Cap on auto-pagination
+max_pages = 10
+# Per-request image cap (Claude friendly under 20)
+max_images_per_request = 20
+# Long-edge resize ceiling
+max_image_long_edge_px = 1568

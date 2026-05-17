@@ -1,0 +1,86 @@
+[package]
+name = "shadowprompt"
+version = "2.0.0-alpha.0"
+edition = "2021"
+description = "Lightweight stealth AI assistant for Windows — single executable, hotkey-driven."
+license = "Apache-2.0"
+repository = "https://github.com/hyowonbernabe/ShadowPrompt"
+
+[features]
+default = []
+# Enables console window + stdout logging. Off in release builds.
+debug = []
+
+[[bin]]
+name = "shadowprompt"
+path = "src/main.rs"
+
+[lib]
+name = "shadowprompt"
+path = "src/lib.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
+
+# HTTP (slimmed: no native-tls, no cookies, no gzip)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+
+# Global hotkeys + mouse hook
+rdev = "0.5"
+
+# Clipboard
+arboard = "3"
+
+# Windows API (Win32 + WinRT)
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_System_Console",
+    "Media_Ocr",
+    "Storage_Streams",
+    "Graphics_Imaging",
+] }
+
+# Browser automation
+headless_chrome = "1"
+
+# Cookie extraction from host browsers
+rookie = "0.5"
+
+# Image resize + encode
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# Base64 encoding for images
+base64 = "0.22"
+
+# Config
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# CLI args
+clap = { version = "4", features = ["derive"] }
+
+# Logging
+log = "0.4"
+simplelog = "0.12"
+
+# Error handling
+anyhow = "1"
+
+[build-dependencies]
+embed-resource = "2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 0
