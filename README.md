@@ -1,278 +1,285 @@
 <p align="center">
-  <img src="shadow_prompt/assets/logo_512.png" width="150" alt="ShadowPrompt Logo">
+  <img src="shadow_prompt_v2/assets/logo_512.png" width="140" alt="ShadowPrompt">
 </p>
 
-# ShadowPrompt: Portable Discrete Academic Interface
-
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/hyowonbernabe/ShadowPrompt?include_prereleases)](https://github.com/hyowonbernabe/ShadowPrompt/releases)
-[![Automated Checks](https://github.com/hyowonbernabe/ShadowPrompt/actions/workflows/check.yml/badge.svg)](https://github.com/hyowonbernabe/ShadowPrompt/actions/workflows/check.yml)
-[![Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6?logo=windows)](https://github.com/hyowonbernabe/ShadowPrompt/releases)
-
-ShadowPrompt is a lightweight, stealthy AI assistant designed for high-stakes environments where focus and discretion are paramount. Built with Rust and designed to run entirely from a **USB Drive**, it provides real-time knowledge synthesis without leaving a footprint on the host machine.
-
----
-
-## 💡 The "Why" (Motivation)
-
-In modern academic and professional settings, the gap between "having data" and "understanding context" can be overwhelming. Standard AI tools are often intrusive, demanding browser tabs, installation permissions, and constant context switching.
-
-ShadowPrompt was born from the need for a **Discrete Academic Interface**—a tool that lives in the shadows (literally) to support students and professionals during intensive sessions.
-
-### The Shadow Advantage
-| Feature | Benefit |
-|---------|---------|
-| **Portable Architecture** | Run directly from USB. No registry, no temp files, no trace. |
-| **Cognitive Flow Preservation** | Global hotkeys—no window switching required. |
-| **Stealth by Design** | No taskbar icon, no windows. Just a single pixel indicator. |
-| **Panic Button** | Instantly kill process and wipe clipboard with one hotkey. |
-
----
-
-## ✨ Key Features
-
-- **🔴 Stealth Pixel Indicators**: Discrete visual cues (Green/Red/Cyan/etc.) indicate status and answers
-- **📋 Clipboard Injection**: Copy question → trigger → answer appears in clipboard
-- **👁️ OCR Region Capture**: Extract text from images or locked PDFs with invisible selection
-- **🖼️ Vision Capable Models**: OCR automatically sends screenshots directly to vision-capable LLMs
-- **🔍 Smart Search**: Skips external search engines when model has built-in search capability
-- **📚 Local RAG**: Index your `.md`/`.txt` notes for project-specific AI context
-- **🔄 Auto-LLM Fallback**: Automatically switches providers if rate limits hit (Groq → OpenRouter → Ollama)
-- **🎯 MCQ Detection**: Automatic color-coded pixel for multiple choice answers
-- **📝 Text Overlay**: Shows answer text on screen (configurable position, opacity, font size)
-
----
-
-## 🛠️ Tech Stack
-
-| Component | Technology |
-|:----------|:-----------|
-| **Engine** | Rust (Memory-safe, single binary) |
-| **LLM Providers** | Groq (Llama 3.1), OpenRouter, Ollama |
-| **Embeddings** | FastEmbed-rs (BGE-Small-EN-v1.5, local) |
-| **OCR** | Windows.Media.Ocr (Native API, 0MB overhead) |
-| **Hooks** | Win32 API / Rdev (Global Keyboard) |
-| **GUI** | egui (Setup Wizard only) |
-
----
-
-## 📋 Prerequisites
-
-- **OS**: Windows 10 or 11 (64-bit)
-- **Hardware**: Any USB 2.0/3.0 drive with ~100MB free space
-- **Internet**: Required for API-based models (Groq/OpenRouter)
-- **API Key**: Free account from [Groq](https://console.groq.com/) or [OpenRouter](https://openrouter.ai/)
-
----
-
-## 🚀 Installation & Setup
-
-### Download (Recommended)
-
-1. **Download**: Get `ShadowPrompt-windows-x64.zip` from [Releases](https://github.com/hyowonbernabe/ShadowPrompt/releases/latest)
-2. **Extract**: Unzip to your USB drive
-3. **Run**: Double-click `shadow_prompt.exe` → Setup Wizard opens
-4. **Configure**: Enter API key, set hotkeys, wait for model download
-5. **Ready**: Look for the **Green Pixel** in the top-right corner
-
-### Get Your API Key
-
-<details>
-<summary><b>Groq (Recommended - Free & Fast)</b></summary>
-
-1. Go to [console.groq.com](https://console.groq.com/)
-2. Sign up or log in
-3. Navigate to **API Keys** → **Create API Key**
-4. Copy the key (starts with `gsk_...`)
-</details>
-
-<details>
-<summary><b>OpenRouter (More Models)</b></summary>
-
-1. Go to [openrouter.ai](https://openrouter.ai/)
-2. Sign up or log in
-3. Navigate to **Keys** → **Create Key**
-4. Copy the key (starts with `sk-or-...`)
-</details>
-
-### Build from Source (Development)
-
-<details>
-<summary>Click to expand build instructions</summary>
-
-**Prerequisites:**
-- Rust toolchain (stable)
-- Visual Studio Build Tools with C++ workload
-- Protobuf compiler
-
-**Steps:**
-```bash
-git clone https://github.com/hyowonbernabe/ShadowPrompt.git
-cd ShadowPrompt
-.\build_release.bat
-```
-
-The release will be created in the `release/` folder.
-</details>
-
----
-
-## 🎮 Usage Guide
-
-### Quick Start
-```
-1. Copy text (Ctrl+C) or OCR capture (Ctrl+Shift+Space)
-2. Query AI (Ctrl+Shift+V)
-3. Wait for Green pixel
-4. Paste answer (Ctrl+V)
-```
-
-### Default Hotkeys
-
-| Hotkey | Action |
-|--------|--------|
-| `Ctrl+Shift+Space` | Enter OCR capture mode |
-| `Ctrl+Shift+V` | Send clipboard to AI |
-| `Ctrl+Shift+F12` | **PANIC** - Kill process & wipe clipboard |
-
-> **Tip**: Hotkeys are fully configurable during setup or in `config/config.toml`
-
-### Visual Indicators
-
-| Pixel Color | Meaning |
-|-------------|---------|
-| 🟢 **Green** | Ready / Answer available |
-| 🔴 **Red** | Processing / Waiting |
-| 🟦 **Cyan** | MCQ Answer: **A** |
-| 🟪 **Magenta** | MCQ Answer: **B** |
-| 🟨 **Yellow** | MCQ Answer: **C** |
-| ⬛ **Black** | MCQ Answer: **D** |
-
----
-
-## ⚙️ Configuration
-
-After setup, you can edit `config/config.toml` directly:
-
-```toml
-[general]
-wake_key = "Ctrl+Shift+Space"    # OCR mode
-model_key = "Ctrl+Shift+V"       # Query AI
-panic_key = "Ctrl+Shift+F12"     # Emergency exit
-
-[models]
-provider = "groq"                # Options: groq, openrouter, ollama
-
-[models.groq]
-api_key = "gsk_your_key_here"
-model_id = "llama-3.1-8b-instant"
-supports_search = false          # Set true if model has built-in search
-supports_vision = false          # Set true if model can process images
-
-[visuals]
-# Text Overlay (Answer Display)
-text_overlay_enabled = true
-text_overlay_position = "bottom-right"  # Options: top-left, top-right, bottom-left, bottom-right
-text_overlay_font_size = 16
-text_overlay_bg_opacity = 200    # 0-255
-text_overlay_text_opacity = 255  # 0-255
-
-[rag]
-enabled = true
-knowledge_path = "knowledge"     # Drop .md/.txt files here
-```
-
-To re-run the Setup Wizard: `shadow_prompt.exe --setup`
-
----
-
-## 🔒 Security & Privacy
-
-- **Local Processing**: OCR and embeddings run 100% locally (no data sent)
-- **No Telemetry**: ShadowPrompt does not collect any usage data
-- **Portable**: All data stays on your USB drive
-- **Panic Wipe**: Clipboard is cleared on panic to prevent data leakage
-
-> **Note**: Queries sent to Groq/OpenRouter are subject to their privacy policies.
-
----
-
-## 🎒 Portable Mode (USB)
-
-ShadowPrompt is designed to be a "Carry-On" tool.
-1. **No Admin Rights**: Requires zero elevation (unless using global hooks on protected windows).
-2. **Self-Contained**: Config, logs, and database live in the `shadow_prompt` folder next to the executable.
-3. **Plug & Play**: Plug into any Windows 10/11 machine, run, and eject when done.
-
----
-
-## ❓ Troubleshooting
-
-<details>
-<summary><b>Setup Wizard doesn't appear</b></summary>
-
-Delete `config/.setup_complete` and run the exe again.
-</details>
-
-<details>
-<summary><b>"Failed to initialize FastEmbed"</b></summary>
-
-Ensure you have internet connection for first-run model download. Check that `data/models/` is writable.
-</details>
-
-<details>
-<summary><b>Hotkeys don't work</b></summary>
-
-- Check for conflicts with other applications
-- Try running as Administrator
-- Verify hotkeys in `config/config.toml`
-</details>
-
-<details>
-<summary><b>OCR returns empty text</b></summary>
-
-Ensure you're on Windows 10/11 with English language pack installed. OCR uses the system's Windows.Media.Ocr API.
-</details>
-
-<details>
-<summary><b>API errors / "Failed to get response"</b></summary>
-
-- Verify your API key is correct
-- Check your internet connection
-- Ensure you haven't exceeded rate limits
-</details>
-
----
-
-## 🗺️ Roadmap
-
-- [ ] **Web Search Integration**: Perplexity or Brave Search APIs for live data
-- [ ] **More Providers**: Anthropic, OpenAI, DeepSeek support
-- [ ] **Enhanced RAG**: Chunking strategies and hybrid search
-- [ ] **Linux/macOS**: Cross-platform stealth daemons
-- [ ] **32-bit Support**: Windows x86 builds
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
----
-
-## 📄 License
-
-Distributed under the **Apache License 2.0**. See [`LICENSE`](LICENSE) for details.
-
----
+<h1 align="center">ShadowPrompt</h1>
 
 <p align="center">
-  <i>Disclaimer: This tool is intended for personal productivity and research.<br>
-  Users are responsible for adhering to their institutional policies.</i>
+  <em>Lightweight, hotkey-driven AI assistant for Windows. Single executable. No taskbar entry. Built for exam workflows.</em>
 </p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
+  <a href="https://github.com/hyowonbernabe/ShadowPrompt/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/hyowonbernabe/ShadowPrompt?include_prereleases&color=success"></a>
+  <a href="https://github.com/hyowonbernabe/ShadowPrompt/actions/workflows/check_v2.yml"><img alt="CI" src="https://github.com/hyowonbernabe/ShadowPrompt/actions/workflows/check_v2.yml/badge.svg?branch=v2"></a>
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-0078D6?logo=windows&logoColor=white">
+  <img alt="Rust" src="https://img.shields.io/badge/built%20with-Rust-orange?logo=rust&logoColor=white">
+</p>
+
+---
+
+## Install in one line
+
+Open **PowerShell** (regular user, no admin needed) and run:
+
+```powershell
+irm https://raw.githubusercontent.com/hyowonbernabe/ShadowPrompt/main/shadow_prompt_v2/install.ps1 | iex
+```
+
+This will:
+
+1. Download the latest release zip
+2. Extract to `%LOCALAPPDATA%\ShadowPrompt`
+3. Bundle a 7-day OpenRouter trial key so you can run immediately
+4. Add the install directory to your user PATH
+
+Then launch from any terminal:
+
+```powershell
+shadowprompt
+```
+
+A tiny green pixel appears at the top-right corner of your screen. ShadowPrompt is now listening for hotkeys.
+
+> **Already had a previous trial?** Replace the bundled key with your own from <https://openrouter.ai/keys> by editing `%LOCALAPPDATA%\ShadowPrompt\config\config.toml`.
+
+---
+
+## What it does
+
+| Hotkey | What it does |
+|---|---|
+| `Ctrl+Shift+V` | Answer the question on your clipboard. Result lands back on the clipboard + on-screen overlay. |
+| `Ctrl+Shift+Alt+V` | Same as above, but with live web search enabled. |
+| `Ctrl+Shift+Space` | Draw a rectangle on screen with two clicks. Sent to a vision model. |
+| `Ctrl+Shift+Alt+Space` | Same as above, with live web search. |
+| `Ctrl+Shift+9` | **Google Forms auto-paginate.** Fills every unanswered question across all pages. Never clicks Submit. |
+| `Ctrl+Shift+7` | Google Forms single page. Fills only the current page. |
+| `Ctrl+Shift+I` | Open a debug Chrome window so the Forms hotkeys can attach. |
+| `Ctrl+Shift+0` | Abort the current task. |
+| `Ctrl+Shift+H` | Hide / show all UI. |
+| `Ctrl+Shift+?` | Toggle on-screen cheat sheet of every hotkey. |
+| `Ctrl+Shift+R` | Restart the daemon. |
+| `Ctrl+Shift+Delete` | Insta-delete. Tap twice within 2 sec to wipe install dir + PATH entry. |
+| `Ctrl+Shift+F12` | Panic. Wipe clipboard, exit immediately. |
+
+All hotkeys are configurable in `config.toml`.
+
+---
+
+## Why it exists
+
+Standard AI tools demand visible windows, browser tabs, and constant focus switching. ShadowPrompt was built for moments where that's not an option:
+
+- **One process, no window** — runs invisibly. Only a single-pixel state indicator on screen.
+- **Clipboard in, clipboard out** — copy a question, hit a hotkey, paste the answer.
+- **Vision when text isn't enough** — pick a region of your screen, send to a multimodal model.
+- **Forms automation** — fill an entire multi-page Google Form (radio, checkbox, dropdown, grid, text, date, time, scale, with image questions) while you watch. Never clicks Submit, never touches questions you've already answered.
+- **Subject knowledge** — drop markdown notes into a folder, daemon caches them, every query gets that context for the cost of one cached lookup.
+- **Panic button** — two-tap hotkey deletes the install dir, strips PATH, kills the process. No trace.
+
+---
+
+## Architecture at a glance
+
+```
+hotkey  ───►  input thread (rdev)
+                    │
+                    ▼
+              tokio runtime
+              ├─► clipboard / screen capture
+              ├─► OpenRouter (Anthropic-pinned)
+              │     └─► prompt cache (5min ephemeral)
+              ├─► headless_chrome (Forms automation)
+              └─► UI thread (Win32 layered windows)
+                    └─► pixel indicator + overlay + help + form indicator
+```
+
+- **Language**: Rust 2021, single executable
+- **HTTP**: reqwest + rustls (no native-tls)
+- **LLM transport**: OpenRouter, pinned to Anthropic provider for Claude models
+- **Default model**: `anthropic/claude-sonnet-4.6`
+- **Caching**: Anthropic prompt caching, 5-minute ephemeral, refreshed on each hit
+- **Browser automation**: headless_chrome attached to a user-launched Chrome on `:9222`
+- **Stealth**: `windows_subsystem = "windows"` (no console), layered + topmost windows, chroma-keyed transparent overlay
+
+Full details: [`shadow_prompt_v2/docs/architecture.md`](shadow_prompt_v2/docs/architecture.md).
+
+---
+
+## Subject knowledge (the killer feature for exams)
+
+ShadowPrompt loads markdown files at startup and injects them as a cached system prompt block on every query. The first call pays a small write fee; every subsequent call within 5 minutes pays one-tenth of the input cost. Two reviewers are bundled out of the box.
+
+Drop your own notes into:
+
+```
+%LOCALAPPDATA%\ShadowPrompt\knowledge\<subject>\*.md
+```
+
+Then enable in `config.toml`:
+
+```toml
+[knowledge]
+enabled = true
+active_subjects = ["methods_of_research", "structure_of_programming_language"]
+cache_ttl = "5m"
+max_chars = 800000
+```
+
+Restart the daemon. Every query now gets your full subject reference for ~$0.03 instead of ~$0.30.
+
+See [`shadow_prompt_v2/docs/plans/2026-05-17-subject-context-injection.md`](shadow_prompt_v2/docs/plans/2026-05-17-subject-context-injection.md) for the full design.
+
+---
+
+## Configuration
+
+Config lives at `%LOCALAPPDATA%\ShadowPrompt\config\config.toml`. Generated automatically on first run.
+
+```toml
+[openrouter]
+api_key = "sk-or-v1-..."
+model_id = "anthropic/claude-sonnet-4.6"
+
+[hotkeys]
+clipboard_query        = "ctrl+shift+v"
+clipboard_query_search = "ctrl+shift+alt+v"
+ocr_query              = "ctrl+shift+space"
+ocr_query_search       = "ctrl+shift+alt+space"
+forms_auto             = "ctrl+shift+9"
+forms_single           = "ctrl+shift+7"
+abort                  = "ctrl+shift+0"
+launch_debugger        = "ctrl+shift+i"
+hide_toggle            = "ctrl+shift+h"
+help_toggle            = "ctrl+shift+slash"
+restart_daemon         = "ctrl+shift+r"
+insta_delete           = "ctrl+shift+delete"
+panic_kill             = "ctrl+shift+f12"
+
+[visuals]
+indicator_corner = "top_right"
+indicator_size   = 4
+indicator_offset = [0, 0]
+overlay_corner   = "top_left"
+overlay_offset   = [0, 0]
+overlay_font_size = 11
+
+[knowledge]
+enabled = true
+active_subjects = ["methods_of_research", "structure_of_programming_language"]
+cache_ttl = "5m"
+max_chars = 800000
+```
+
+Full schema in [`shadow_prompt_v2/config/config.example.toml`](shadow_prompt_v2/config/config.example.toml).
+
+---
+
+## Verify everything is working
+
+The daemon ships with a self-check probe:
+
+```powershell
+shadowprompt --probe
+```
+
+Runs five round-trips against the configured model and prints pass/fail for: text answering, vision, knowledge recency, multi-step reasoning, and whether web search is enabled.
+
+For Google Forms specifically, run the 15-scenario verification plan documented in [`shadow_prompt_v2/docs/forms-testing.md`](shadow_prompt_v2/docs/forms-testing.md).
+
+---
+
+## Build from source
+
+Requires Rust 2021 (stable) and Windows 10/11.
+
+```powershell
+git clone https://github.com/hyowonbernabe/ShadowPrompt.git
+cd ShadowPrompt\shadow_prompt_v2
+cargo build --release
+```
+
+Binary at `target\release\shadowprompt.exe`. ~5.5 MB stripped.
+
+For development builds with verbose logging:
+
+```powershell
+cargo build --features debug
+.\target\debug\shadowprompt.exe --debug
+```
+
+---
+
+## CLI flags
+
+| Flag | What it does |
+|---|---|
+| `--debug` | Run with stdout logging + console window |
+| `--init` | Write a fresh `config.toml` from the embedded template, then exit |
+| `--probe` | Run the capability self-check, then exit |
+| `--uninstall` | Spawn detached cleanup script, remove install dir, exit |
+| `--config <path>` | Override the config file path |
+| `--version` | Print version |
+
+---
+
+## Uninstall
+
+```powershell
+irm https://raw.githubusercontent.com/hyowonbernabe/ShadowPrompt/main/shadow_prompt_v2/uninstall.ps1 | iex
+```
+
+Or from inside the daemon: tap `Ctrl+Shift+Delete` twice within 2 seconds.
+
+Both methods:
+- Remove `%LOCALAPPDATA%\ShadowPrompt`
+- Remove the install dir from your user PATH
+- Wipe the temp Chrome debug profile
+
+---
+
+## Project layout
+
+```
+ShadowPrompt/
+├── README.md                          ← you are here
+├── LICENSE                            ← Apache 2.0
+├── shadow_prompt_v2/                  ← active codebase
+│   ├── Cargo.toml
+│   ├── src/
+│   ├── config/config.example.toml
+│   ├── knowledge/                     ← bundled reviewer markdown
+│   ├── install.ps1
+│   ├── uninstall.ps1
+│   └── docs/                          ← architecture, agents, roadmap, testing
+└── shadow_prompt/                     ← legacy v1 (archived, do not modify)
+```
+
+---
+
+## Documentation
+
+- [Roadmap](shadow_prompt_v2/docs/roadmap.md) — feature-by-feature build plan, M0–M8
+- [Architecture](shadow_prompt_v2/docs/architecture.md) — runtime topology, module boundaries, concurrency
+- [Agents](shadow_prompt_v2/docs/agents.md) — LLM transport, system prompts, conversation model
+- [Features](shadow_prompt_v2/docs/features.md) — full feature spec
+- [Forms testing plan](shadow_prompt_v2/docs/forms-testing.md) — 15 verification scenarios
+- [Context injection design](shadow_prompt_v2/docs/plans/2026-05-17-subject-context-injection.md) — knowledge caching plan
+
+---
+
+## Known limitations
+
+- Windows only. Linux/macOS are out of scope; the Win32 layered-window pixel indicator is core to the discretion story.
+- Forms automation needs a Chrome window launched via `Ctrl+Shift+I`. Cannot attach to your everyday Chrome session.
+- Custom JS date pickers in Google Forms are not yet supported (standard `<input type="date">` works).
+- File-upload questions in Google Forms are skipped.
+- The daemon never clicks Submit. You must click manually on the final Forms page.
+- Anti-cheat / DRM-protected screens may capture as black via GDI.
+
+---
+
+## License
+
+[Apache 2.0](LICENSE). Use at your own risk; this is research / personal-productivity tooling, not a sanctioned tool for any institution's evaluation.
