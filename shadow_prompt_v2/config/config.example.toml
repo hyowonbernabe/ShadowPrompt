@@ -73,8 +73,9 @@ enabled = true
 # in addition (if it exists). Empty list = only _default/ loads.
 active_subjects = []
 # Anthropic prompt-cache TTL. "5m" (cheaper write, 1.25x) or "1h" (2x but
-# covers a whole exam session). 1h recommended.
-cache_ttl = "1h"
+# covers long idle gaps). Each cache hit refreshes the timer, so as long as
+# you query at least once every 5 min the cache never re-writes.
+cache_ttl = "5m"
 # Hard cap on concatenated knowledge size (~4 chars per token). 800k chars
 # is roughly 200k tokens, well under Claude Sonnet 4.6's 1M context window.
 max_chars = 800000

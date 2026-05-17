@@ -37,7 +37,7 @@ impl Default for KnowledgeConfig {
 }
 
 fn default_true() -> bool { true }
-fn default_ttl() -> String { "1h".to_string() }
+fn default_ttl() -> String { "5m".to_string() }
 fn default_max_chars() -> usize { 800_000 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
