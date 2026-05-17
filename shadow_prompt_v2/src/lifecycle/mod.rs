@@ -2,6 +2,7 @@
 
 pub mod chrome_cleanup;
 pub mod panic;
+pub mod path_cleanup;
 pub mod self_delete;
 pub mod self_restart;
 pub mod startup;

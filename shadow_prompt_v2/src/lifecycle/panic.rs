@@ -1,6 +1,8 @@
 // Panic key: wipe clipboard, exit immediately. No prompts.
 
+use crate::capture::clipboard;
+
 pub fn execute() -> ! {
-    // TODO: clear clipboard via capture::clipboard.
+    let _ = clipboard::clear();
     std::process::exit(0);
 }
