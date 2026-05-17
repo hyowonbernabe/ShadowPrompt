@@ -43,7 +43,7 @@ pub fn capture_region(x: i32, y: i32, w: i32, h: i32) -> anyhow::Result<Vec<u8>>
                 biHeight: -h,
                 biPlanes: 1,
                 biBitCount: 32,
-                biCompression: BI_RGB.0 as u32,
+                biCompression: BI_RGB.0,
                 ..Default::default()
             },
             ..Default::default()
