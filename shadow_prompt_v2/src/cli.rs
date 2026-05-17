@@ -21,6 +21,10 @@ pub struct Cli {
     /// Remove install dir from PATH, terminate Chrome instances we launched, delete self.
     #[arg(long)]
     pub uninstall: bool,
+
+    /// Probe the configured model: capability table + text/vision/recency/reasoning round-trips.
+    #[arg(long)]
+    pub probe: bool,
 }
 
 impl Cli {

@@ -10,6 +10,7 @@ pub mod input;
 pub mod lifecycle;
 pub mod llm;
 pub mod logger;
+pub mod probe;
 pub mod ui;
 
 use crate::cli::Cli;
@@ -27,6 +28,14 @@ pub fn run() -> anyhow::Result<()> {
     if args.uninstall {
         lifecycle::self_delete::execute()?;
         return Ok(());
+    }
+
+    if args.probe {
+        let cfg = config::load::load()?;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        return rt.block_on(probe::run(cfg));
     }
 
     logger::init(args.debug)?;
