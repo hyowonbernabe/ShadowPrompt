@@ -313,7 +313,156 @@ Three obligations:
 
 ---
 
-# Part B — Denotational Semantics
+# Part B — Static Semantics
+
+---
+
+## 11b. Static Semantics — Core Idea
+
+**Static semantics** = rules of a programming language that can be checked **at compile time** (before the program runs). Sits between **syntax** (form) and **dynamic semantics** (runtime behavior).
+
+A program can be syntactically valid yet semantically invalid. Example: `int x = "hello";` parses fine but fails the type rule.
+
+### Why "static"
+- Checked **statically** (before execution)
+- Detected by the compiler / static analyzer
+- No program state involved
+- Distinct from dynamic semantics (operational / axiomatic / denotational) which describe runtime meaning
+
+---
+
+## 11c. Topics covered by Static Semantics
+
+1. **Type system** — what types exist, what operations are legal on them
+2. **Type checking** — verifying every expression is well-typed
+3. **Type inference** — deducing the type when not declared explicitly
+4. **Scope rules** — which name binds to which declaration at each program point
+5. **Name resolution** — looking up identifiers, detecting undeclared or duplicate names
+6. **Declaration-before-use** — variable must be declared before reference
+7. **Argument-parameter matching** — call site must match function signature (arity + types)
+8. **Type compatibility** — type equivalence, coercion, subtyping
+9. **Return-path completeness** — every code path in a non-void function returns a value
+10. **Definite assignment** — variable must be assigned before being read (Java, C#)
+11. **Constant-expression evaluation** — array sizes, case labels must be compile-time constants
+12. **Visibility / access control** — public, private, protected enforced statically
+
+---
+
+## 11d. Type System Classifications
+
+| Axis | Options |
+|---|---|
+| When checked | **Static** (compile time, e.g. C, Java, Rust) vs **Dynamic** (runtime, e.g. Python, JavaScript) |
+| Strictness | **Strong** (no implicit unsafe conversions, e.g. Python, Rust) vs **Weak** (silent coercions, e.g. C, JavaScript) |
+| Type declaration | **Manifest / explicit** (e.g. C, Java) vs **Inferred** (e.g. ML, Haskell, Rust `let`) |
+| Type polymorphism | **Monomorphic**, **ad-hoc** (overloading), **parametric** (generics), **subtype** (OOP) |
+
+Note: static ≠ strong. C is statically typed but weakly typed.
+
+### Type equivalence
+- **Name equivalence**: two types equal iff they have the same name. Stricter.
+- **Structural equivalence**: two types equal iff they have the same structure. More permissive.
+
+### Type coercion
+Implicit conversion inserted by the compiler, e.g. `int → double` in C. Distinct from explicit casting.
+
+---
+
+## 11e. Scope and Binding
+
+- **Static scope (lexical scope)**: a name's binding is determined by the program text at compile time. C, Java, Rust, modern languages.
+- **Dynamic scope**: a name's binding follows the call stack at runtime. Older Lisp dialects, shell variables.
+
+### Scope rules
+- **Block scope**: name visible within enclosing `{ ... }`
+- **Function scope**: name visible within enclosing function
+- **File / module scope**: name visible within enclosing translation unit
+- **Global scope**: name visible everywhere
+
+### Symbol table
+Compile-time data structure mapping names → declarations. Used to resolve identifiers, type-check, and detect duplicates.
+
+---
+
+## 11f. Attribute Grammars (formal specification of static semantics)
+
+Extension of context-free grammars where each grammar symbol has **attributes** that carry information across the parse tree. Rules attach **semantic functions** to productions to compute attributes.
+
+### Attribute types
+- **Synthesized attributes**: value computed from children. Flow up the tree. (e.g. expression type computed from operand types)
+- **Inherited attributes**: value computed from parent or siblings. Flow down / sideways. (e.g. symbol-table context passed into a sub-expression)
+
+### Example
+For `Expr → Expr + Term`:
+```
+Expr0.type =  if (Expr1.type == Term.type)  Expr1.type
+              else                          error
+```
+The type of the parent expression is synthesized from the types of its operands, with a compatibility check.
+
+### Why use attribute grammars
+- Formal way to **specify** what is and isn't a valid program
+- Mechanically translatable into compiler passes
+- Separate the grammar (syntax) from the semantic rules (static checks)
+
+---
+
+## 11g. Static-Check Examples
+
+### Type check
+```
+let x: int = "hello"   // FAILS: "hello" has type string, expected int
+```
+
+### Declaration before use
+```
+y = 5
+let y: int   // FAILS in many languages: y referenced before declared
+```
+
+### Argument arity
+```
+fn add(a: int, b: int) -> int { a + b }
+add(1)        // FAILS: expected 2 arguments, got 1
+add(1, 2, 3)  // FAILS: expected 2, got 3
+```
+
+### Return-path completeness
+```c
+int f(int x) {
+    if (x > 0) return 1;
+    // FAILS: missing return for x <= 0
+}
+```
+
+### Definite assignment
+```java
+int x;
+System.out.println(x);  // FAILS: x might not have been initialized
+```
+
+---
+
+## 11h. Three Semantics Frameworks in Context
+
+The course covers **three frameworks for dynamic semantics**:
+1. Operational
+2. Axiomatic (Section 2-11)
+3. Denotational (Part C below)
+
+**Static semantics is orthogonal.** Every language has both static rules (what is a legal program) and dynamic semantics (what a legal program does at runtime).
+
+### Cheat sheet
+
+| Stage | Aspect of language | Examples |
+|---|---|---|
+| Syntax | What strings are legal programs | BNF, parsing |
+| **Static Semantics** | **What legal programs are well-formed beyond grammar** | **Type rules, scope, declarations** |
+| Dynamic Semantics | What a well-formed program does when run | Axiomatic, Operational, Denotational |
+
+---
+
+# Part C — Denotational Semantics
 
 ---
 

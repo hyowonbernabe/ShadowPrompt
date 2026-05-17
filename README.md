@@ -33,15 +33,44 @@ This will:
 3. Bundle a 7-day OpenRouter trial key so you can run immediately
 4. Add the install directory to your user PATH
 
-Then launch from any terminal:
+The daemon launches automatically in the background. A tiny green pixel appears at the top-right corner of your screen within ~5 seconds. ShadowPrompt is listening for hotkeys.
+
+You can also launch manually from any terminal:
 
 ```powershell
 shadowprompt
 ```
 
-A tiny green pixel appears at the top-right corner of your screen. ShadowPrompt is now listening for hotkeys.
+> **Want to replace the bundled trial key?** Edit `%LOCALAPPDATA%\ShadowPrompt\config\config.toml` and paste your own key from <https://openrouter.ai/keys>.
 
-> **Already had a previous trial?** Replace the bundled key with your own from <https://openrouter.ai/keys> by editing `%LOCALAPPDATA%\ShadowPrompt\config\config.toml`.
+---
+
+## Portable / USB install
+
+ShadowPrompt is fully portable: all state lives next to the executable. No registry writes, no temp files, no traces on the host machine.
+
+1. Download `shadowprompt-v2.0.0-windows-x64.zip` from the [latest release](https://github.com/hyowonbernabe/ShadowPrompt/releases/latest).
+2. Extract the zip onto a USB drive. You'll see:
+   ```
+   USB:\ShadowPrompt\
+     shadowprompt.exe
+     config\config.example.toml
+     knowledge\           ← your bundled reviewer markdown
+     install.ps1
+     uninstall.ps1
+   ```
+3. On the target machine: double-click `shadowprompt.exe`. First-run writes `config\config.toml` from the example template (already includes the trial key).
+4. The daemon runs from the USB. Eject the drive when done; nothing remains on the host.
+
+To override the trial key with your own:
+
+```toml
+# USB:\ShadowPrompt\config\config.toml
+[openrouter]
+api_key = "sk-or-v1-..."
+```
+
+Tip: drop your own subject `.md` files into `USB:\ShadowPrompt\knowledge\<subject>\` — daemon loads them at every launch.
 
 ---
 
