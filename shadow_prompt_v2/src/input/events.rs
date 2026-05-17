@@ -12,6 +12,7 @@ pub enum InputEvent {
     Abort,
     LaunchDebugger,
     HideToggle,
+    HelpToggle,
     RestartDaemon,
     InstaDeleteArmed,
     InstaDeleteConfirmed,

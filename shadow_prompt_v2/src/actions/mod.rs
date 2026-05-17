@@ -4,6 +4,7 @@
 pub mod abort_active;
 pub mod clipboard_query;
 pub mod forms_run;
+pub mod help_toggle;
 pub mod hide_toggle;
 pub mod launch_debugger;
 pub mod ocr_query;
@@ -63,6 +64,7 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
         InputEvent::HideToggle => {
             let _ = ctx.ui_tx.send(UICommand::ToggleHide);
         }
+        InputEvent::HelpToggle => help_toggle::execute(ctx).await,
         InputEvent::RestartDaemon => {
             if let Err(e) = crate::lifecycle::self_restart::execute() {
                 log::error!("restart: {e}");

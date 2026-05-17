@@ -24,6 +24,7 @@ forms_single        = "ctrl+shift+7"
 abort               = "ctrl+shift+0"
 launch_debugger     = "ctrl+shift+i"
 hide_toggle         = "ctrl+shift+h"
+help_toggle         = "ctrl+shift+slash"        # shows / hides hotkey cheat sheet
 restart_daemon      = "ctrl+shift+r"
 insta_delete        = "ctrl+shift+delete"
 panic_kill          = "ctrl+shift+f12"

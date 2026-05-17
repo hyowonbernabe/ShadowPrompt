@@ -54,7 +54,11 @@ pub async fn execute_form_flow(llm: Arc<LlmClient>, mode: FormsMode) -> anyhow::
     };
 
     for page_idx in 0..max_pages {
-        tokio::time::sleep(Duration::from_millis(400)).await;
+        // First page may still be painting; subsequent pages already waited
+        // 900ms after Next click.
+        if page_idx == 0 {
+            tokio::time::sleep(Duration::from_millis(600)).await;
+        }
 
         let extracted: serde_json::Value = tab
             .evaluate(EXTRACTOR_JS, false)?
@@ -64,6 +68,8 @@ pub async fn execute_form_flow(llm: Arc<LlmClient>, mode: FormsMode) -> anyhow::
         let questions_json = extracted.as_str().unwrap_or("[]");
         let questions: Vec<Question> = serde_json::from_str(questions_json)
             .map_err(|e| anyhow::anyhow!("parse questions: {e}; body={questions_json}"))?;
+
+        log::info!("page {}: extractor found {} question(s)", page_idx + 1, questions.len());
 
         let unanswered: Vec<&Question> = questions
             .iter()
@@ -102,6 +108,10 @@ pub async fn execute_form_flow(llm: Arc<LlmClient>, mode: FormsMode) -> anyhow::
         match next {
             Ok(btn) => {
                 btn.click()?;
+                // Page transition: Google Forms re-renders the listitems.
+                // Wait long enough for the new page to mount before the next
+                // extractor pass.
+                tokio::time::sleep(Duration::from_millis(900)).await;
             }
             Err(_) => {
                 if submit_present {
@@ -169,13 +179,51 @@ fn prune_images_from_history(history: &mut [Message]) {
 }
 
 fn parse_answers(raw: &str) -> HashMap<String, String> {
+    // Try direct parse first (model followed instructions perfectly).
     let trimmed = raw.trim();
-    let body = trimmed
+    let stripped = trimmed
         .strip_prefix("```json")
         .or_else(|| trimmed.strip_prefix("```"))
-        .unwrap_or(trimmed);
-    let body = body.trim_end_matches("```").trim();
-    serde_json::from_str(body).unwrap_or_default()
+        .unwrap_or(trimmed)
+        .trim_end_matches("```")
+        .trim();
+    if let Ok(map) = serde_json::from_str::<HashMap<String, String>>(stripped) {
+        return map;
+    }
+
+    // Fallback: extract the first balanced {...} block. Handles models that
+    // wrap JSON in prose like "Here are my answers: { ... } Hope this helps".
+    if let Some(start) = stripped.find('{') {
+        let bytes = stripped.as_bytes();
+        let mut depth = 0i32;
+        let mut in_string = false;
+        let mut escape = false;
+        for (i, &b) in bytes.iter().enumerate().skip(start) {
+            if escape {
+                escape = false;
+                continue;
+            }
+            match b {
+                b'\\' if in_string => escape = true,
+                b'"' => in_string = !in_string,
+                b'{' if !in_string => depth += 1,
+                b'}' if !in_string => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let candidate = &stripped[start..=i];
+                        if let Ok(map) = serde_json::from_str::<HashMap<String, String>>(candidate) {
+                            return map;
+                        }
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    log::warn!("forms: could not parse answer JSON; raw body was:\n{raw}");
+    HashMap::new()
 }
 
 async fn fetch_debugger_ws() -> anyhow::Result<String> {

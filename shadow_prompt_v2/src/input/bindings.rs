@@ -22,6 +22,7 @@ pub fn build(cfg: &HotkeysConfig) -> anyhow::Result<Vec<Binding>> {
         Binding { combo: parse(&cfg.abort)?, make_event: || InputEvent::Abort },
         Binding { combo: parse(&cfg.launch_debugger)?, make_event: || InputEvent::LaunchDebugger },
         Binding { combo: parse(&cfg.hide_toggle)?, make_event: || InputEvent::HideToggle },
+        Binding { combo: parse(&cfg.help_toggle)?, make_event: || InputEvent::HelpToggle },
         Binding { combo: parse(&cfg.restart_daemon)?, make_event: || InputEvent::RestartDaemon },
         // insta_delete is matched separately; it drives the state machine, not a direct event.
         Binding { combo: parse(&cfg.panic_kill)?, make_event: || InputEvent::PanicKill },

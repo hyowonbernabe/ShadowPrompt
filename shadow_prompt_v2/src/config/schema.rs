@@ -60,6 +60,7 @@ pub struct HotkeysConfig {
     pub abort: String,
     pub launch_debugger: String,
     pub hide_toggle: String,
+    pub help_toggle: String,
     pub restart_daemon: String,
     pub insta_delete: String,
     pub panic_kill: String,

@@ -79,9 +79,11 @@ struct UiCtx {
     hwnd_form: HWND,
     hwnd_overlay: HWND,
     hwnd_debug: HWND,
+    hwnd_help: HWND,
     indicator: IndicatorState,
     form: FormIndicatorState,
     overlay_text: String,
+    help_text: String,
     hidden: bool,
 }
 
@@ -121,15 +123,25 @@ fn run_ui_thread(visuals: VisualsConfig, ready_tx: mpsc::Sender<u32>) -> anyhow:
         let hwnd_debug = create_window(&class_name, overlay_ex, WS_POPUP, 0, 0, 1, 1, hinstance.into());
         let _ = SetLayeredWindowAttributes(hwnd_debug, COLORREF(0), 180, LWA_ALPHA);
 
+        // Help window: bottom-right, chroma-keyed transparent, hidden until toggled.
+        let help_w = 360;
+        let help_h = 360;
+        let help_x = screen_w - help_w - 8;
+        let help_y = screen_h - help_h - 8;
+        let hwnd_help = create_window(&class_name, overlay_ex, WS_POPUP, help_x, help_y, help_w, help_h, hinstance.into());
+        let _ = SetLayeredWindowAttributes(hwnd_help, COLORREF(0), 255, LWA_COLORKEY);
+
         let mut ctx = Box::new(UiCtx {
             visuals: visuals.clone(),
             hwnd_indicator,
             hwnd_form,
             hwnd_overlay,
             hwnd_debug,
+            hwnd_help,
             indicator: IndicatorState::Ready,
             form: FormIndicatorState::Hidden,
             overlay_text: String::new(),
+            help_text: String::new(),
             hidden: false,
         });
         let ctx_ptr: *mut UiCtx = &mut *ctx;
@@ -137,6 +149,7 @@ fn run_ui_thread(visuals: VisualsConfig, ready_tx: mpsc::Sender<u32>) -> anyhow:
         SetWindowLongPtrW(hwnd_form, GWLP_USERDATA, ctx_ptr as isize);
         SetWindowLongPtrW(hwnd_overlay, GWLP_USERDATA, ctx_ptr as isize);
         SetWindowLongPtrW(hwnd_debug, GWLP_USERDATA, ctx_ptr as isize);
+        SetWindowLongPtrW(hwnd_help, GWLP_USERDATA, ctx_ptr as isize);
 
         let _ = ShowWindow(hwnd_indicator, SW_SHOWNOACTIVATE);
         let _ = ShowWindow(hwnd_overlay, SW_SHOWNOACTIVATE);
@@ -189,6 +202,15 @@ fn drain_commands(ctx: &mut UiCtx) {
                     let _ = ShowWindow(ctx.hwnd_form, sw);
                 }
             },
+            UICommand::ShowHelp(t) => {
+                ctx.help_text = t;
+                unsafe { let _ = ShowWindow(ctx.hwnd_help, SW_SHOWNOACTIVATE); }
+                invalidate(ctx.hwnd_help);
+            }
+            UICommand::HideHelp => {
+                ctx.help_text.clear();
+                unsafe { let _ = ShowWindow(ctx.hwnd_help, SW_HIDE); }
+            }
             UICommand::Shutdown => unsafe { PostQuitMessage(0); },
         }
     }
@@ -262,7 +284,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
 
 unsafe fn paint(hwnd: HWND, ctx: &UiCtx) {
     if hwnd == ctx.hwnd_overlay {
-        paint_overlay(hwnd, ctx);
+        paint_overlay(hwnd, ctx, &ctx.overlay_text, false);
+        return;
+    }
+    if hwnd == ctx.hwnd_help {
+        paint_overlay(hwnd, ctx, &ctx.help_text, true);
         return;
     }
     let mut ps = PAINTSTRUCT::default();
@@ -297,16 +323,15 @@ unsafe fn paint(hwnd: HWND, ctx: &UiCtx) {
     let _ = EndPaint(hwnd, &ps);
 }
 
-unsafe fn paint_overlay(hwnd: HWND, ctx: &UiCtx) {
+unsafe fn paint_overlay(hwnd: HWND, ctx: &UiCtx, text: &str, anchor_bottom_right: bool) {
     let mut ps = PAINTSTRUCT::default();
     let hdc = BeginPaint(hwnd, &mut ps);
 
-    // Black background — chroma-keyed to fully transparent via LWA_COLORKEY.
     let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0));
     FillRect(hdc, &ps.rcPaint, brush);
     let _ = DeleteObject(brush);
 
-    if !ctx.overlay_text.is_empty() {
+    if !text.is_empty() {
         let face: Vec<u16> = "Arial\0".encode_utf16().collect();
         let font_size = ctx.visuals.overlay_font_size.max(1) as i32;
         let font = CreateFontW(
@@ -325,8 +350,7 @@ unsafe fn paint_overlay(hwnd: HWND, ctx: &UiCtx) {
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, super::colors::colorref((255, 255, 255)));
 
-        // Measure text — line count × line height + max line width.
-        let lines: Vec<&str> = ctx.overlay_text.lines().collect();
+        let lines: Vec<&str> = text.lines().collect();
         let mut max_w: i32 = 0;
         for line in &lines {
             let utf: Vec<u16> = line.encode_utf16().collect();
@@ -339,10 +363,20 @@ unsafe fn paint_overlay(hwnd: HWND, ctx: &UiCtx) {
         let h = (font_size + 2) * lines.len().max(1) as i32;
         let w = max_w.max(10);
 
-        let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, w, h, SWP_NOMOVE | SWP_NOACTIVATE);
+        if anchor_bottom_right {
+            // Reposition so window bottom-right corner stays anchored to a
+            // fixed screen offset; size shrinks to fit content.
+            let screen_w = GetSystemMetrics(SM_CXSCREEN);
+            let screen_h = GetSystemMetrics(SM_CYSCREEN);
+            let x = screen_w - w - 8;
+            let y = screen_h - h - 8;
+            let _ = SetWindowPos(hwnd, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE);
+        } else {
+            let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, w, h, SWP_NOMOVE | SWP_NOACTIVATE);
+        }
 
         let mut rect = RECT { left: 0, top: 0, right: w, bottom: h };
-        let mut text_nul: Vec<u16> = ctx.overlay_text.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut text_nul: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
         let _ = DrawTextW(hdc, &mut text_nul, &mut rect, DT_LEFT | DT_NOCLIP);
 
         SelectObject(hdc, old);

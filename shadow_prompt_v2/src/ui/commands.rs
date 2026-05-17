@@ -8,6 +8,8 @@ pub enum UICommand {
     ShowDebugRect { x: i32, y: i32, w: i32, h: i32 },
     HideDebugRect,
     ToggleHide,
+    ShowHelp(String),
+    HideHelp,
     Shutdown,
 }
 
