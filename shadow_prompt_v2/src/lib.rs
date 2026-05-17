@@ -58,7 +58,7 @@ fn run_daemon(cfg: config::Config, _args: Cli) -> anyhow::Result<()> {
         .enable_all()
         .build()?;
     rt.block_on(async move {
-        let mut input_rx = input::start()?;
+        let mut input_rx = input::start(cfg.hotkeys.clone())?;
         log::info!("daemon loop running; awaiting input events");
         let _ = &cfg;
         while let Some(event) = input_rx.recv().await {
