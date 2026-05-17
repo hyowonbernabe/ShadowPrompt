@@ -6,10 +6,8 @@ $ErrorActionPreference = "Stop"
 
 $Owner   = "hyowonbernabe"
 $Repo    = "ShadowPrompt"
-$ExeName = "shadowprompt.exe"
 
 $InstallDir = Join-Path $env:LOCALAPPDATA "ShadowPrompt"
-$ExePath    = Join-Path $InstallDir $ExeName
 $ConfigDir  = Join-Path $InstallDir "config"
 $ConfigPath = Join-Path $ConfigDir "config.toml"
 
@@ -17,35 +15,38 @@ Write-Host ""
 Write-Host "ShadowPrompt v2 installer" -ForegroundColor Cyan
 Write-Host "-------------------------"
 
-# Create install dir
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 New-Item -ItemType Directory -Force -Path $ConfigDir  | Out-Null
 
-# Fetch latest release asset URL for the EXE
+# Fetch latest release zip (contains exe + config example + knowledge/ tree).
 $ReleaseApi = "https://api.github.com/repos/$Owner/$Repo/releases/latest"
 $Release = Invoke-RestMethod -Uri $ReleaseApi -Headers @{ "User-Agent" = "shadowprompt-installer" }
-$Asset = $Release.assets | Where-Object { $_.name -eq $ExeName } | Select-Object -First 1
-if (-not $Asset) { throw "No $ExeName asset on latest release." }
+$Zip = $Release.assets | Where-Object { $_.name -like "*windows-x64.zip" } | Select-Object -First 1
+if (-not $Zip) { throw "No windows-x64.zip asset on latest release." }
 
-Write-Host "Downloading $ExeName ..."
-Invoke-WebRequest -Uri $Asset.browser_download_url -OutFile $ExePath -UseBasicParsing
-Write-Host "  -> $ExePath"
+$TempZip = Join-Path $env:TEMP "shadowprompt-install.zip"
+Write-Host "Downloading $($Zip.name) ..."
+Invoke-WebRequest -Uri $Zip.browser_download_url -OutFile $TempZip -UseBasicParsing
 
-# Fetch example config if not present
-if (-not (Test-Path $ConfigPath)) {
-    $ExampleUrl = "https://raw.githubusercontent.com/$Owner/$Repo/main/shadow_prompt_v2/config/config.example.toml"
-    Invoke-WebRequest -Uri $ExampleUrl -OutFile $ConfigPath -UseBasicParsing
+Write-Host "Extracting to $InstallDir ..."
+Expand-Archive -Path $TempZip -DestinationPath $InstallDir -Force
+Remove-Item $TempZip -Force
+
+# Move example config to config.toml on first install only.
+$ExamplePath = Join-Path $ConfigDir "config.example.toml"
+if ((Test-Path $ExamplePath) -and (-not (Test-Path $ConfigPath))) {
+    Copy-Item $ExamplePath $ConfigPath
     Write-Host "Wrote default config -> $ConfigPath"
 }
 
-# Add to user PATH if missing
+# Add install dir to user PATH if missing.
 $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($UserPath -notlike "*$InstallDir*") {
     [Environment]::SetEnvironmentVariable("Path", "$UserPath;$InstallDir", "User")
     Write-Host "Added $InstallDir to user PATH (restart terminal to take effect)."
 }
 
-# Prompt for OpenRouter API key (trial key is bundled by default)
+# API key prompt.
 Write-Host ""
 Write-Host "A 7-day trial OpenRouter key ships with this build." -ForegroundColor Cyan
 Write-Host "Press Enter to use it, or paste your own key to override." -ForegroundColor Cyan
@@ -60,5 +61,8 @@ if ($Key) {
 }
 
 Write-Host ""
-Write-Host "Done. Run:  shadowprompt" -ForegroundColor Cyan
+Write-Host "Knowledge folder: $InstallDir\knowledge\" -ForegroundColor Cyan
+Write-Host "Add your own .md notes under knowledge\<subject>\ then activate via config.toml." -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Done. Run:  shadowprompt" -ForegroundColor Green
 Write-Host ""

@@ -32,11 +32,14 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
     );
     println!();
 
+    // Probe deliberately bypasses knowledge injection to test bare model capability.
     let llm = LlmClient::new(
         cfg.openrouter.api_key.clone(),
         model,
         cfg.http.connect_timeout_secs,
         cfg.http.read_timeout_secs,
+        crate::knowledge::KnowledgeBundle::default(),
+        "5m".to_string(),
     )?;
 
     probe_text(&llm).await;
@@ -76,17 +79,11 @@ async fn probe_vision(llm: &LlmClient) {
         }
     };
     let msgs = vec![
-        Message::System {
-            content: "Reply with exactly one color name.".to_string(),
-        },
+        Message::system_text("Reply with exactly one color name."),
         Message::User {
             content: vec![
-                ContentPart::Text {
-                    text: "What single color fills this image?".to_string(),
-                },
-                ContentPart::Image {
-                    image_url: ImageUrl { url },
-                },
+                ContentPart::text("What single color fills this image?"),
+                ContentPart::Image { image_url: ImageUrl { url } },
             ],
         },
     ];

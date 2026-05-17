@@ -46,9 +46,7 @@ pub async fn execute_form_flow(llm: Arc<LlmClient>, mode: FormsMode) -> anyhow::
         })?
         .clone();
 
-    let mut history: Vec<Message> = vec![Message::System {
-        content: ANSWER_MODE_FORMS.to_string(),
-    }];
+    let mut history: Vec<Message> = vec![llm.system_message(ANSWER_MODE_FORMS)];
 
     let max_pages = match mode {
         FormsMode::AutoPaginate => MAX_PAGES,
@@ -138,7 +136,7 @@ fn build_user_message(unanswered: &[&Question]) -> Message {
             text.push_str(&format!("  images: {} attached\n", q.image_urls.len()));
         }
     }
-    parts.push(ContentPart::Text { text });
+    parts.push(ContentPart::text(text));
     for q in unanswered {
         for url in &q.image_urls {
             parts.push(ContentPart::Image { image_url: ImageUrl { url: url.clone() } });
@@ -161,9 +159,10 @@ fn prune_images_from_history(history: &mut [Message]) {
                 keep
             });
             if pruned > 0 {
-                content.push(ContentPart::Text {
-                    text: format!("[{} earlier image(s) dropped from context]", pruned),
-                });
+                content.push(ContentPart::text(format!(
+                    "[{} earlier image(s) dropped from context]",
+                    pruned
+                )));
             }
         }
     }

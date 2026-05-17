@@ -62,3 +62,19 @@ max_pages = 10
 max_images_per_request = 20
 # Long-edge resize ceiling
 max_image_long_edge_px = 1568
+
+[knowledge]
+# Reference markdown files in <install_dir>/knowledge/<subject>/ get loaded once
+# at startup and injected as a cached system prompt block. Cache hits cost 0.1x
+# normal input, so an exam-length session is dramatically cheaper than paying
+# full input every call.
+enabled = true
+# Subject folder names under knowledge/. The _default/ folder is always loaded
+# in addition (if it exists). Empty list = only _default/ loads.
+active_subjects = []
+# Anthropic prompt-cache TTL. "5m" (cheaper write, 1.25x) or "1h" (2x but
+# covers a whole exam session). 1h recommended.
+cache_ttl = "1h"
+# Hard cap on concatenated knowledge size (~4 chars per token). 800k chars
+# is roughly 200k tokens, well under Claude Sonnet 4.6's 1M context window.
+max_chars = 800000

@@ -21,9 +21,9 @@ async fn execute_inner(ctx: ActionContext, x: i32, y: i32, w: i32, h: i32, onlin
     let part = tokio::task::spawn_blocking(move || image::prepare_for_request(&png)).await??;
 
     let messages = vec![
-        Message::System { content: ANSWER_MODE_GENERAL.to_string() },
+        ctx.llm.system_message(ANSWER_MODE_GENERAL),
         Message::User { content: vec![
-            ContentPart::Text { text: "Answer the question(s) visible in this screenshot.".to_string() },
+            ContentPart::text("Answer the question(s) visible in this screenshot."),
             part,
         ]},
     ];

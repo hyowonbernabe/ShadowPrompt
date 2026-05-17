@@ -7,6 +7,7 @@ pub mod capture;
 pub mod cli;
 pub mod config;
 pub mod input;
+pub mod knowledge;
 pub mod lifecycle;
 pub mod llm;
 pub mod logger;
@@ -73,11 +74,16 @@ fn run_daemon(cfg: config::Config, _args: Cli) -> anyhow::Result<()> {
         let ui_tx = ui::start(cfg.visuals.clone())?;
         let mut input_rx = input::start(cfg.hotkeys.clone())?;
 
+        let install_dir = config::paths::exe_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let knowledge = knowledge::load(&install_dir, &cfg.knowledge);
+
         let llm = llm::LlmClient::new(
             cfg.openrouter.api_key.clone(),
             cfg.openrouter.model_id.clone(),
             cfg.http.connect_timeout_secs,
             cfg.http.read_timeout_secs,
+            knowledge,
+            cfg.knowledge.cache_ttl.clone(),
         )?;
 
         let action_ctx = actions::ActionContext {

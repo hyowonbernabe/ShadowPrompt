@@ -9,7 +9,36 @@ pub struct Config {
     pub visuals: VisualsConfig,
     pub http: HttpConfig,
     pub forms: FormsConfig,
+    #[serde(default)]
+    pub knowledge: KnowledgeConfig,
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct KnowledgeConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub active_subjects: Vec<String>,
+    #[serde(default = "default_ttl")]
+    pub cache_ttl: String,
+    #[serde(default = "default_max_chars")]
+    pub max_chars: usize,
+}
+
+impl Default for KnowledgeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            active_subjects: Vec::new(),
+            cache_ttl: default_ttl(),
+            max_chars: default_max_chars(),
+        }
+    }
+}
+
+fn default_true() -> bool { true }
+fn default_ttl() -> String { "1h".to_string() }
+fn default_max_chars() -> usize { 800_000 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OpenRouterConfig {

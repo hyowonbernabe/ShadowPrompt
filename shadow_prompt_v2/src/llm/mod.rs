@@ -14,6 +14,8 @@ use messages::{ContentPart, Message};
 use request::build;
 use response::Response;
 
+use crate::knowledge::KnowledgeBundle;
+
 const ENDPOINT: &str = "https://openrouter.ai/api/v1/chat/completions";
 
 #[derive(Clone)]
@@ -21,10 +23,19 @@ pub struct LlmClient {
     pub http: Arc<reqwest::Client>,
     pub api_key: Arc<str>,
     pub model_id: Arc<str>,
+    pub knowledge: Arc<KnowledgeBundle>,
+    pub cache_ttl: Arc<str>,
 }
 
 impl LlmClient {
-    pub fn new(api_key: String, model_id: String, connect_secs: u64, read_secs: u64) -> anyhow::Result<Self> {
+    pub fn new(
+        api_key: String,
+        model_id: String,
+        connect_secs: u64,
+        read_secs: u64,
+        knowledge: KnowledgeBundle,
+        cache_ttl: String,
+    ) -> anyhow::Result<Self> {
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(connect_secs))
             .timeout(Duration::from_secs(read_secs))
@@ -33,33 +44,48 @@ impl LlmClient {
             http: Arc::new(http),
             api_key: Arc::from(api_key),
             model_id: Arc::from(model_id),
+            knowledge: Arc::new(knowledge),
+            cache_ttl: Arc::from(cache_ttl),
         })
     }
 
-    /// Single round-trip: system + user text → assistant text. No history.
-    pub async fn answer_text(&self, system: &str, user: &str) -> anyhow::Result<String> {
-        self.answer_text_inner(system, user, false).await
+    /// Build the system message: rules block + (optional) cached knowledge block.
+    /// Pass the rules text (answer-mode-general or answer-mode-forms).
+    pub fn system_message(&self, rules: &str) -> Message {
+        let mut parts = vec![ContentPart::text(rules)];
+        if !self.knowledge.is_empty() {
+            let ttl: &'static str = match self.cache_ttl.as_ref() {
+                "1h" | "1hour" | "60m" => "1h",
+                _ => "5m",
+            };
+            parts.push(ContentPart::text_cached(
+                format!("# Reference material\n{}", self.knowledge.text),
+                ttl,
+            ));
+        }
+        Message::System { content: parts }
     }
 
-    /// Same as answer_text but forces live web search via OpenRouter's :online suffix.
-    pub async fn answer_text_online(&self, system: &str, user: &str) -> anyhow::Result<String> {
-        self.answer_text_inner(system, user, true).await
+    pub async fn answer_text(&self, system_rules: &str, user: &str) -> anyhow::Result<String> {
+        self.answer_text_inner(system_rules, user, false).await
     }
 
-    async fn answer_text_inner(&self, system: &str, user: &str, online: bool) -> anyhow::Result<String> {
+    pub async fn answer_text_online(&self, system_rules: &str, user: &str) -> anyhow::Result<String> {
+        self.answer_text_inner(system_rules, user, true).await
+    }
+
+    async fn answer_text_inner(&self, system_rules: &str, user: &str, online: bool) -> anyhow::Result<String> {
         let msgs = vec![
-            Message::System { content: system.to_string() },
-            Message::User { content: vec![ContentPart::Text { text: user.to_string() }] },
+            self.system_message(system_rules),
+            Message::User { content: vec![ContentPart::text(user)] },
         ];
         self.call_internal(msgs, online).await
     }
 
-    /// Multi-message exchange (used by Forms with images + history).
     pub async fn call(&self, messages: Vec<Message>) -> anyhow::Result<String> {
         self.call_internal(messages, false).await
     }
 
-    /// Same as call but forces live web search via OpenRouter's :online suffix.
     pub async fn call_online(&self, messages: Vec<Message>) -> anyhow::Result<String> {
         self.call_internal(messages, true).await
     }
@@ -97,6 +123,16 @@ impl LlmClient {
                 }
                 let parsed: Response = serde_json::from_str(&text)
                     .map_err(|e| anyhow::anyhow!("parse response: {e}; body={text}"))?;
+                if let Some(u) = &parsed.usage {
+                    let write = u.cache_creation_input_tokens;
+                    let read = u.cache_read();
+                    if write > 0 || read > 0 {
+                        log::info!(
+                            "cache: write={write} read={read} prompt={} completion={}",
+                            u.prompt_tokens, u.completion_tokens
+                        );
+                    }
+                }
                 parsed
                     .choices
                     .into_iter()

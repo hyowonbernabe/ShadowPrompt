@@ -38,6 +38,9 @@ jobs:
           Copy-Item target/release/shadowprompt.exe -Destination $stage/
           New-Item -ItemType Directory -Force -Path "$stage/config" | Out-Null
           Copy-Item config/config.example.toml -Destination "$stage/config/"
+          if (Test-Path knowledge) {
+            Copy-Item knowledge -Destination "$stage/" -Recurse
+          }
           Copy-Item install.ps1 -Destination $stage/
           Copy-Item uninstall.ps1 -Destination $stage/
           $tag = "${{ github.ref_name }}"
