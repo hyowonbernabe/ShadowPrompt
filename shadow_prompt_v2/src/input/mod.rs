@@ -53,6 +53,7 @@ struct ListenerState {
     last_fire: Mutex<Option<(KeyCombo, Instant)>>,
     cursor: Mutex<(i32, i32)>,
     selecting: Mutex<bool>,
+    selecting_online: Mutex<bool>,
     p1: Mutex<Option<(i32, i32)>>,
 }
 
@@ -74,6 +75,7 @@ impl ListenerState {
             last_fire: Mutex::new(None),
             cursor: Mutex::new((0, 0)),
             selecting: Mutex::new(false),
+            selecting_online: Mutex::new(false),
             p1: Mutex::new(None),
         }
     }
@@ -109,9 +111,10 @@ impl ListenerState {
                 let h = (y1 - y2).abs();
                 *p1 = None;
                 *self.selecting.lock().unwrap() = false;
-                log::debug!("ocr region: P2 at {:?}; rect {}x{} @ ({},{})", cur, w, h, x, y);
+                let online = std::mem::replace(&mut *self.selecting_online.lock().unwrap(), false);
+                log::debug!("ocr region: P2 at {:?}; rect {}x{} @ ({},{}) online={online}", cur, w, h, x, y);
                 if w > 0 && h > 0 {
-                    let _ = self.tx.send(InputEvent::OcrRegion { x, y, w, h });
+                    let _ = self.tx.send(InputEvent::OcrRegion { x, y, w, h, online });
                 } else {
                     let _ = self.tx.send(InputEvent::OcrCancel);
                 }
@@ -143,10 +146,17 @@ impl ListenerState {
                     InputEvent::OcrQuery => {
                         *self.p1.lock().unwrap() = None;
                         *self.selecting.lock().unwrap() = true;
+                        *self.selecting_online.lock().unwrap() = false;
+                    }
+                    InputEvent::OcrQuerySearch => {
+                        *self.p1.lock().unwrap() = None;
+                        *self.selecting.lock().unwrap() = true;
+                        *self.selecting_online.lock().unwrap() = true;
                     }
                     InputEvent::Abort => {
                         let was_selecting = *self.selecting.lock().unwrap();
                         *self.selecting.lock().unwrap() = false;
+                        *self.selecting_online.lock().unwrap() = false;
                         *self.p1.lock().unwrap() = None;
                         if was_selecting {
                             let _ = self.tx.send(InputEvent::OcrCancel);

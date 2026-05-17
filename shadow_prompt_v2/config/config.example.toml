@@ -15,8 +15,10 @@ api_key = ""
 model_id = "anthropic/claude-sonnet-4.6"
 
 [hotkeys]
-clipboard_query     = "ctrl+shift+v"
-ocr_query           = "ctrl+shift+space"
+clipboard_query        = "ctrl+shift+v"
+clipboard_query_search = "ctrl+shift+alt+v"      # same as above + live web search
+ocr_query              = "ctrl+shift+space"
+ocr_query_search       = "ctrl+shift+alt+space"  # same as above + live web search
 forms_auto          = "ctrl+shift+9"
 forms_single        = "ctrl+shift+7"
 abort               = "ctrl+shift+0"

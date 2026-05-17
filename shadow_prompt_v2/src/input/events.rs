@@ -2,8 +2,10 @@
 #[derive(Debug, Clone)]
 pub enum InputEvent {
     ClipboardQuery,
+    ClipboardQuerySearch,
     OcrQuery,
-    OcrRegion { x: i32, y: i32, w: i32, h: i32 },
+    OcrQuerySearch,
+    OcrRegion { x: i32, y: i32, w: i32, h: i32, online: bool },
     OcrCancel,
     FormsAuto,
     FormsSingle,

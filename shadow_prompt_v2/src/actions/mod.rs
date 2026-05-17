@@ -32,13 +32,18 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
         InputEvent::ClipboardQuery => spawn_exclusive(ctx, |c| async move {
             clipboard_query::execute(c).await
         }).await,
-        InputEvent::OcrQuery => {
-            // Enter selecting mode: indicator shows processing color; actual
-            // capture fires when OcrRegion arrives.
+        InputEvent::ClipboardQuerySearch => spawn_exclusive(ctx, |c| async move {
+            clipboard_query::execute_online(c).await
+        }).await,
+        InputEvent::OcrQuery | InputEvent::OcrQuerySearch => {
             let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Processing));
         }
-        InputEvent::OcrRegion { x, y, w, h } => spawn_exclusive(ctx, move |c| async move {
-            ocr_query::execute(c, x, y, w, h).await
+        InputEvent::OcrRegion { x, y, w, h, online } => spawn_exclusive(ctx, move |c| async move {
+            if online {
+                ocr_query::execute_online(c, x, y, w, h).await
+            } else {
+                ocr_query::execute(c, x, y, w, h).await
+            }
         }).await,
         InputEvent::OcrCancel => {
             let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Ready));

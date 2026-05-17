@@ -11,7 +11,11 @@ pub struct Binding {
 
 pub fn build(cfg: &HotkeysConfig) -> anyhow::Result<Vec<Binding>> {
     Ok(vec![
+        // Order matters: more-specific (4-modifier) combos must come BEFORE
+        // the 3-modifier base combos so the listener matches them first.
+        Binding { combo: parse(&cfg.clipboard_query_search)?, make_event: || InputEvent::ClipboardQuerySearch },
         Binding { combo: parse(&cfg.clipboard_query)?, make_event: || InputEvent::ClipboardQuery },
+        Binding { combo: parse(&cfg.ocr_query_search)?, make_event: || InputEvent::OcrQuerySearch },
         Binding { combo: parse(&cfg.ocr_query)?, make_event: || InputEvent::OcrQuery },
         Binding { combo: parse(&cfg.forms_auto)?, make_event: || InputEvent::FormsAuto },
         Binding { combo: parse(&cfg.forms_single)?, make_event: || InputEvent::FormsSingle },

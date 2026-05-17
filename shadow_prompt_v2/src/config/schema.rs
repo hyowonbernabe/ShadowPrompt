@@ -20,7 +20,9 @@ pub struct OpenRouterConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HotkeysConfig {
     pub clipboard_query: String,
+    pub clipboard_query_search: String,
     pub ocr_query: String,
+    pub ocr_query_search: String,
     pub forms_auto: String,
     pub forms_single: String,
     pub abort: String,

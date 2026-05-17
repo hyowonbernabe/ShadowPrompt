@@ -38,17 +38,40 @@ impl LlmClient {
 
     /// Single round-trip: system + user text → assistant text. No history.
     pub async fn answer_text(&self, system: &str, user: &str) -> anyhow::Result<String> {
+        self.answer_text_inner(system, user, false).await
+    }
+
+    /// Same as answer_text but forces live web search via OpenRouter's :online suffix.
+    pub async fn answer_text_online(&self, system: &str, user: &str) -> anyhow::Result<String> {
+        self.answer_text_inner(system, user, true).await
+    }
+
+    async fn answer_text_inner(&self, system: &str, user: &str, online: bool) -> anyhow::Result<String> {
         let msgs = vec![
             Message::System { content: system.to_string() },
             Message::User { content: vec![ContentPart::Text { text: user.to_string() }] },
         ];
-        self.call(msgs).await
+        self.call_internal(msgs, online).await
     }
 
     /// Multi-message exchange (used by Forms with images + history).
     pub async fn call(&self, messages: Vec<Message>) -> anyhow::Result<String> {
-        let caps = capabilities::for_model(&self.model_id);
-        let body = build(&self.model_id, &messages, caps);
+        self.call_internal(messages, false).await
+    }
+
+    /// Same as call but forces live web search via OpenRouter's :online suffix.
+    pub async fn call_online(&self, messages: Vec<Message>) -> anyhow::Result<String> {
+        self.call_internal(messages, true).await
+    }
+
+    async fn call_internal(&self, messages: Vec<Message>, online: bool) -> anyhow::Result<String> {
+        let effective_model: String = if online && !self.model_id.ends_with(":online") {
+            format!("{}:online", self.model_id)
+        } else {
+            self.model_id.to_string()
+        };
+        let caps = capabilities::for_model(&effective_model);
+        let body = build(&effective_model, &messages, caps);
         let body = serde_json::to_string(&body)?;
         let http = self.http.clone();
         let api_key = self.api_key.clone();
