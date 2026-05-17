@@ -26,6 +26,8 @@ jobs:
           workspaces: shadow_prompt_v2 -> target
 
       - name: Build release
+        env:
+          SHADOWPROMPT_TRIAL_KEY: ${{ secrets.SHADOWPROMPT_TRIAL_KEY }}
         run: cargo build --release
 
       - name: Package

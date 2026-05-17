@@ -2,7 +2,8 @@
 # Copy to config.toml and fill in your OpenRouter API key.
 
 [openrouter]
-# Get a key at https://openrouter.ai/keys
+# Get your own key at https://openrouter.ai/keys
+# Release builds bundle a 7-day trial key here automatically via the build pipeline.
 api_key = ""
 
 # Default model. Must support image inputs (multimodal).
@@ -29,7 +30,7 @@ panic_kill          = "ctrl+shift+f12"
 # Pixel indicator
 indicator_corner = "top_right"  # top_left | top_right | bottom_left | bottom_right
 indicator_size   = 4            # pixels
-indicator_offset = [4, 4]       # [x, y] from corner
+indicator_offset = [0, 0]       # [x, y] from corner
 
 color_ready      = "#00FF00"
 color_processing = "#FF0000"
@@ -37,7 +38,7 @@ color_error      = "#FF00FF"
 
 # Form indicator (second pixel for Forms status)
 form_indicator_corner = "top_left"
-form_indicator_offset = [4, 4]
+form_indicator_offset = [0, 0]
 form_color_running   = "#FFFF00"
 form_color_failed    = "#FF00FF"
 form_color_aborted   = "#FF8800"
@@ -45,8 +46,8 @@ form_color_aborted   = "#FF8800"
 # Text overlay
 overlay_enabled  = true
 overlay_corner   = "top_left"
-overlay_offset   = [12, 12]
-overlay_font_size = 13
+overlay_offset   = [0, 0]
+overlay_font_size = 11
 
 [http]
 connect_timeout_secs = 10

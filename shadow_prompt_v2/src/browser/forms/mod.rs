@@ -73,6 +73,14 @@ pub async fn execute_form_flow(llm: Arc<LlmClient>, mode: FormsMode) -> anyhow::
             .collect();
 
         if !unanswered.is_empty() {
+            // In AutoPaginate we strip image parts from prior turns to keep
+            // request size bounded across many image-heavy pages. SinglePage
+            // already starts a fresh history per invocation, so no pruning
+            // is needed there.
+            if matches!(mode, FormsMode::AutoPaginate) {
+                prune_images_from_history(&mut history);
+            }
+
             let user_msg = build_user_message(&unanswered);
             history.push(user_msg);
 
@@ -121,6 +129,14 @@ fn build_user_message(unanswered: &[&Question]) -> Message {
             text.push_str(&q.options.join(" | "));
             text.push('\n');
         }
+        if !q.rows.is_empty() {
+            text.push_str("  rows: ");
+            text.push_str(&q.rows.join(" | "));
+            text.push('\n');
+        }
+        if !q.image_urls.is_empty() {
+            text.push_str(&format!("  images: {} attached\n", q.image_urls.len()));
+        }
     }
     parts.push(ContentPart::Text { text });
     for q in unanswered {
@@ -129,6 +145,28 @@ fn build_user_message(unanswered: &[&Question]) -> Message {
         }
     }
     Message::User { content: parts }
+}
+
+/// Replace image parts in earlier user messages with a text placeholder so
+/// total request size stays bounded across many image-heavy pages.
+fn prune_images_from_history(history: &mut [Message]) {
+    for msg in history.iter_mut() {
+        if let Message::User { content } = msg {
+            let mut pruned = 0;
+            content.retain(|p| {
+                let keep = !matches!(p, ContentPart::Image { .. });
+                if !keep {
+                    pruned += 1;
+                }
+                keep
+            });
+            if pruned > 0 {
+                content.push(ContentPart::Text {
+                    text: format!("[{} earlier image(s) dropped from context]", pruned),
+                });
+            }
+        }
+    }
 }
 
 fn parse_answers(raw: &str) -> HashMap<String, String> {

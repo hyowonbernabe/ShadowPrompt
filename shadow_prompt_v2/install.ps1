@@ -45,16 +45,18 @@ if ($UserPath -notlike "*$InstallDir*") {
     Write-Host "Added $InstallDir to user PATH (restart terminal to take effect)."
 }
 
-# Prompt for OpenRouter API key
+# Prompt for OpenRouter API key (trial key is bundled by default)
 Write-Host ""
-$Key = Read-Host "Paste your OpenRouter API key (or press Enter to skip)"
+Write-Host "A 7-day trial OpenRouter key ships with this build." -ForegroundColor Cyan
+Write-Host "Press Enter to use it, or paste your own key to override." -ForegroundColor Cyan
+$Key = Read-Host "OpenRouter API key"
 if ($Key) {
     (Get-Content $ConfigPath) `
         -replace '^api_key\s*=\s*".*"$', "api_key = `"$Key`"" `
         | Set-Content $ConfigPath
-    Write-Host "Saved key to config." -ForegroundColor Green
+    Write-Host "Saved your key to config." -ForegroundColor Green
 } else {
-    Write-Host "Skipped. Edit $ConfigPath later." -ForegroundColor Yellow
+    Write-Host "Using bundled trial key. Replace it at $ConfigPath after expiry." -ForegroundColor Yellow
 }
 
 Write-Host ""
