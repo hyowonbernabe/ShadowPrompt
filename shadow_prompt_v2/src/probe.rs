@@ -8,12 +8,12 @@ use crate::llm::capabilities;
 use crate::llm::messages::{ContentPart, ImageUrl, Message};
 use crate::llm::LlmClient;
 
-/// Generate a 64x64 solid-red PNG at runtime. Some providers reject sub-32px
-/// inputs, so we don't rely on a tiny hardcoded blob.
+/// 256x256 solid red, RGB (no alpha). Some Anthropic-via-Bedrock/Vertex routes
+/// reject RGBA or sub-200px inputs.
 fn red_square_data_url() -> anyhow::Result<String> {
     use base64::Engine;
-    use image::{ImageBuffer, Rgba};
-    let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_pixel(64, 64, Rgba([255, 0, 0, 255]));
+    use image::{ImageBuffer, Rgb};
+    let img: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_pixel(256, 256, Rgb([255, 0, 0]));
     let mut buf = Vec::new();
     img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)?;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&buf);
