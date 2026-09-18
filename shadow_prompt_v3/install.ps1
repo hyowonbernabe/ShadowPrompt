@@ -37,9 +37,15 @@ Log "Creating $InstallDir ..."
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 New-Item -ItemType Directory -Force -Path $ConfigDir  | Out-Null
 
-Log "Fetching latest release metadata ..."
-$ReleaseApi = "https://api.github.com/repos/$Owner/$Repo/releases/latest"
-$Release = Invoke-RestMethod -Uri $ReleaseApi -Headers @{ "User-Agent" = "shadowprompt-installer" }
+Log "Fetching latest v3 release metadata ..."
+# GitHub's own `/releases/latest` always excludes prereleases, and this repo also ships v2
+# releases (non-prerelease) in parallel — that endpoint would silently resolve to the newest v2
+# release instead of v3, no error, just the wrong major version installed. List releases instead
+# and pick the newest one whose tag actually starts with "v3." (GitHub returns them newest-first).
+$ReleaseApi = "https://api.github.com/repos/$Owner/$Repo/releases"
+$Releases = Invoke-RestMethod -Uri $ReleaseApi -Headers @{ "User-Agent" = "shadowprompt-installer" }
+$Release = $Releases | Where-Object { $_.tag_name -like "v3.*" } | Select-Object -First 1
+if (-not $Release) { throw "No v3.* release found." }
 $Zip = $Release.assets | Where-Object { $_.name -like "*windows-x64.zip" } | Select-Object -First 1
 if (-not $Zip) { throw "No windows-x64.zip asset on latest release." }
 
