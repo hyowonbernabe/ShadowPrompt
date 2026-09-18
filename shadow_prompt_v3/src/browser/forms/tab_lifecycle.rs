@@ -10,62 +10,112 @@
 // inherently-unverifiable-here requirement — see `safe_to_close`'s doc comment for the honest
 // limitation.
 
-use chromiumoxide::cdp::browser_protocol::target::CreateTargetParams;
 use chromiumoxide::{Browser, Page};
 
 /// Same reasoning as `mod.rs`'s `PAGE_DISCOVERY_RETRIES` — chromiumoxide's internal target list
 /// is only populated once it's processed the async `Target.targetCreated` event, which can lag
 /// behind a command response by a moment. Short bounded retry, not a long fixed wait.
-const GET_PAGE_RETRIES: u32 = 10;
-const GET_PAGE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
+const NEW_TAB_RETRIES: u32 = 10;
+const NEW_TAB_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
 
-pub async fn open_forms_tab(browser: &Browser, form_url: &str) -> anyhow::Result<Page> {
-    // Three prior attempts at this, all confirmed by live testing (via the debug_open_tab
-    // hotkey, exactly so this could be iterated on quickly without a full Forms/LLM run each
-    // time):
+pub async fn open_forms_tab(browser: &Browser, source_page: &Page, form_url: &str) -> anyhow::Result<Page> {
+    // Four prior attempts at this, all confirmed by live testing (via the debug_open_tab hotkey,
+    // exactly so this could be iterated on quickly without a full Forms/LLM run each time):
     //   1. Bare URL (`new_window` left unset) — no error, but opens a brand new top-level
     //      window every time. Chrome's own doc says this field defaults to `false` (a tab); in
     //      practice, attached via `--remote-debugging-port` rather than CDP-launched, it
     //      behaves like `true`.
     //   2. Explicit `new_window(false)` — fails outright with CDP error -32000 "Failed to open
     //      new tab - no browser is open."
-    //   3. `for_tab(true)` — this one actually opens a real tab in the existing window (user
-    //      directly confirmed this fixes the original report), but then chromiumoxide's own
-    //      handler panics internally: `Browser::new_page` waits on `self.targets.get_mut
-    //      (&target_id)` being populated by the (separate, async) `Target.targetCreated` event
-    //      before it'll hand back a `Page`, and hard-`panic!("Created target not present")`
-    //      instead of retrying if that event hasn't arrived yet by the time the `createTarget`
-    //      command's own response comes back — a genuine upstream race, not something wrong on
-    //      this app's side (the crate's own source has a `// TODO can this even happen?` right
-    //      next to that panic).
-    // Fix: keep `for_tab(true)` (it's what actually gets the right window/tab behavior), but
-    // stop going through `Browser::new_page` (`HandlerMessage::CreatePage`, the code path that
-    // panics) — issue the raw `Target.createTarget` command via `Browser::execute`
-    // (`HandlerMessage::Command`, a plain passthrough with none of `new_page`'s special-cased
-    // post-processing), then separately poll `Browser::get_page` for the resulting target,
-    // tolerating exactly the same "event hasn't landed yet" race by retrying instead of
-    // asserting it can't happen.
-    let params = CreateTargetParams::builder()
-        .url(form_url)
-        .for_tab(true)
-        .build()
-        .map_err(|e| anyhow::anyhow!("building new-tab params: {e}"))?;
-    let created = browser
-        .execute(params)
+    //   3. `for_tab(true)` — this one actually opens a real tab in the existing window, but then
+    //      chromiumoxide's own handler panics internally: `Browser::new_page` waits on
+    //      `self.targets.get_mut(&target_id)` being populated by the (separate, async)
+    //      `Target.targetCreated` event before it'll hand back a `Page`, and hard-
+    //      `panic!("Created target not present")` instead of retrying if that event hasn't
+    //      arrived yet.
+    //   4. `for_tab(true)` again, worked around the panic by issuing the raw `Target.createTarget`
+    //      via `Browser::execute` and separately polling `Browser::get_page` — no more panic, but
+    //      `get_page` never resolves, ever, no matter how long you retry: confirmed by reading
+    //      `chromiumoxide::handler::target::Target::poll`, which unconditionally
+    //      `return`s `None` (never issuing the `Target.attachToTarget` command that would set
+    //      `session_id`, which is what `get_or_create_page` actually waits on) whenever
+    //      `!self.is_page()`. `for_tab(true)` creates a target whose CDP `type` is the literal
+    //      string `"tab"` (Chrome's newer tab-strip target kind), and `TargetType::new` only maps
+    //      `"page"/"background_page"/"service_worker"/"shared_worker"/"other"/"browser"/"webview"`
+    //      to known variants — `"tab"` falls through to `Unknown`, so `is_page()` is false
+    //      forever. This crate structurally cannot attach to a `for_tab(true)` target; no amount
+    //      of retrying fixes it.
+    // Fix: stop using CDP `Target.createTarget` for this at all. Instead, run `window.open(url,
+    // '_blank')` as JS inside the already-attached source page — a page-initiated `window.open`
+    // creates an ordinary CDP target of type `"page"`, fully compatible with chromiumoxide's
+    // normal attach/poll path, while still landing as a real tab in the same window (this is
+    // exactly what `window.open` does in a real browser). The new tab has no CDP target id
+    // available from JS, so it's found by diffing `Browser::pages()` before/after for a target id
+    // that wasn't there before, with the same short bounded retry as everywhere else in this file
+    // that waits on the `Target.targetCreated` race.
+    let before: std::collections::HashSet<_> = browser
+        .pages()
         .await
-        .map_err(|e| anyhow::anyhow!("opening new Forms tab: {e}"))?;
-    let target_id = created.result.target_id;
+        .map_err(|e| anyhow::anyhow!("listing open tabs before opening new Forms tab: {e}"))?
+        .iter()
+        .map(|p| p.target_id().clone())
+        .collect();
 
-    for attempt in 0..GET_PAGE_RETRIES {
-        match browser.get_page(target_id.clone()).await {
-            Ok(page) => return Ok(page),
-            Err(_) if attempt + 1 < GET_PAGE_RETRIES => {
-                tokio::time::sleep(GET_PAGE_RETRY_DELAY).await;
-            }
-            Err(e) => return Err(anyhow::anyhow!("new Forms tab was created but never became attachable: {e}")),
+    // `window.open(...)`'s own return value is a `Window` reference — deeply self-referential
+    // (`window.window`, `window.self`, `window.top`, ...) — and CDP's `Runtime.evaluate` tries to
+    // build a serializable preview of whatever the expression evaluates to, which fails walking a
+    // `Window` object's reference graph with "-32000: Object reference chain is too long." The
+    // trailing `void 0` discards it, so the expression's completion value is plain `undefined`.
+    let open_js = format!(
+        "window.open({}, '_blank'); void 0",
+        serde_json::to_string(form_url).map_err(|e| anyhow::anyhow!("encoding Forms URL for window.open: {e}"))?
+    );
+    source_page
+        .evaluate(open_js)
+        .await
+        .map_err(|e| anyhow::anyhow!("opening new Forms tab via window.open: {e}"))?;
+
+    for attempt in 0..NEW_TAB_RETRIES {
+        let pages = browser
+            .pages()
+            .await
+            .map_err(|e| anyhow::anyhow!("listing open tabs after opening new Forms tab: {e}"))?;
+        if let Some(page) = pages.into_iter().find(|p| !before.contains(p.target_id())) {
+            wait_for_document_ready(&page).await;
+            return Ok(page);
+        }
+        if attempt + 1 < NEW_TAB_RETRIES {
+            tokio::time::sleep(NEW_TAB_RETRY_DELAY).await;
         }
     }
-    unreachable!("loop above always returns")
+    anyhow::bail!("new Forms tab was opened via window.open but never appeared in the target list")
+}
+
+/// The new tab's CDP target can be discovered via `Browser::pages()` well before Chrome has
+/// actually finished navigating to `form_url` — confirmed live: `read_page` on the freshly-
+/// returned page saw "0 field(s)", got treated as "already answered" (vacuously true on an empty
+/// list), and `advance_to_next_page` then failed outright because the real form content just
+/// hadn't loaded yet. Best-effort poll of `document.readyState`, same short-bounded-retry shape as
+/// the rest of this file; if it never reports ready, callers proceed anyway and any real failure
+/// surfaces downstream instead of hanging here.
+const PAGE_READY_RETRIES: u32 = 30;
+const PAGE_READY_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
+
+async fn wait_for_document_ready(page: &Page) {
+    for attempt in 0..PAGE_READY_RETRIES {
+        let ready = page
+            .evaluate("document.readyState === 'complete'")
+            .await
+            .ok()
+            .and_then(|r| r.into_value::<bool>().ok())
+            .unwrap_or(false);
+        if ready {
+            return;
+        }
+        if attempt + 1 < PAGE_READY_RETRIES {
+            tokio::time::sleep(PAGE_READY_RETRY_DELAY).await;
+        }
+    }
 }
 
 /// Returns true if it's safe to close `page` — false if it's the only tab left in the browser,

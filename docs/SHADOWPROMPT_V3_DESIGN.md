@@ -106,6 +106,14 @@ never expose the capability at all, rather than build a mechanism to gate access
   handles any picture-question scenario Clipboard/Forms can't.
 - Same tools as Clipboard Query. Same streaming/crawl display. No separate search-modifier hotkey,
   same reasoning as above.
+- **Process-wide invariant, found via live testing on a second, differently-scaled machine: the
+  process must declare Per-Monitor-V2 DPI awareness** (`SetProcessDpiAwarenessContext`, called
+  once at the top of `lib::run()`). Without it, Windows virtualizes `GetSystemMetrics` and GDI
+  screen capture to the scaled/logical resolution for an unaware process, while `rdev`'s low-level
+  mouse hook always reports real physical pixels — the two coordinate spaces only happen to match
+  at 100% scaling. Any code that mixes mouse-hook coordinates with `GetSystemMetrics`/window
+  placement/GDI capture depends on this staying set; don't remove it without re-verifying
+  Screenshot Query on a scaled display.
 
 ### Test Model (new in v3)
 - A hotkey that sends a literal "What model are you?" query.
@@ -301,12 +309,55 @@ Verified live, against a real form, using browser automation tooling in this ses
      of retrying if that event hasn't landed yet — a genuine upstream race, confirmed by reading
      chromiumoxide 0.9.1's own source, which has a `// TODO can this even happen?` right next to
      the panic.
-  - **Final fix**: keep `for_tab(true)` (it's what gets the right tab/window behavior), but stop
-    routing through `Browser::new_page` (the code path that panics). Issue the raw
+  - **Fix at the time**: keep `for_tab(true)` (it's what gets the right tab/window behavior), but
+    stop routing through `Browser::new_page` (the code path that panics). Issue the raw
     `Target.createTarget` command via `Browser::execute` instead — a plain command/response
     passthrough with none of `new_page`'s special-cased post-processing — then separately poll
     `Browser::get_page` for the resulting target with a short bounded retry, tolerating the same
     "the event hasn't landed yet" race by retrying rather than asserting it can't happen.
+  - **Correction — not actually the final fix.** The very next real run hit a different error:
+    `get_page` exhausted every retry with "Requested value not found," and no retry count would
+    have helped. Root cause, found by reading `chromiumoxide::handler::target::Target::poll`:
+    it returns early, before ever sending `Target.attachToTarget` (the command that sets
+    `session_id`, the one thing `get_or_create_page` actually waits on), whenever
+    `!self.is_page()`. `for_tab(true)` creates a target whose CDP `type` is the literal string
+    `"tab"` — Chrome's newer tab-strip target kind — and chromiumoxide 0.9.1's `TargetType::new`
+    doesn't recognize that string at all (only `page`/`background_page`/`service_worker`/
+    `shared_worker`/`other`/`browser`/`webview` map to known variants), so `is_page()` is false
+    forever for it. A second, structurally different upstream gap from the panic above, not a
+    variant of the same race.
+  - **Actual final fix**: drop CDP `Target.createTarget` for this entirely. `open_forms_tab` now
+    runs `window.open(url, '_blank')` as JS inside the already-attached source page (the Forms
+    tab `find_active_forms_url` found) instead — a page-initiated `window.open` creates an
+    ordinary `"page"`-type target that chromiumoxide's normal attach/poll path handles correctly,
+    while still opening as a real tab in the same window. Since the new tab has no CDP target id
+    obtainable from JS, it's identified by diffing `Browser::pages()` before/after for a target id
+    that wasn't there before (same short bounded retry pattern as the rest of this file).
+    `find_active_forms_url` now returns the source `Page` alongside its URL instead of discarding
+    it, and its focused-tab lookup was pulled into a shared `find_focused_page` helper so
+    `debug_open_tab` (no real Forms tab available) can get a source page the same way, rather than
+    calling `open_forms_tab` with no source page at all — a gap the previous fix would have hit
+    immediately if exercised through the debug hotkey standalone.
+  - **Immediate follow-up bug**: the very next run hit CDP error -32000, "Object reference chain
+    is too long." `window.open(...)` itself evaluates to a `Window` object reference — deeply
+    self-referential (`window.window`, `window.self`, `window.top` all cycle back) — and CDP's
+    `Runtime.evaluate` tries to build a serializable preview of the expression's completion value,
+    which fails walking that cycle. Fixed with a trailing `; void 0` so the evaluated expression's
+    completion value is plain `undefined` instead of the `Window` reference.
+  - **Third follow-up bug — read before the tab finished loading**: next run logged "page 1 — 0
+    field(s)," treated as already-answered (vacuous truth on an empty list), then failed to find
+    a Next/Submit control. The new tab is handed back the moment its CDP target exists, which can
+    be before Chrome finishes navigating it — `read_page` ran against a still-loading document.
+    Fixed with `wait_for_document_ready`: polls `document.readyState === 'complete'` with a short
+    bounded retry before `open_forms_tab` returns the page to any caller.
+  - **Fourth follow-up bug — genuine infinite loop once the page actually had content**: the model
+    called `fill_page({"answers":{}})` every round, forever, with no cap left to stop it
+    (`MAX_LOOP_ROUNDS` was removed entirely per earlier explicit request). Root cause:
+    `fill_page`'s schema had no `minProperties`, so an empty object is schema-valid, and the
+    function's own loop is a no-op on an empty map — it silently returned `"[]"`, indistinguishable
+    from success to the model. Fixed at both layers: `minProperties: 1` on the schema, plus
+    `FillPageTool::execute` now explicitly errors on an empty `answers` map instead of silently
+    no-opping, so a model gets a real corrective signal instead of a fake success.
 - **Top-right "Forms is running" pixel indicator — real gap, never wired**: `SetFormIndicator`/
   `FormIndicatorState` (a separate small pixel stacked under the main indicator, `top_right`,
   §10/config) were fully defined and handled in the UI layer since scaffolding, but nothing in

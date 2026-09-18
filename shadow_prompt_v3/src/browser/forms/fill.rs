@@ -540,7 +540,8 @@ impl Tool for FillPageTool {
                     "properties": {
                         "answers": {
                             "type": "object",
-                            "additionalProperties": { "type": "string" }
+                            "additionalProperties": { "type": "string" },
+                            "minProperties": 1
                         }
                     },
                     "required": ["answers"]
@@ -556,6 +557,16 @@ impl Tool for FillPageTool {
         }
         let args: Args = serde_json::from_str(args_json)
             .map_err(|e| anyhow::anyhow!("invalid arguments: {e}"))?;
+        // Real, confirmed gap found live: an empty `answers` object satisfies this schema (no
+        // `minProperties` originally) and `fill_page`'s loop is a no-op on an empty map, so this
+        // returned a silent `"[]"` that reads to the model as a harmless success — with no round
+        // cap left (removed on request), a model that ever produces one empty call can loop on it
+        // forever with no corrective signal. `minProperties: 1` above rejects it at the schema
+        // level for models that actually validate against the schema; this check is the backstop
+        // for ones that don't, giving an explicit error back instead of a fake-success no-op.
+        if args.answers.is_empty() {
+            anyhow::bail!("no answers provided — include at least one question id from the page content with its answer");
+        }
         let results = fill_page(&self.page, &args.answers).await?;
         Ok(serde_json::to_string(&results)?)
     }

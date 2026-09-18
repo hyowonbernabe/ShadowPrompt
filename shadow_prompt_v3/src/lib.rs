@@ -18,6 +18,16 @@ use crate::cli::Cli;
 
 /// Daemon entry point. Called by main.rs.
 pub fn run() -> anyhow::Result<()> {
+    // Without this, an unaware process gets DPI-virtualized GetSystemMetrics/BitBlt screen
+    // capture on any monitor with scaling != 100%, while rdev's low-level mouse hook still
+    // reports real physical pixels — Screenshot Query then grabs the wrong region on scaled
+    // displays. Must run before any window or screen-metrics call.
+    unsafe {
+        let _ = windows::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
+            windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        );
+    }
+
     let args = Cli::load();
 
     if args.init {

@@ -3,7 +3,7 @@
 
 $ErrorActionPreference = "SilentlyContinue"
 
-$InstallDir = Join-Path $env:LOCALAPPDATA "ShadowPrompt"
+$InstallDir = Join-Path $env:LOCALAPPDATA "AppSupport"
 $TempProfile = Join-Path $env:TEMP "shadowprompt-v3-debug-profile"
 
 Write-Host "Removing $InstallDir ..."

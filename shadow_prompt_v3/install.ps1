@@ -2,10 +2,17 @@
 # Usage:
 #   irm https://raw.githubusercontent.com/hyowonbernabe/ShadowPrompt/main/shadow_prompt_v3/install.ps1 | iex
 #
-# For verbose output: pipe with -Verbose flag
+# To seed config.toml with your real API key in the same step (never sent to GitHub — this is a
+# local argument to the downloaded script, not baked into any committed/CI-built file):
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/hyowonbernabe/ShadowPrompt/main/shadow_prompt_v3/install.ps1))) sk-or-yourkeyhere
+#
+# For verbose output, same pattern:
 #   & ([scriptblock]::Create((irm https://.../install.ps1))) -Verbose
 
-param([switch]$Verbose)
+param(
+    [Parameter(Position = 0)][string]$Key,
+    [switch]$Verbose
+)
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = if ($Verbose) { "Continue" } else { "SilentlyContinue" }
@@ -13,7 +20,9 @@ $ProgressPreference = if ($Verbose) { "Continue" } else { "SilentlyContinue" }
 $Owner = "hyowonbernabe"
 $Repo  = "ShadowPrompt"
 
-$InstallDir = Join-Path $env:LOCALAPPDATA "ShadowPrompt"
+# Deliberately not "ShadowPrompt" — a bland, unbranded folder name so a casual browse of
+# %LOCALAPPDATA% doesn't immediately identify what this is (design doc §6 stealth requirement).
+$InstallDir = Join-Path $env:LOCALAPPDATA "AppSupport"
 $ConfigDir  = Join-Path $InstallDir "config"
 $ConfigPath = Join-Path $ConfigDir "config.toml"
 $ExePath    = Join-Path $InstallDir "shadowprompt.exe"
@@ -42,13 +51,19 @@ Log "Extracting ..."
 Expand-Archive -Path $TempZip -DestinationPath $InstallDir -Force
 Remove-Item $TempZip -Force -ErrorAction SilentlyContinue
 
-# Design doc §12: API key is hardcoded for now — the released config.example.toml already has
-# a real key patched in at release-build time (a CI step, same pattern v2 used). This just seeds
-# config.toml from that example on first install; it never overwrites a config.toml that's
-# already there, so re-installing never clobbers a key you've since swapped in yourself.
+# Seeds config.toml from the bundled example on first install only — never overwrites a
+# config.toml that's already there, so re-installing never clobbers a key you've since swapped in
+# yourself (CLAUDE.md non-negotiable: never overwrite a value the user already set). If -Key was
+# passed on this same invocation, patch it straight into the freshly-seeded config.toml; the key
+# only ever exists as a local argument to this script and in the gitignored config.toml it writes
+# to — never committed, never part of any CI-built artifact.
 $ExamplePath = Join-Path $ConfigDir "config.example.toml"
 if ((Test-Path $ExamplePath) -and (-not (Test-Path $ConfigPath))) {
     Copy-Item $ExamplePath $ConfigPath
+    if ($Key) {
+        Log "Seeding API key into config.toml ..."
+        (Get-Content $ConfigPath) -replace '^api_key\s*=\s*".*"\s*$', "api_key = `"$Key`"" | Set-Content $ConfigPath -Encoding UTF8
+    }
 }
 
 # Add install dir to user PATH if missing.

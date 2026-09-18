@@ -33,8 +33,8 @@ pub enum FormsMode {
 
 pub async fn execute_form_flow(llm: Arc<LlmClient>, mode: FormsMode, max_pages: u32) -> anyhow::Result<()> {
     let browser = crate::browser::debugger::connect().await?;
-    let form_url = find_active_forms_url(&browser).await?;
-    let page = tab_lifecycle::open_forms_tab(&browser, &form_url).await?;
+    let (form_url, source_page) = find_active_forms_url(&browser).await?;
+    let page = tab_lifecycle::open_forms_tab(&browser, &source_page, &form_url).await?;
 
     let mut history: Vec<Message> = vec![Message::system_text(forms_prompt())];
 
@@ -161,11 +161,9 @@ fn content_images(content: &PageContent) -> Vec<String> {
 }
 
 fn build_page_message(content: &PageContent) -> Vec<ContentPart> {
-    let mut parts = vec![ContentPart::text(format!(
-        "{}\n\n{}",
-        content.page_context,
-        serde_json::to_string_pretty(&content.fields).unwrap_or_default()
-    ))];
+    let fields_json = serde_json::to_string_pretty(&content.fields).unwrap_or_default();
+    log::debug!("forms: page content sent to model — context: {:?}, fields: {}", content.page_context, fields_json);
+    let mut parts = vec![ContentPart::text(format!("{}\n\n{}", content.page_context, fields_json))];
     for url in content_images(content) {
         parts.push(ContentPart::Image { image_url: crate::llm::messages::ImageUrl { url } });
     }
@@ -261,7 +259,29 @@ async fn advance_to_next_page(page: &chromiumoxide::Page) -> anyhow::Result<Next
 const PAGE_DISCOVERY_RETRIES: u32 = 5;
 const PAGE_DISCOVERY_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
 
-async fn find_active_forms_url(browser: &chromiumoxide::Browser) -> anyhow::Result<String> {
+/// `Browser::pages()` right after a fresh `Browser::connect()` (which every caller here does on
+/// every single hotkey press, not once at daemon startup) can race the handler's
+/// `Target.setDiscoverTargets` handshake — CDP has to round-trip that call and then deliver a
+/// `targetCreated` event per existing tab before `pages()` knows about tabs that were already
+/// open before this connection existed, which is the normal case here (the user navigates in the
+/// debug window, *then* fires the hotkey). A handful of short retries absorbs that instead of
+/// failing on a target list that just hadn't populated yet.
+///
+/// Real gap found by thinking through multi-tab use (user report: Brave + a second Chrome + this
+/// debug Chrome all open, plus multiple form tabs inside the debug window itself): the old version
+/// took "the first open tab whose URL matches Google Forms' known shapes," which ignored which tab
+/// the user was actually looking at entirely. If a stale Forms tab from an earlier test was still
+/// open in the background, a hotkey fired while looking at an unrelated tab (e.g. YouTube) would
+/// silently answer the *wrong, stale* form instead of failing. Other browsers (Brave, a second
+/// Chrome) were never in scope either way — `browser.pages()` only ever sees targets belonging to
+/// this one CDP-attached debug Chrome process.
+///
+/// `document.hasFocus()` is true for exactly the one document that is both the frontmost tab of
+/// its window *and* in a window that currently has OS input focus — unlike `TargetInfo`, which
+/// carries no such flag, this reliably answers "which tab is the user actually on" and naturally
+/// handles a second debug-Chrome *window* too (at most one tab across all of them should ever
+/// report true).
+pub(crate) async fn find_focused_page(browser: &chromiumoxide::Browser) -> anyhow::Result<chromiumoxide::Page> {
     let mut pages = Vec::new();
     for attempt in 0..PAGE_DISCOVERY_RETRIES {
         pages = browser
@@ -274,22 +294,7 @@ async fn find_active_forms_url(browser: &chromiumoxide::Browser) -> anyhow::Resu
         tokio::time::sleep(PAGE_DISCOVERY_RETRY_DELAY).await;
     }
 
-    // Real gap found by thinking through multi-tab use (user report: Brave + a second Chrome +
-    // this debug Chrome all open, plus multiple form tabs inside the debug window itself): the
-    // old version took "the first open tab whose URL matches Google Forms' known shapes," which
-    // ignored which tab the user was actually looking at entirely. If a stale Forms tab from an
-    // earlier test was still open in the background, a hotkey fired while looking at an unrelated
-    // tab (e.g. YouTube) would silently answer the *wrong, stale* form instead of failing. Other
-    // browsers (Brave, a second Chrome) were never in scope either way — `browser.pages()` only
-    // ever sees targets belonging to this one CDP-attached debug Chrome process.
-    //
-    // `document.hasFocus()` is true for exactly the one document that is both the frontmost tab
-    // of its window *and* in a window that currently has OS input focus — unlike `TargetInfo`,
-    // which carries no such flag, this reliably answers "which tab is the user actually on" and
-    // naturally handles a second debug-Chrome *window* too (at most one tab across all of them
-    // should ever report true).
-    let mut focused_url: Option<String> = None;
-    for page in &pages {
+    for page in pages {
         let has_focus = page
             .evaluate("document.hasFocus()")
             .await
@@ -297,19 +302,26 @@ async fn find_active_forms_url(browser: &chromiumoxide::Browser) -> anyhow::Resu
             .and_then(|r| r.into_value::<bool>().ok())
             .unwrap_or(false);
         if has_focus {
-            focused_url = page.url().await.ok().flatten();
-            break;
+            return Ok(page);
         }
     }
 
-    let Some(url) = focused_url else {
-        anyhow::bail!(
-            "couldn't find a focused tab in debug Chrome on :{DEBUG_PORT} — click into the tab with your form first"
-        );
-    };
+    anyhow::bail!("couldn't find a focused tab in debug Chrome on :{DEBUG_PORT} — click into the tab with your form first")
+}
+
+async fn find_active_forms_url(
+    browser: &chromiumoxide::Browser,
+) -> anyhow::Result<(String, chromiumoxide::Page)> {
+    let page = find_focused_page(browser).await?;
+    let url = page
+        .url()
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| anyhow::anyhow!("focused tab in debug Chrome on :{DEBUG_PORT} has no URL"))?;
 
     if is_forms_url(&url) {
-        Ok(url)
+        Ok((url, page))
     } else {
         anyhow::bail!(
             "the focused tab in debug Chrome on :{DEBUG_PORT} isn't a Google Form ({url}) — click into the form's tab first"

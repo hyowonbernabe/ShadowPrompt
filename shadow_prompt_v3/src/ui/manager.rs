@@ -631,7 +631,7 @@ unsafe fn render_intensity_layer(
 
     let src: &[u8] = std::slice::from_raw_parts(bits_ptr as *const u8, stride * h as usize);
     let mut out = vec![0u8; (w as usize) * (h as usize)];
-    for (i, px) in src.chunks_exact(4).enumerate() {
+    for (i, px) in src.as_chunks::<4>().0.iter().enumerate() {
         out[i] = px[0].max(px[1]).max(px[2]);
     }
 

@@ -60,7 +60,7 @@ pub fn remove_from_user_path(install_dir: &Path) -> anyhow::Result<()> {
 }
 
 fn bytes_to_wide(b: &[u8]) -> Vec<u16> {
-    b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect()
+    b.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect()
 }
 
 fn wide_to_bytes(w: &[u16]) -> Vec<u8> {

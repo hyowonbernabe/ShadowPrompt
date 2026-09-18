@@ -51,7 +51,7 @@ unsafe fn capture_region_raw(x: i32, y: i32, w: i32, h: i32) -> anyhow::Result<V
     std::ptr::copy_nonoverlapping(bits_ptr as *const u8, out.as_mut_ptr(), buf_len);
 
     // BGRA -> RGBA (GDI DIBs are BGR order)
-    for px in out.chunks_exact_mut(4) {
+    for px in out.as_chunks_mut::<4>().0 {
         px.swap(0, 2);
     }
 

@@ -416,7 +416,7 @@ specifically to iterate on this without a full Forms/LLM run each time:
    the separate `Target.targetCreated` event hasn't landed yet — confirmed as a genuine crate bug
    by reading its source, which has its own `// TODO can this even happen?` next to the panic).
 
-**Final fix**: keep `for_tab(true)`, stop calling `Browser::new_page` (the panicking path).
+**Fix at the time**: keep `for_tab(true)`, stop calling `Browser::new_page` (the panicking path).
 Issue the raw `Target.createTarget` via `Browser::execute` (plain passthrough, no special
 post-processing), then poll `Browser::get_page` with a short bounded retry for the same
 "event hasn't landed yet" race, tolerated instead of asserted impossible. Also (from the first
@@ -425,6 +425,77 @@ indicator) were fully wired in the UI layer since scaffolding but never actually
 `forms_run.rs`'s own header comment said so. Wired now: `Running` before `execute_form_flow`,
 `Hidden` right after, regardless of outcome. Verified: `cargo check`/`clippy --all-targets -- -D
 warnings`/`test` clean, 54/54.
+
+**Correction — this was not actually the final fix.** Live testing hit a new, different error on
+the very next real run: `new Forms tab was created but never became attachable: Requested value
+not found.` — the retry loop above exhausted all 10 attempts and always would have, no matter how
+long it retried. Root cause, found by reading `chromiumoxide::handler::target::Target::poll`
+(0.9.1): it unconditionally returns early (`if !self.is_page() { return None; }`) *before* ever
+issuing the `Target.attachToTarget` command that sets `session_id` — and `session_id` being `Some`
+is the only thing `get_or_create_page` actually waits on. `for_tab(true)` creates a target whose
+CDP `type` field is the literal string `"tab"` (Chrome's newer tab-strip-era target kind).
+`TargetType::new` only recognizes `"page"/"background_page"/"service_worker"/"shared_worker"/
+"other"/"browser"/"webview"` — `"tab"` falls through to `Unknown`, so `is_page()` is false forever
+for this target and chromiumoxide structurally never attaches to it. This is a second, separate
+upstream gap from the earlier panic, not a variant of the same race — no retry count fixes it.
+
+**Actual final fix**: stop using CDP `Target.createTarget` for this entirely. `open_forms_tab` now
+takes the already-attached source page (the one `find_active_forms_url` found) and runs
+`window.open(url, '_blank')` as JS inside it — a page-initiated `window.open` creates an ordinary
+`"page"`-type target, fully compatible with chromiumoxide's normal attach/poll path, while still
+landing as a real tab in the same window (exactly what `window.open` does in a real browser). The
+new tab has no CDP target id obtainable from JS, so it's found by diffing `Browser::pages()`
+before/after `window.open` for a target id that wasn't there before, with the same short bounded
+retry used elsewhere in this file for the `Target.targetCreated` race. `find_active_forms_url` was
+refactored to return the source `Page` alongside its URL (was previously discarded after reading
+`document.hasFocus()`), and its focused-tab-finding logic was pulled out into a shared
+`find_focused_page` helper so `debug_open_tab` (which has no Forms tab to speak of) can find a
+source page the same way instead of hard-coding `"about:blank"` with no source page at all — a gap
+the previous version of this fix would have hit immediately had it been tested standalone.
+Verified: `cargo check`/`clippy --all-targets -- -D warnings`/`test`, both default and `--features
+debug`, all clean, 54/54.
+
+**Immediate follow-up bug, same live-testing pass**: the very next run hit `opening new Forms tab
+via window.open: Error -32000: Object reference chain is too long`. Root cause: `window.open(...)`
+itself evaluates to a `Window` object reference — deeply self-referential (`window.window`,
+`window.self`, `window.top` all point back into the same cyclic structure) — and CDP's
+`Runtime.evaluate` tries to build a serializable preview of the expression's completion value
+before handing the result back, which fails walking a `Window` object's reference graph. Fixed by
+appending `; void 0` to the evaluated JS so the expression's completion value is plain `undefined`
+instead of the `Window` reference — nothing left to try serializing. Verified: `cargo
+check`/`clippy --all-targets -- -D warnings`/`test`, both default and `--features debug`, all
+clean, 54/54.
+
+**Third follow-up bug, same live-testing pass — page read before it finished loading**: next run
+logged `forms: page 1 — 0 field(s)`, then `page 1 already fully answered, skipping ahead`
+(`all_fields_answered` is vacuously true on an empty list), then `advance_to_next_page: found
+neither a Next nor a Submit control on this page`. Root cause: `open_forms_tab` hands back the new
+`Page` the moment its CDP target is discoverable via `Browser::pages()`, which can be well before
+Chrome has actually finished navigating `window.open`'s target to `form_url` — `read_page` was
+running against a still-loading/blank document. Fixed with `wait_for_document_ready` in
+`tab_lifecycle.rs`: polls `document.readyState === 'complete'` with a short bounded retry (30 ×
+200ms) right after the new tab is found, before handing it back to any caller. Best-effort — if it
+never reports ready, callers proceed anyway rather than hanging, and any real failure surfaces
+downstream same as before.
+
+**Fourth follow-up bug, same live-testing pass — real run, once the tab actually had content**:
+with the page-ready fix in place, the model got into a genuine infinite loop calling
+`fill_page({"answers":{}})` every round, forever (confirmed live past round 25 with no change and
+no cap — `MAX_LOOP_ROUNDS` was removed entirely per earlier explicit request, so nothing was going
+to stop this). Root cause: `fill_page`'s tool schema had no `minProperties` on `answers`, so an
+empty object is schema-valid, and `fill_page()`'s own loop (`for (field_id, raw_answer) in
+answers`) is a no-op on an empty map — it silently returned `"[]"`, which reads to the model as a
+harmless success rather than a rejected call, giving it no signal to ever try something different.
+Fixed at both layers: `minProperties: 1` added to the tool's JSON schema (rejects it up front for
+any model that actually validates tool-call arguments against the schema), and `FillPageTool::
+execute` now explicitly errors on an empty `answers` map (`"no answers provided — include at least
+one question id..."`) as a backstop for models that don't validate, so the model gets a real
+corrective error back instead of a fake-success empty array. This doesn't guarantee a given model
+recovers from a genuine capability gap, but it stops a no-op from ever looking like success — the
+actual bug, independent of which model is misbehaving.
+
+Verified (all four fixes together): `cargo check`/`clippy --all-targets -- -D warnings`/`test`,
+both default and `--features debug`, all clean, 54/54.
 
 ---
 
@@ -606,3 +677,32 @@ concurrent edits to the same `browser/forms/mod.rs`). Callback isn't wired to th
 never seen this project before, passes a full manual hotkey-by-hotkey check.
 
 **Depends on**: all of the above.
+
+---
+
+**Live-testing fix — Screenshot Query grabbed the wrong region on a scaled display**: reported
+while testing on a second machine at non-100% Windows display scaling — the captured image never
+matched the dragged rectangle. Root cause: the process never declared any DPI awareness (no
+manifest, no `SetProcessDpiAwarenessContext` call anywhere, despite the `Win32_UI_HiDpi` Cargo
+feature having been enabled and unused since it was added). For a DPI-unaware process, Windows
+transparently virtualizes both `GetSystemMetrics(SM_CXSCREEN/CYSCREEN)` and GDI screen capture
+(`GetDC`/`BitBlt` from the screen DC) down to the scaled/logical resolution — but `rdev`'s
+low-level mouse hook (`WH_MOUSE_LL`) always reports real physical pixel coordinates, unaffected by
+the hooking process's own DPI awareness. At 100% scaling the two coordinate spaces are identical
+by coincidence, which is why this never surfaced on the original dev machine; at any other scale
+factor the drag rectangle (physical pixels) and the capture (virtualized pixels) disagree, and
+`capture_region` grabs the wrong area. **Fix**: `SetProcessDpiAwarenessContext
+(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)` called once, first thing in `lib::run()`, before any
+window or screen-metrics call — makes every Win32 coordinate in the process (mouse hook, window
+placement, `GetSystemMetrics`, GDI capture) consistently physical, on any monitor/scale
+combination. No new dependency; `Win32_UI_HiDpi` was already in `Cargo.toml`.
+
+Fixing this also surfaced a separate, unrelated problem: the newly-installed Rust toolchain
+(1.98.1, needed because this dev machine had no Rust/MSVC build tools at all before this session)
+ships a clippy lint (`chunks_exact_to_as_chunks`) that didn't exist in whatever toolchain last
+built this repo clean. It failed `cargo clippy --all-targets -- -D warnings` on three pre-existing,
+unrelated call sites (`capture/screen.rs`, `lifecycle/path_cleanup.rs`, `ui/manager.rs`) —
+confirmed pre-existing by reproducing the same failures on a clean `git stash`. Fixed as three
+mechanical one-line rewrites to `slice::as_chunks`/`as_chunks_mut` (clippy's own suggested form,
+stable in this toolchain), no behavior change. Verified: `cargo check`/`clippy --all-targets -- -D
+warnings`/`test`, both default and `--features debug`, all clean, 54/54.

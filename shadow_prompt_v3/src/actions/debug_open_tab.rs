@@ -8,10 +8,11 @@
 #[cfg(feature = "debug")]
 pub async fn execute() -> anyhow::Result<()> {
     use crate::browser::debugger;
-    use crate::browser::forms::tab_lifecycle;
+    use crate::browser::forms::{find_focused_page, tab_lifecycle};
 
     let browser = debugger::connect().await?;
-    tab_lifecycle::open_forms_tab(&browser, "about:blank").await?;
+    let source_page = find_focused_page(&browser).await?;
+    tab_lifecycle::open_forms_tab(&browser, &source_page, "about:blank").await?;
     Ok(())
 }
 
