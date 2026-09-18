@@ -1,0 +1,75 @@
+# ShadowPrompt v3 — config template. Copy to config.toml (or run --init) and fill in your
+# OpenRouter API key. See docs/SHADOWPROMPT_V3_DESIGN.md for the reasoning behind every default
+# here — this file only needs to say *what*, not *why*.
+
+[openrouter]
+api_key = "sk-or-REPLACE-ME"
+# Fallback chain, tried in order. Uncomment to override the built-in default (design doc §8):
+# models = [
+#   "google/gemini-3.5-flash-lite",
+#   "anthropic/claude-sonnet-5",
+#   "inclusionai/ling-3.0-flash-sante:free",
+#   "inclusionai/ling-3.0-flash-fin:free",
+#   "nex-agi/nex-n2.5-mini:free",
+# ]
+
+# All combos include alt — plain ctrl+shift+<letter> collides with real shortcuts other apps
+# already own (e.g. ctrl+shift+s is Chrome's own screenshot/save-as in several extensions, which
+# is exactly what got mistaken for a bug in this app during testing). forms_answer_page and abort
+# got new letters (g, c) instead of reusing forms_answer_all's f / insta_delete's x, since those
+# pairs used to be told apart by alt alone — now that every binding has alt, they'd otherwise
+# collide.
+[hotkeys]
+clipboard_query = "ctrl+shift+alt+v"
+screenshot_query = "ctrl+shift+alt+s"
+test_model = "ctrl+shift+alt+t"
+switch_model = "ctrl+shift+alt+m"
+launch_debugger = "ctrl+shift+alt+b"
+forms_answer_page = "ctrl+shift+alt+g"
+forms_answer_all = "ctrl+shift+alt+f"
+abort = "ctrl+shift+alt+c"
+hide_toggle = "ctrl+shift+alt+h"
+help_toggle = "ctrl+shift+alt+slash"
+restart_daemon = "ctrl+shift+alt+r"
+insta_delete = "ctrl+shift+alt+x"
+# NOT ctrl+alt+delete — Windows intercepts that combo at the OS level before any app ever sees
+# it, so binding panic_kill to it would silently never fire.
+panic_kill = "ctrl+alt+end"
+# Dev-only test hotkey — opens a new tab in the debug Chrome window via the exact same code path
+# Forms itself uses, without the LLM loop around it. Only does anything under the `debug` Cargo
+# feature; harmless to parse otherwise.
+debug_open_tab = "ctrl+shift+alt+z"
+
+[visuals]
+indicator_corner = "top_right"
+indicator_size = 4
+indicator_offset = [4, 4]
+color_ready = "#00FF00"
+color_processing = "#FF0000"
+color_error = "#FFFF00"
+
+form_indicator_corner = "top_right"
+form_indicator_offset = [4, 12]
+form_color_running = "#FFFF00"
+form_color_failed = "#FF0000"
+form_color_aborted = "#808080"
+
+overlay_enabled = true
+overlay_corner = "bottom_left"
+overlay_offset = [8, 8]
+overlay_font_size = 14
+crawl_trigger_lines = 2
+crawl_ms_per_line = 2000
+
+[http]
+connect_timeout_secs = 10
+read_timeout_secs = 60
+
+[forms]
+max_pages = 20
+max_images_per_request = 6
+max_image_long_edge_px = 1200
+
+[knowledge]
+enabled = true
+max_doc_bytes = 100000

@@ -1,0 +1,38 @@
+name: v3 Checks
+
+on:
+  push:
+    branches: [ "v3", "main" ]
+    paths:
+      - "shadow_prompt_v3/**"
+      - ".github/workflows/check_v3.yml"
+  pull_request:
+    paths:
+      - "shadow_prompt_v3/**"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check & Test (v3)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: shadow_prompt_v3
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: shadow_prompt_v3 -> target
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --lib

@@ -1,0 +1,2 @@
+DELIVERY
+Output the final answer directly as your response text, formatted per the ANSWER FORMAT rules above. Do not call a tool to deliver the answer itself — tools here are only for looking something up (a knowledge doc, a web search) before you answer, never for the answer's delivery.
