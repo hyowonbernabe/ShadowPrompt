@@ -403,17 +403,24 @@ function's own comment had flagged as unverified: it now requires the *focused* 
 stale/background one if multiple tabs are open. See design doc §7.3 for the full writeup.
 Verified: `cargo check`/`clippy --all-targets -- -D warnings`/`test` clean, 54/54.
 
-**Second post-M8 fix, same testing pass — attempted, then reverted as a regression**:
+**Second post-M8 fix, same testing pass — three iterations, real upstream bug found**:
 `open_forms_tab` opened a brand new top-level browser *window* instead of a new tab in the debug
-window (confirmed by two separate taskbar thumbnails). First attempt: `browser.new_page
-(form_url)` left CDP's `newWindow` field unset, so it was set explicitly via `.new_window(false)`
-on a `CreateTargetParams`. That broke tab creation outright on the very next live test —
-`Target.createTarget` failed every time with CDP error -32000 "Failed to open new tab - no
-browser is open," a known quirk where explicit `false` needs browser-window bookkeeping that a
-CDP-*attached* (not CDP-*launched*) browser doesn't have. **Reverted** back to the bare-URL call
-— confirmed working in every test run before this field was ever touched — leaving the original
-"opens as a window" report open rather than trading it for a worse, total failure. Also (this
-part kept): `SetFormIndicator`/`FormIndicatorState` (top-right pixel, stacked under the main
+window. A dedicated dev-only test hotkey (`debug_open_tab`, Ctrl+Shift+Alt+Z) was added
+specifically to iterate on this without a full Forms/LLM run each time:
+1. Bare URL (`new_window` unset) — opens a new window every time.
+2. Explicit `new_window(false)` — CDP error -32000 "Failed to open new tab - no browser is
+   open" outright.
+3. `for_tab(true)` — user-confirmed working (real tab, existing window), but then chromiumoxide
+   0.9.1's own handler panics (`Browser::new_page` requires the new target already be in its
+   internal map when the `createTarget` response arrives; hard-`panic!`s instead of retrying if
+   the separate `Target.targetCreated` event hasn't landed yet — confirmed as a genuine crate bug
+   by reading its source, which has its own `// TODO can this even happen?` next to the panic).
+
+**Final fix**: keep `for_tab(true)`, stop calling `Browser::new_page` (the panicking path).
+Issue the raw `Target.createTarget` via `Browser::execute` (plain passthrough, no special
+post-processing), then poll `Browser::get_page` with a short bounded retry for the same
+"event hasn't landed yet" race, tolerated instead of asserted impossible. Also (from the first
+attempt, kept): `SetFormIndicator`/`FormIndicatorState` (top-right pixel, stacked under the main
 indicator) were fully wired in the UI layer since scaffolding but never actually sent —
 `forms_run.rs`'s own header comment said so. Wired now: `Running` before `execute_form_flow`,
 `Hidden` right after, regardless of outcome. Verified: `cargo check`/`clippy --all-targets -- -D

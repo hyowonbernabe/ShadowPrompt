@@ -283,19 +283,30 @@ Verified live, against a real form, using browser automation tooling in this ses
   isn't a Forms URL at all, rather than falling back to scanning the rest. Other browsers (Brave,
   a second Chrome instance) were never in scope either way — `browser.pages()` only ever sees
   targets belonging to the one CDP-attached debug Chrome process this app itself launched.
-- **New Forms tab opened as a separate OS window instead of a tab — attempted fix reverted as a
-  regression, still open**: `open_forms_tab` called `browser.new_page(form_url)` with a bare
-  URL, leaving CDP's `Target.createTarget` `newWindow` field unset — documented as "false by
-  default," but the user observed a brand new top-level window (two side-by-side taskbar
-  thumbnails). Tried setting `.new_window(false)` explicitly; that broke tab creation outright
-  on the very next live run with CDP error -32000 "Failed to open new tab - no browser is open"
-  — explicit `false` apparently needs browser-window bookkeeping that a CDP-*attached* (this
-  app's `Browser::connect`, not a CDP-*launched* browser) doesn't have, unlike leaving the field
-  unset. Reverted to the bare-URL call. The original "opens as a window" report is still
-  unresolved — next angle to try, if it recurs: confirm via the debug Chrome window itself
-  whether this is a genuinely separate OS window or actually just Chrome's normal per-tab
-  taskbar-thumbnail UI (each tab gets its own preview card even within one window on Windows),
-  since that would mean there's no bug here at all.
+- **New Forms tab opened as a separate OS window instead of a tab — real fix, found through a
+  genuine upstream chromiumoxide bug**: `open_forms_tab` called `browser.new_page(form_url)`
+  with a bare URL, leaving CDP's `Target.createTarget` `newWindow` field unset — documented as
+  "false by default," but the user directly observed a brand new top-level window every time.
+  Isolated and iterated on fast via a dedicated dev-only test hotkey (`debug_open_tab`,
+  Ctrl+Shift+Alt+Z — opens a tab with none of the LLM loop around it) rather than running a full
+  Forms flow for every attempt:
+  1. Bare URL (`new_window` unset) — opens a new window every time.
+  2. Explicit `new_window(false)` — CDP error -32000 "Failed to open new tab - no browser is
+     open" outright.
+  3. `for_tab(true)` (CDP's more direct "create a Tab-type target" flag) — **this one actually
+     works**, confirmed directly by the user watching it open a real tab in the existing window.
+     But then chromiumoxide's own handler panicked: `Browser::new_page` waits on the new
+     target's id already being in its internal map (populated by the separate, async
+     `Target.targetCreated` event) before it'll construct a `Page`, and hard-`panic!`s instead
+     of retrying if that event hasn't landed yet — a genuine upstream race, confirmed by reading
+     chromiumoxide 0.9.1's own source, which has a `// TODO can this even happen?` right next to
+     the panic.
+  - **Final fix**: keep `for_tab(true)` (it's what gets the right tab/window behavior), but stop
+    routing through `Browser::new_page` (the code path that panics). Issue the raw
+    `Target.createTarget` command via `Browser::execute` instead — a plain command/response
+    passthrough with none of `new_page`'s special-cased post-processing — then separately poll
+    `Browser::get_page` for the resulting target with a short bounded retry, tolerating the same
+    "the event hasn't landed yet" race by retrying rather than asserting it can't happen.
 - **Top-right "Forms is running" pixel indicator — real gap, never wired**: `SetFormIndicator`/
   `FormIndicatorState` (a separate small pixel stacked under the main indicator, `top_right`,
   §10/config) were fully defined and handled in the UI layer since scaffolding, but nothing in
