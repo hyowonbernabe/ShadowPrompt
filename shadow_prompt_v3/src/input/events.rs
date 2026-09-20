@@ -16,8 +16,13 @@ pub enum InputEvent {
     SwitchModel,
     // Google Forms
     LaunchDebugger,
+    /// v3 legacy (design doc §7.4) — default/primary as of 2026-09-20.
     FormsAnswerPage,
     FormsAnswerAll,
+    /// v3 new (design doc §7.3) — AX-tree read + `fill_page` agentic loop, parked/secondary,
+    /// moved off the main binds but kept reachable.
+    FormsAnswerPageAxtree,
+    FormsAnswerAllAxtree,
     // Utility
     Abort,
     HideToggle,

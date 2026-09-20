@@ -22,7 +22,7 @@ pub async fn execute(ctx: &ActionContext) {
 
 fn build_help_text(ctx: &ActionContext) -> String {
     let h = &ctx.config.hotkeys;
-    let rows: [(&str, &str); 13] = [
+    let rows: [(&str, &str); 15] = [
         (&h.clipboard_query, "Answer (clipboard)"),
         (&h.screenshot_query, "Answer (screen region)"),
         (&h.test_model, "Test which model is answering"),
@@ -30,6 +30,8 @@ fn build_help_text(ctx: &ActionContext) -> String {
         (&h.launch_debugger, "Launch Chrome on :9222"),
         (&h.forms_answer_page, "Forms: answer this page"),
         (&h.forms_answer_all, "Forms: answer all pages"),
+        (&h.forms_answer_page_axtree, "Forms [v3 new]: answer this page"),
+        (&h.forms_answer_all_axtree, "Forms [v3 new]: answer all pages"),
         (&h.abort, "Abort current task"),
         (&h.hide_toggle, "Hide / show UI"),
         (&h.help_toggle, "Toggle this help"),

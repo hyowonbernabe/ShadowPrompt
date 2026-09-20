@@ -11,6 +11,7 @@
 // without tracking an explicit page number.
 
 pub mod fill;
+pub mod legacy;
 pub mod read;
 pub mod screenshot_tool;
 pub mod tab_lifecycle;
@@ -329,7 +330,10 @@ async fn find_active_forms_url(
     }
 }
 
-fn is_forms_url(url: &str) -> bool {
+/// `pub(crate)` so `legacy/mod.rs` (design doc §7.4) reuses this instead of re-deriving the same
+/// URL-shape check a second time — legacy shares this bit of Forms-URL recognition even though it
+/// doesn't share the rest of this module's tab-opening/AX-tree machinery.
+pub(crate) fn is_forms_url(url: &str) -> bool {
     url.contains("docs.google.com/forms") || url.contains("forms.gle")
 }
 

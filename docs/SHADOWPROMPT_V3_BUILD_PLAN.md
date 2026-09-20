@@ -709,7 +709,7 @@ warnings`/`test`, both default and `--features debug`, all clean, 54/54.
 
 ---
 
-## M13 — v3 legacy Forms: reading + already-answered enforcement — NEW, added 2026-09-20
+## M13 — v3 legacy Forms: reading + already-answered enforcement — DONE, 2026-09-20
 
 **Goal**: after extended live testing left v3 new (§7.3) unable to reliably type or answer
 questions at all, build v3 legacy (design doc §7.4) as the new default Forms engine. This
@@ -745,7 +745,25 @@ against unit fixtures.
 
 ---
 
-## M14 — v3 legacy Forms: agentic answer (no fill tool) + parse/inject — NEW, added 2026-09-20
+**Status**: verified (`cargo check`/`clippy --all-targets -- -D warnings`/`test`, default and
+`--features debug`, all clean, 69/69 — up from 54/54 pre-M13). Ported `EXTRACTOR_JS` into
+`browser/forms/legacy/extractor.rs`, run via `Page::evaluate()` (chromiumoxide's async
+equivalent of v2's sync `tab.evaluate()`) instead of a second, separate browser-automation crate —
+no `headless_chrome` dependency added, keeping one Chrome-automation stack in the binary. All four
+design-doc §7.4 patches implemented directly in the JS (no `if (!text) return`, no `data:` filter,
+page-level heading/description capture, per-row `blank_rows` on Grid/CheckboxGrid) plus a new
+`QuestionKind::Unknown` variant for a field with no recognized input control at all, so a
+heading-less, control-less field still surfaces as *something* rather than vanishing. Tested via
+hand-built JSON fixtures matching the extractor's own `JSON.stringify` output shape (same
+constraint M6/M7/read.rs already documented: the JS itself can't run outside a real Chrome in this
+environment, only the Rust-side parsing/`needs_attention` logic is unit-testable here — consistent
+with design doc §13's "test the real thing" posture, not a gap specific to this milestone).
+`Question::needs_attention()` is the already-answered gate: whole-field for every kind except
+Grid/CheckboxGrid, which are judged by `blank_rows` — directly fixes the v2 defect found while
+designing this (a partially-filled grid's collective `current_value` reads as "answered" the
+instant any one row has a pick).
+
+## M14 — v3 legacy Forms: agentic answer (no fill tool) + parse/inject — DONE, 2026-09-20
 
 **Goal**: the answering and filling half. Model keeps real reasoning/search/docs capability via
 `run_turn`, but filling is code-driven from one final structured-text answer, never a tool call —
@@ -778,7 +796,22 @@ the fill step.
 
 ---
 
-## M15 — v3 legacy Forms: current-page multi-step flow + hotkey split — NEW, added 2026-09-20
+**Status**: verified. `delivery_forms_legacy.txt` added (`forms_legacy_prompt()` in
+`system_prompts.rs`) — restates the already-answered-skip and no-submit rules directly, on top of
+`base.txt`'s general posture, matching design doc §9's addendum convention. `execute_legacy_form_flow`
+calls `run_turn` with only `list_docs`/`read_doc`/`web_search` attached (`web_search` is
+auto-added inside `run_turn` itself, same as every other entry point) — **no `fill_page` tool, no
+browser-interaction tool of any kind**. The model's final turn is parsed by `parse_answers`, ported
+verbatim from `shadow_prompt_v2/src/browser/forms/mod.rs` (clean-JSON path plus the
+balanced-brace/prose-wrapped fallback), then injected via `browser/forms/legacy/injector.rs`
+(v2's `injector.rs` ported, patched with a live-DOM re-check in every branch — `if (dateInput.value)
+continue`, `groupAlreadyChecked(g)`, etc. — so the write-lock is enforced at the moment of acting,
+regardless of what the parsed answer map contains, not just relying on the model having been asked
+nicely). This is the direct fix for the failure class that made v3 new unusable: no tool call
+drives filling, so there is no tool schema for a model to call with empty/malformed arguments and
+no tool-loop for it to get stuck retrying.
+
+## M15 — v3 legacy Forms: current-page multi-step flow + hotkey split — DONE, 2026-09-20
 
 **Goal**: wire M13/M14 into the two Forms hotkeys, operating directly on the already-open tab (no
 new background tab, no tab-closing logic, no page-count cap — all explicitly dropped per design
@@ -807,3 +840,26 @@ via v3 legacy on the default binds; `forms_answer_page_axtree`/`forms_answer_all
 invoke v3 new, unchanged, on the new binds — both reachable in the same build.
 
 **Depends on**: M14.
+
+**Status**: verified (`cargo check`/`clippy --all-targets -- -D warnings`/`test`, default and
+`--features debug`, all clean, 69/69). `browser/forms/legacy/mod.rs`'s `advance_to_next_page`
+ported v2's `submit_guard.rs` selectors almost verbatim (`div[role="button"][aria-label*="Next"/
+"Submit"]`), using chromiumoxide's own `Page::find_element`/`Element::click` — the same
+CSS-selector-based public API v3 new's own module doc (`fill.rs`) already confirmed is the only
+public way to get an `Element` from this crate, just used directly here instead of needing the
+AX-tree/`backend_dom_node_id` bridge `fill.rs` had to build for its AX-driven lookups. `forms_run.rs`
+(v3 new's action handler) is untouched; a new `forms_run_legacy.rs` mirrors its `FormIndicator`
+wiring for the legacy engine. `HotkeysConfig` gained `forms_answer_page_axtree`/
+`forms_answer_all_axtree` with `#[serde(default)]` (`ctrl+shift+alt+j`/`u`) so an existing
+`config.toml` written before this pair existed still parses without a forced `--init` rerun.
+`InputEvent`/`bindings.rs`/`actions/mod.rs::dispatch` all extended with the two new variants;
+`help_toggle.rs`'s cheat sheet grew from 13 to 15 rows. Confirmed by reading the diff (not just
+asserted): no call anywhere in `browser/forms/legacy/` touches `tab_lifecycle::open_forms_tab`/
+`safe_to_close`, and there is no page-count loop bound at all in `execute_legacy_form_flow` — both
+match design doc §7.4's explicit drops. Not verified, and cannot be without a live Google Form (no
+browser available in this environment, the same honest constraint every prior Forms milestone in
+this plan has carried): whether the ported extractor/injector selectors and the best-effort
+page-description heuristic actually match Google's current live markup. That is the actual reason
+v3 legacy exists — v2's underlying selector approach was the proven-reliable half of this rebuild,
+carried forward rather than re-invented — but "v2's approach worked before" is not the same claim
+as "confirmed working today," and this should be the first thing tried against a real form.

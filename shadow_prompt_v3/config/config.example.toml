@@ -27,6 +27,10 @@ switch_model = "ctrl+shift+alt+m"
 launch_debugger = "ctrl+shift+alt+b"
 forms_answer_page = "ctrl+shift+alt+g"
 forms_answer_all = "ctrl+shift+alt+f"
+# v3 new (AX-tree/fill_page engine, parked/secondary as of 2026-09-20) — kept reachable on
+# deliberately-obscure binds while v3 legacy (above) is the default. See design doc §7.4/§10.
+forms_answer_page_axtree = "ctrl+shift+alt+j"
+forms_answer_all_axtree = "ctrl+shift+alt+u"
 abort = "ctrl+shift+alt+c"
 hide_toggle = "ctrl+shift+alt+h"
 help_toggle = "ctrl+shift+alt+slash"

@@ -18,6 +18,8 @@ pub fn build(cfg: &HotkeysConfig) -> anyhow::Result<Vec<Binding>> {
         Binding { combo: parse(&cfg.launch_debugger)?, make_event: || InputEvent::LaunchDebugger },
         Binding { combo: parse(&cfg.forms_answer_page)?, make_event: || InputEvent::FormsAnswerPage },
         Binding { combo: parse(&cfg.forms_answer_all)?, make_event: || InputEvent::FormsAnswerAll },
+        Binding { combo: parse(&cfg.forms_answer_page_axtree)?, make_event: || InputEvent::FormsAnswerPageAxtree },
+        Binding { combo: parse(&cfg.forms_answer_all_axtree)?, make_event: || InputEvent::FormsAnswerAllAxtree },
         Binding { combo: parse(&cfg.abort)?, make_event: || InputEvent::Abort },
         Binding { combo: parse(&cfg.hide_toggle)?, make_event: || InputEvent::HideToggle },
         Binding { combo: parse(&cfg.help_toggle)?, make_event: || InputEvent::HelpToggle },

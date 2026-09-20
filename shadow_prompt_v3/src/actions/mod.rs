@@ -7,6 +7,7 @@ pub mod abort_active;
 pub mod clipboard_query;
 pub mod debug_open_tab;
 pub mod forms_run;
+pub mod forms_run_legacy;
 pub mod help_toggle;
 pub mod hide_toggle;
 pub mod launch_debugger;
@@ -66,10 +67,19 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
             spawn_exclusive(ctx.answer_task.clone(), ctx.clone(), |c| async move { test_model::execute(c).await }).await;
         }
         InputEvent::SwitchModel => switch_model::execute(&ctx),
+        // Design doc §7.4: v3 legacy is the default/primary engine as of 2026-09-20 — it takes
+        // over these two main binds. v3 new (AX-tree/fill_page loop, §7.3) moved to the
+        // `*Axtree` binds below, parked but reachable, not deleted.
         InputEvent::FormsAnswerPage => {
-            spawn_exclusive(ctx.forms_task.clone(), ctx.clone(), |c| async move { forms_run::execute(c, forms_run::Mode::AnswerPage).await }).await;
+            spawn_exclusive(ctx.forms_task.clone(), ctx.clone(), |c| async move { forms_run_legacy::execute(c, forms_run_legacy::Mode::AnswerPage).await }).await;
         }
         InputEvent::FormsAnswerAll => {
+            spawn_exclusive(ctx.forms_task.clone(), ctx.clone(), |c| async move { forms_run_legacy::execute(c, forms_run_legacy::Mode::AnswerAll).await }).await;
+        }
+        InputEvent::FormsAnswerPageAxtree => {
+            spawn_exclusive(ctx.forms_task.clone(), ctx.clone(), |c| async move { forms_run::execute(c, forms_run::Mode::AnswerPage).await }).await;
+        }
+        InputEvent::FormsAnswerAllAxtree => {
             spawn_exclusive(ctx.forms_task.clone(), ctx.clone(), |c| async move { forms_run::execute(c, forms_run::Mode::AnswerAll).await }).await;
         }
         InputEvent::LaunchDebugger => {

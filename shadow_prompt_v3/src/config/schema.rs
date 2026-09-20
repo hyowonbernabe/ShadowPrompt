@@ -48,8 +48,15 @@ pub struct HotkeysConfig {
     pub switch_model: String,
     // Google Forms
     pub launch_debugger: String,
+    /// v3 legacy (design doc §7.4) — default/primary as of 2026-09-20.
     pub forms_answer_page: String,
     pub forms_answer_all: String,
+    /// v3 new (design doc §7.3) — AX-tree/`fill_page` engine, parked but kept reachable.
+    /// `#[serde(default)]` so a config file written before this pair existed still parses.
+    #[serde(default = "default_forms_answer_page_axtree")]
+    pub forms_answer_page_axtree: String,
+    #[serde(default = "default_forms_answer_all_axtree")]
+    pub forms_answer_all_axtree: String,
     // Utility
     pub abort: String,
     pub hide_toggle: String,
@@ -106,6 +113,12 @@ fn default_crawl_ms_per_line() -> u64 {
 }
 fn default_debug_open_tab() -> String {
     "ctrl+shift+alt+z".to_string()
+}
+fn default_forms_answer_page_axtree() -> String {
+    "ctrl+shift+alt+j".to_string()
+}
+fn default_forms_answer_all_axtree() -> String {
+    "ctrl+shift+alt+u".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

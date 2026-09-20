@@ -78,6 +78,8 @@ mod tests {
                 launch_debugger: "VK_F5".to_string(),
                 forms_answer_page: "VK_F6".to_string(),
                 forms_answer_all: "VK_F7".to_string(),
+                forms_answer_page_axtree: "VK_F14".to_string(),
+                forms_answer_all_axtree: "VK_F15".to_string(),
                 abort: "VK_F8".to_string(),
                 hide_toggle: "VK_F9".to_string(),
                 help_toggle: "VK_F10".to_string(),
