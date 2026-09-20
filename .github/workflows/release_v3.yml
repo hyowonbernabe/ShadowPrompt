@@ -49,7 +49,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          prerelease: true
+          # A tag with a suffix (v3.0.0-beta.3) is a prerelease; a plain vX.Y.Z tag is a real one.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           make_latest: true
           files: |
             shadow_prompt_v3/target/release/shadowprompt.exe
