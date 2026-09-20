@@ -1,7 +1,12 @@
-// Insta-delete: wipe clipboard, remove PATH entry, spawn detached hidden PowerShell that deletes
-// install dir + exe after this process exits. Ported as-is from v2. No watchdog/dead-man's-switch
+// Insta-delete: wipe clipboard, remove PATH entry, spawn hidden PowerShell that deletes install
+// dir + exe after this process exits. Ported as-is from v2. No watchdog/dead-man's-switch
 // involvement — design doc §11: that's a separate, deferred feature, this is the direct
 // double-tap-triggered path only.
+//
+// Same bug as `self_restart.rs` (found and fixed there first): `DETACHED_PROCESS |
+// CREATE_NO_WINDOW` makes `spawn()` report success while the PowerShell host silently never runs
+// the cleanup script — no crash, no error, no deletion. `CREATE_NO_WINDOW` alone is enough to
+// keep the cleanup invisible; `DETACHED_PROCESS` is what broke it, so it's dropped here too.
 
 use std::os::windows::process::CommandExt;
 use std::path::Path;
@@ -12,7 +17,6 @@ use crate::config::paths::exe_dir;
 
 use super::path_cleanup;
 
-const DETACHED_PROCESS: u32 = 0x00000008;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 pub fn execute() -> anyhow::Result<()> {
@@ -37,7 +41,7 @@ pub fn execute() -> anyhow::Result<()> {
 
     Command::new("powershell.exe")
         .args(["-WindowStyle", "Hidden", "-NoProfile", "-NonInteractive", "-Command", &ps])
-        .creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW)
+        .creation_flags(CREATE_NO_WINDOW)
         .spawn()?;
 
     std::process::exit(0);

@@ -22,7 +22,7 @@ pub async fn execute(ctx: &ActionContext) {
 
 fn build_help_text(ctx: &ActionContext) -> String {
     let h = &ctx.config.hotkeys;
-    let rows: [(&str, &str); 15] = [
+    let rows: [(&str, &str); 13] = [
         (&h.clipboard_query, "Answer (clipboard)"),
         (&h.screenshot_query, "Answer (screen region)"),
         (&h.test_model, "Test which model is answering"),
@@ -30,8 +30,6 @@ fn build_help_text(ctx: &ActionContext) -> String {
         (&h.launch_debugger, "Launch Chrome on :9222"),
         (&h.forms_answer_page, "Forms: answer this page"),
         (&h.forms_answer_all, "Forms: answer all pages"),
-        (&h.forms_answer_page_axtree, "Forms [v3 new]: answer this page"),
-        (&h.forms_answer_all_axtree, "Forms [v3 new]: answer all pages"),
         (&h.abort, "Abort current task"),
         (&h.hide_toggle, "Hide / show UI"),
         (&h.help_toggle, "Toggle this help"),
@@ -46,6 +44,12 @@ fn build_help_text(ctx: &ActionContext) -> String {
 
     let mut all_rows: Vec<(&str, &str)> = rows.into_iter().collect();
     all_rows.push(FIXED_ESCAPE_ROW);
+    // v3 new (AX-tree engine) is untested/not working as of 2026-09-21 — dead keys outside a
+    // debug build (see actions::mod::dispatch), so hidden from the cheat sheet outside one too.
+    #[cfg(feature = "debug")]
+    all_rows.push((&h.forms_answer_page_axtree, "[debug] Forms [v3 new]: answer this page"));
+    #[cfg(feature = "debug")]
+    all_rows.push((&h.forms_answer_all_axtree, "[debug] Forms [v3 new]: answer all pages"));
     // Dev-only test hotkey (actions::debug_open_tab) — does nothing in a production build, so it
     // doesn't belong in the cheat sheet a real build shows either.
     #[cfg(feature = "debug")]

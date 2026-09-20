@@ -1,17 +1,23 @@
-// Self-restart: spawn detached hidden PowerShell that relaunches the exe after a brief delay,
-// then exit cleanly.
+// Self-restart: spawn a hidden PowerShell that relaunches the exe after a brief delay, then exit
+// cleanly.
 //
 // Real bug found by actually using this (not caught by any test): the relaunch passed no CLI
 // args at all, so `--debug` (and anything else the user launched with) silently vanished on
 // restart — the new instance came back up with no console/logging attached, which looks
 // indistinguishable from "it just died" if you were watching the terminal that started the
 // original one. Fixed: forward the current process's actual args to the relaunch.
+//
+// Second real bug, found the same way: `creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW)`
+// made `spawn()` report success (a real PID came back) but the PowerShell host never actually
+// ran the `-Command` script — no relaunch, no error, nothing. Confirmed in isolation with a
+// throwaway example binary: `CREATE_NO_WINDOW` alone relaunches fine; adding `DETACHED_PROCESS`
+// on top breaks it every time. `CREATE_NO_WINDOW` is sufficient on its own to keep the relauncher
+// invisible, so `DETACHED_PROCESS` is dropped entirely rather than worked around.
 
 use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::Command;
 
-const DETACHED_PROCESS: u32 = 0x00000008;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 pub fn execute() -> anyhow::Result<()> {
@@ -30,7 +36,7 @@ pub fn execute() -> anyhow::Result<()> {
 
     Command::new("powershell.exe")
         .args(["-WindowStyle", "Hidden", "-NoProfile", "-NonInteractive", "-Command", &ps])
-        .creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW)
+        .creation_flags(CREATE_NO_WINDOW)
         .spawn()?;
 
     std::process::exit(0);

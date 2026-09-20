@@ -76,10 +76,16 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
         InputEvent::FormsAnswerAll => {
             spawn_exclusive(ctx.forms_task.clone(), ctx.clone(), |c| async move { forms_run_legacy::execute(c, forms_run_legacy::Mode::AnswerAll).await }).await;
         }
+        // v3 new (AX-tree engine) is untested/not working as of 2026-09-21 — hidden from real
+        // usage by gating it behind the `debug` feature, same convention as `debug_open_tab`.
+        // A release build never has this feature on, so these binds are dead keys in production
+        // until v3 new is actually finished and re-enabled.
         InputEvent::FormsAnswerPageAxtree => {
+            #[cfg(feature = "debug")]
             spawn_exclusive(ctx.forms_task.clone(), ctx.clone(), |c| async move { forms_run::execute(c, forms_run::Mode::AnswerPage).await }).await;
         }
         InputEvent::FormsAnswerAllAxtree => {
+            #[cfg(feature = "debug")]
             spawn_exclusive(ctx.forms_task.clone(), ctx.clone(), |c| async move { forms_run::execute(c, forms_run::Mode::AnswerAll).await }).await;
         }
         InputEvent::LaunchDebugger => {
