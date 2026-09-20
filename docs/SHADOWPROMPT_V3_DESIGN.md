@@ -254,7 +254,23 @@ Verified live, against a real form, using browser automation tooling in this ses
   live URL each time; no per-page-number URL exists. This means there is no way to link directly to
   "page 3" — reaching it requires physically advancing through the pages before it.
 
-### 7.3 The rebuilt automation engine
+### 7.3 v3 new — accessibility-tree engine (secondary, parked as of 2026-09-20)
+
+**Status change, 2026-09-20**: after extended live testing, this engine could not be made to
+reliably type or answer questions at all — every real run hit a new error (see the chain of four
+sequential upstream/logic bugs documented inline below and in the build plan's M8 section: a
+chromiumoxide target-type mismatch, a `window.open` self-reference serialization failure, a
+read-before-navigation-finished race, and a genuine infinite `fill_page({})` loop with nothing left
+to stop it once `MAX_LOOP_ROUNDS` was removed). Rather than keep debugging an engine built on two
+compounding sources of risk — chromiumoxide's own upstream gaps around newer tab-target types, and
+AX-role strings that were never verified against a live Google Form — the decision was made to
+build a second engine (§7.4, "v3 legacy") that removes both risk sources at once, promote it to the
+default, and park this one. **This code is not deleted.** It stays in the tree, reachable via its
+own secondary hotkeys (§10), to be revisited once v3 legacy is solid. Nothing below this note was
+rewritten to pretend it always worked — it's kept as the honest record of what was tried and why it
+didn't hold up outside unit tests.
+
+**The rebuilt automation engine, as built:**
 - **Engine**: `chromiumoxide` (pure Rust, async-native CDP client), replacing `headless_chrome`.
   No Node.js, no Playwright-the-library dependency — confirmed that even Playwright's own Rust
   binding (`playwright-rust`/`playwright-rs`) still spawns Playwright's Node driver process
@@ -467,6 +483,94 @@ Verified live, against a real form, using browser automation tooling in this ses
   itself at a time. **Abort stops both slots at once**, unconditionally — simplest, matches "get me
   out of whatever's happening right now."
 
+### 7.4 v3 legacy — JS-extraction engine (primary, default as of 2026-09-20)
+
+Built to replace v3 new as the default, keeping v3's reasoning/tool capability but reading/filling
+the page the way v2 did (a proven-reliable technique) instead of chromiumoxide's AX-tree read
+(§7.3's never-verified AX-role guessing) and the `fill_page` agentic tool loop (§7.3's fill-loop
+hang/infinite-loop bugs). Same hard non-negotiables as v3 new (never submit, never overwrite an
+already-answered field) — enforced the same defense-in-depth way, just built on different plumbing.
+
+- **Reading**: still `chromiumoxide`, but reads via plain `Page::evaluate()` running v2's
+  `EXTRACTOR_JS`/per-type selector JS — ported, not rewritten from scratch — patched for all three
+  confirmed v2 gaps (§7.1) plus one more found while designing this:
+  1. Remove `if (!text) return` — a heading-less (image-only) question still produces a field.
+  2. Remove the `data:`-URI filter on image collection — inline images survive.
+  3. Capture page-level heading/paragraph text (outside any `[role="listitem"]`) as page context —
+     v2 never read this at all.
+  4. **Grid/matrix rows get individual blank/filled tracking**, not one collective JSON blob per
+     question. v2's original extractor reported a Grid's `current_value` as the whole row→choice
+     map, which reads as "answered" the instant *any* row has a pick — a partially-filled grid was
+     silently treated as fully answered and skipped wholesale. Fixed by tracking each row's
+     filled/blank state individually, matching the row-level granularity §7.3 already established
+     for v3 new.
+- **Already-answered handling — same posture as §7.3, not v2's original "just don't send it"
+  approach**: the model sees every question/row, answered or not, as real context (an answered
+  question can be a clue or setup for a later one) — nothing is hidden. The system prompt tells it
+  to recognize and skip anything already answered, and explicitly states there is no way around
+  this and not to look for one. **On top of that**, the fill/injection step only ever writes into a
+  field/row that was independently identified as blank at read time — the model has no code path
+  to alter an existing value no matter what it outputs, same belt-and-suspenders guarantee as v3
+  new, just enforced by the legacy injector instead of `fill_page`'s live-DOM re-check. Grid rows
+  get row-level enforcement (only blank rows are writable); checkbox questions stay whole-question
+  skip if any pick already exists, same reasoning as §7.3 (no reliable way to tell "stopped
+  partway" from "chose fewer on purpose").
+- **Answering — agentic, but filling is not.** `run_turn` is used (same core loop as Clipboard/
+  Screenshot), with `list_docs`, `read_doc`, and `web_search` attached as real tools — the model
+  can still reason, search, and check the knowledge folder. **No `fill_page` tool, no
+  browser-interaction tool of any kind is exposed.** The model's final turn is one structured
+  JSON answer map (`{"q0": "answer", ...}`), the same delivery contract v2 used, parsed with v2's
+  existing balanced-brace `parse_answers` fallback for when a weaker model wraps it in prose. This
+  is the specific fix for the failure mode that made v3 new unusable: with no tool call driving the
+  fill action, there is no schema for a model to call with empty/malformed arguments and no
+  tool-loop for it to get stuck retrying — the entire class of bug that caused v3 new's 300+-round
+  hang and its empty-`fill_page({})` infinite loop (§7.3) cannot occur here, because filling was
+  never a decision inside the loop to begin with. Images extracted from the page are attached as
+  image content parts on the initial user message, same as before — vision works the same way, no
+  separate screenshot tool needed.
+- **Filling**: code parses the final answer JSON, builds v2's `injector.rs`-style JS (fuzzy
+  label matching, not exact-string) patched for the same grid-row targeting as the extractor, and
+  runs it via `Page::evaluate()`. Fire-and-forget like v2 (no per-field success/failure feedback
+  loop back to the model) — an accepted simplification, consistent with dropping the agentic fill
+  loop entirely.
+- **No separate background tab, no tab-closing logic.** Operates directly on whichever Forms tab
+  is already open and focused — exactly v2's behavior, and simpler than §7.3's tab-open/tab-safety
+  machinery, which is dropped for this engine. Reuses the existing focused-tab-detection logic
+  (`document.hasFocus()`-based lookup) to find which tab to act on, since that part is generic
+  Chrome-connection plumbing, not something specific to opening a new tab.
+- **No walk-from-page-1 logic.** §7.3 needed this because opening a *new* tab reloads Forms back to
+  page 1 with no memory of where the user actually was. Since this engine never opens a new tab, it
+  simply acts on whatever page the already-open tab is currently showing — a direct consequence of
+  dropping the separate-tab requirement above, not a separately re-litigated design choice.
+  `forms_answer_page` reads/answers/fills the current page and stops.
+  `forms_answer_all` keeps going from the current page: read → answer/fill → find Next and click it
+  → repeat, stopping the instant only a Submit control remains (never clicked, same hard
+  non-negotiable as §7.3) — no re-checking earlier pages, since it's already starting from wherever
+  the user's own tab is.
+- **No page-count safety cap.** Dropped, same reasoning and same accepted risk as the `run_turn`
+  round-cap removal (§2): a form whose Next never resolves to Submit could loop until manually
+  Aborted. Explicitly chosen over re-adding a cap.
+- **Cross-page memory in `forms_answer_all`**: same flattened-text-prepend approach as §7.3 (prior
+  pages' content + this run's own answers for them, prepended as extra context to each new page) —
+  `run_turn` still has no multi-turn history parameter, so this inherits the same fidelity gap
+  §7.3/M8 already flagged and accepted, not a new one introduced here.
+- **Hotkeys — both engines live at once, not a config toggle.** v3 legacy takes over the current
+  default binds, `forms_answer_page` (`ctrl+shift+alt+g`) and `forms_answer_all`
+  (`ctrl+shift+alt+f`), since it's the one meant for daily use now. v3 new moves to two new,
+  deliberately-obscure binds — `forms_answer_page_axtree` (`ctrl+shift+alt+j`) and
+  `forms_answer_all_axtree` (`ctrl+shift+alt+u`) — kept reachable for continued testing, not
+  deleted, revisited later per §7.3's parking note. See §10.
+- **Tools deliberately kept to three for now**: `web_search`/`list_docs`/`read_doc` only, matching
+  Clipboard/Screenshot's existing tool set. Considered and explicitly deferred for simplicity: a
+  zoom-screenshot fallback tool, a calculator/expression evaluator, a current-date/time lookup.
+  Considered and explicitly rejected (not deferred — a real design boundary): any generic
+  browser-interaction tool in the claude-in-chrome/Playwright mold (`computer`, `form_input`,
+  `javascript_tool`, click-by-description) — those are built for a model that drives the browser
+  live itself, which is exactly the pattern being removed here, and a generic clicker has no
+  concept of "never click Submit" the way the purpose-built injector does. `get_page_text` (a raw
+  read-only text dump, as a fallback when the structured extractor misses an exotic widget) was
+  considered as a safe middle ground and also deferred for now, not rejected on principle.
+
 ## 8. Model fallback / OpenRouter configuration
 
 - Primary model: `google/gemini-3.5-flash-lite` (chosen for speed + multimodality + "smart
@@ -585,10 +689,17 @@ Verified live, against a real form, using browser automation tooling in this ses
   tool-use posture, per-question-type answer-content rules, AI-use-disclosure posture) plus a
   small per-mode **delivery addendum** — `delivery_general.txt` ("answer directly as your response
   text") and `delivery_forms.txt` ("call `fill_page` with the answer(s), shaped per the rules
-  above"). This was a refinement over the first proposal (base + Forms-only addendum): the real
-  shared/varying boundary is "what the correct answer looks like" (shared, large) vs. "how it gets
-  delivered" (small, varies) — both modes get a small symmetric addendum, not one bare default and
-  one bare-plus-extra.
+  above," v3 new/§7.3 only). This was a refinement over the first proposal (base + Forms-only
+  addendum): the real shared/varying boundary is "what the correct answer looks like" (shared,
+  large) vs. "how it gets delivered" (small, varies) — both modes get a small symmetric addendum,
+  not one bare default and one bare-plus-extra.
+  - **`delivery_forms_legacy.txt`, added for v3 legacy (§7.4)**: "answer with one JSON object
+    mapping question id → answer, shaped per the rules above" — v2's original delivery contract,
+    not a tool call. Explicitly restates, for this mode specifically, that already-answered
+    questions/rows must be skipped (recognized from context, never re-answered) and that there is
+    no submit capability and no way to invoke one — both stated directly rather than assumed
+    to carry over silently from `base.txt`'s general posture, since this addendum is the one place
+    that describes what this mode can actually output.
 - **No self-description anywhere.** Explicitly decided against v1's opening line ("You are a
   stealth AI assistant...") — pure behavior/output rules only. Same functional behavior, but
   nothing self-incriminating exists in the prompt if a request is ever logged or reviewed by
@@ -631,11 +742,13 @@ Verified live, against a real form, using browser automation tooling in this ses
   subject-specific/current-events. This was chosen specifically as the replacement for the rejected
   hard loop-cap (§2) — speed comes from this prompt guidance, not from code-enforced limits.
 
-## 10. Final hotkey list (13 total)
+## 10. Final hotkey list (15 total, as of 2026-09-20)
 
 Compared to v2's 13: two "_search" modifier hotkeys dropped (autonomous tool search now), two new
-ones added (`test_model`, `switch_model`) — plus Forms' new-tab behavior, which was absorbed into
-the existing `forms_answer_page`/`forms_answer_all` hotkeys rather than needing a third new one.
+ones added (`test_model`, `switch_model`), and Forms now carries **four** hotkeys instead of two —
+`forms_answer_page`/`forms_answer_all` are v3 legacy (§7.4, the default/primary engine as of
+2026-09-20) and `forms_answer_page_axtree`/`forms_answer_all_axtree` are v3 new (§7.3, parked but
+kept reachable), both pairs live simultaneously, not gated behind a config flag.
 
 **Answer**
 1. `clipboard_query` — clipboard text → answer, writes back + overlay (text only; an
@@ -647,22 +760,29 @@ the existing `forms_answer_page`/`forms_answer_all` hotkeys rather than needing 
 
 **Google Forms**
 5. `launch_debugger` — opens incognito Chrome/Edge with the debug port on, for manual login/navigation
-6. `forms_answer_page` — solve just the page you're stuck on (new background tab, walks forward, §7.3)
-7. `forms_answer_all` — solve the whole form the same way, stopping cleanly at Submit
+6. `forms_answer_page` — **v3 legacy** (§7.4, default/primary): solve the current page, stop.
+7. `forms_answer_all` — **v3 legacy** (§7.4, default/primary): solve from the current page onward,
+   stopping cleanly at Submit.
+8. `forms_answer_page_axtree` — **v3 new** (§7.3, parked/secondary): AX-tree read + `fill_page`
+   agentic loop, new-background-tab, walk-forward-from-page-1 behavior as originally designed.
+9. `forms_answer_all_axtree` — **v3 new** (§7.3, parked/secondary): same engine, multi-page.
 
 **Utility**
-8. `abort` — stops whatever's running in *either* task slot (§7.3)
-9. `hide_toggle` — one key, hides and un-hides everything
-10. `help_toggle` — shows/hides the hotkey cheat sheet
+10. `abort` — stops whatever's running in *either* task slot (§7.3)
+11. `hide_toggle` — one key, hides and un-hides everything
+12. `help_toggle` — shows/hides the hotkey cheat sheet
 
 **Lifecycle**
-11. `restart_daemon` — restarts the whole program
-12. `insta_delete` — double-tap, wipes everything, no confirmation
-13. `panic_kill` — wipes clipboard, exits immediately
+13. `restart_daemon` — restarts the whole program
+14. `insta_delete` — double-tap, wipes everything, no confirmation
+15. `panic_kill` — wipes clipboard, exits immediately
 
 Renamed from v2: `ocr_query` → `screenshot_query`, `forms_auto`/`forms_single` →
 `forms_answer_all`/`forms_answer_page`. Dropped from v2: `clipboard_query_search`,
-`ocr_query_search`.
+`ocr_query_search`. Default binds: `forms_answer_page` = `ctrl+shift+alt+g`, `forms_answer_all` =
+`ctrl+shift+alt+f` (unchanged — these are the binds muscle memory already uses, now pointed at v3
+legacy). New, deliberately-obscure binds for the parked engine: `forms_answer_page_axtree` =
+`ctrl+shift+alt+j`, `forms_answer_all_axtree` = `ctrl+shift+alt+u`.
 
 ## 11. Lifecycle / stealth (non-UI)
 

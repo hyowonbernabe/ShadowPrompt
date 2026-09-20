@@ -706,3 +706,104 @@ confirmed pre-existing by reproducing the same failures on a clean `git stash`. 
 mechanical one-line rewrites to `slice::as_chunks`/`as_chunks_mut` (clippy's own suggested form,
 stable in this toolchain), no behavior change. Verified: `cargo check`/`clippy --all-targets -- -D
 warnings`/`test`, both default and `--features debug`, all clean, 54/54.
+
+---
+
+## M13 — v3 legacy Forms: reading + already-answered enforcement — NEW, added 2026-09-20
+
+**Goal**: after extended live testing left v3 new (§7.3) unable to reliably type or answer
+questions at all, build v3 legacy (design doc §7.4) as the new default Forms engine. This
+milestone covers the *reading* half only — extraction and the already-answered write-lock, no
+answering/filling yet (M14).
+
+- Port v2's `EXTRACTOR_JS` (`shadow_prompt_v2/src/browser/forms/extractor.rs`) into
+  `shadow_prompt_v3`, run via `chromiumoxide`'s `Page::evaluate()` instead of `headless_chrome`'s
+  sync `tab.evaluate()`. Same `Question`/`QuestionKind` shape as v2, ported as-is where it isn't
+  one of the four patches below.
+- Patch the extractor for design doc §7.4's four fixes:
+  1. Remove `if (!text) return;` — heading-less/image-only questions still produce a `Question`.
+  2. Remove the `data:`-prefix filter in the image-collection line — inline images survive.
+  3. Add page-level heading/paragraph collection (outside any `[role="listitem"]`) into a new
+     `page_context: String` field the extractor returns alongside the question array.
+  4. Grid questions report each row's filled/blank state individually (not one collective
+     `current_value` JSON blob) — add a per-row blank/filled shape to `Question` for `Grid`/
+     `CheckboxGrid` kinds specifically.
+- Unit-test the patch against hand-built HTML/DOM fixtures (or the same kind of hand-built
+  fixture-JSON approach `read.rs`'s tests already used for v3 new) covering: a heading-less image
+  question, an inline `data:` image, page-level context text, and a partially-filled grid.
+- Already-answered write-lock: compute, from the extractor's own output, which fields/rows are
+  blank vs. filled — this list is what M14's fill step is allowed to touch, nothing else. Checkbox
+  questions stay whole-question skip (any existing pick locks the whole question), matching §7.3's
+  reasoning.
+
+**Exit criteria**: extraction runs against a real Google Form via `chromiumoxide` and correctly
+reports all four fixes by inspection (page context populated, heading-less image question present,
+inline image URL present, partially-filled grid reports per-row state) — verified live, not just
+against unit fixtures.
+
+**Depends on**: nothing new — reuses v3's existing `chromiumoxide`/debugger connection from §7.3.
+
+---
+
+## M14 — v3 legacy Forms: agentic answer (no fill tool) + parse/inject — NEW, added 2026-09-20
+
+**Goal**: the answering and filling half. Model keeps real reasoning/search/docs capability via
+`run_turn`, but filling is code-driven from one final structured-text answer, never a tool call —
+the specific design choice that removes v3 new's fill-loop hang/infinite-loop failure class
+(design doc §7.4).
+
+- Add `delivery_forms_legacy.txt` (design doc §9): instructs the model to answer with one JSON
+  object mapping question id → answer, restates that already-answered content must be skipped and
+  that there is no submit capability and no way to invoke one.
+- Call `run_turn` with `list_docs`/`read_doc`/`web_search` attached as tools — **no `fill_page`
+  tool, no browser-interaction tool of any kind**. Build the initial user content from M13's
+  extracted unanswered fields/rows (page context + questions + images as content parts, same
+  shape as v2's `build_user_message`).
+- Parse the model's final text with v2's existing balanced-brace `parse_answers` (port as-is from
+  `shadow_prompt_v2/src/browser/forms/mod.rs` — already handles a clean JSON reply and a
+  prose-wrapped one).
+- Port v2's `injector.rs` (fuzzy label matching, not exact-string) into `shadow_prompt_v3`, run via
+  `Page::evaluate()`, patched to only ever target the blank fields/rows M13 identified — this is
+  the hard enforcement layer, independent of whatever the parsed answer map happens to contain.
+- Test the never-overwrite guarantee directly: manually pre-fill some fields (including a
+  partially-filled grid) on a real test form, run the flow, confirm only the blank fields/rows
+  changed and the pre-filled ones are byte-identical afterward.
+
+**Exit criteria**: a real Forms page with a mix of question types (including at least one image
+question and one partially-filled grid) gets correctly answered and filled end to end, using real
+search/`list_docs` calls where the test question calls for them, with zero tool-loop involved in
+the fill step.
+
+**Depends on**: M13.
+
+---
+
+## M15 — v3 legacy Forms: current-page multi-step flow + hotkey split — NEW, added 2026-09-20
+
+**Goal**: wire M13/M14 into the two Forms hotkeys, operating directly on the already-open tab (no
+new background tab, no tab-closing logic, no page-count cap — all explicitly dropped per design
+doc §7.4), and split the hotkey surface so v3 legacy takes the current default binds while v3 new
+moves to new, secondary ones.
+
+- `forms_answer_page`: find the currently-focused Forms tab (reuse §7.3's
+  `document.hasFocus()`-based lookup — that part is generic tab-detection, not new-tab-opening, so
+  it's shared rather than reimplemented), run M13 read → M14 answer/fill on the current page, stop.
+- `forms_answer_all`: same, then find a Next-labeled control and click it, repeat from the current
+  page onward until only a Submit control remains (never clicked — same hard non-negotiable as
+  §7.3, and there is still no submit tool anywhere in the codebase). Cross-page memory via the same
+  flattened-text-prepend approach §7.3/M8 already used and flagged (`run_turn` still has no
+  multi-turn history parameter — inherited gap, not a new one).
+- No page-count cap, no tab-open/tab-close code at all for this engine — confirm by reading the
+  diff that none of §7.3's `tab_lifecycle.rs` open/close logic is called from this path.
+- Config/hotkey split: `forms_answer_page`/`forms_answer_all` (`ctrl+shift+alt+g`/`f`, unchanged
+  binds) route to v3 legacy. Add `forms_answer_page_axtree`/`forms_answer_all_axtree`
+  (`ctrl+shift+alt+j`/`u`, new) routing to v3 new's existing, untouched `execute_form_flow`. Both
+  pairs active at all times — no config flag gating which engine runs; update
+  `config/schema.rs`/`config.toml`/`config.example.toml`/the help-overlay cheat sheet (13 → 15
+  rows) accordingly.
+
+**Exit criteria**: `forms_answer_page`/`forms_answer_all` solve a real multi-page form end to end
+via v3 legacy on the default binds; `forms_answer_page_axtree`/`forms_answer_all_axtree` still
+invoke v3 new, unchanged, on the new binds — both reachable in the same build.
+
+**Depends on**: M14.
