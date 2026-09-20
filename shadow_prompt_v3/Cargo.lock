@@ -1869,7 +1869,7 @@ dependencies = [
 
 [[package]]
 name = "shadowprompt"
-version = "3.0.1"
+version = "3.0.2"
 dependencies = [
  "anyhow",
  "arboard",

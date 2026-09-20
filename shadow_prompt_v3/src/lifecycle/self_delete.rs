@@ -7,6 +7,15 @@
 // CREATE_NO_WINDOW` makes `spawn()` report success while the PowerShell host silently never runs
 // the cleanup script — no crash, no error, no deletion. `CREATE_NO_WINDOW` alone is enough to
 // keep the cleanup invisible; `DETACHED_PROCESS` is what broke it, so it's dropped here too.
+//
+// Second real bug, found by actually double-tapping this against a real install: the exe deleted
+// fine but nothing else did — the whole install folder was left behind. Root cause: `powershell`
+// inherits its working directory from us, and we're normally launched sitting inside our own
+// install folder, so the recursive delete's target *is* the spawned PowerShell's own current
+// directory. Windows refuses to remove a directory that's a live process's CWD, so the entire
+// `Remove-Item -Recurse` silently no-ops (caught by `-ErrorAction SilentlyContinue`) while the
+// exe — a specific file, not a directory handle — deletes fine on its own. Fixed by explicitly
+// running the cleanup from outside the install dir (`%TEMP%`) via `current_dir`.
 
 use std::os::windows::process::CommandExt;
 use std::path::Path;
@@ -42,6 +51,7 @@ pub fn execute() -> anyhow::Result<()> {
     Command::new("powershell.exe")
         .args(["-WindowStyle", "Hidden", "-NoProfile", "-NonInteractive", "-Command", &ps])
         .creation_flags(CREATE_NO_WINDOW)
+        .current_dir(std::env::temp_dir())
         .spawn()?;
 
     std::process::exit(0);
