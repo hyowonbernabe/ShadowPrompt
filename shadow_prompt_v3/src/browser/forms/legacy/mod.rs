@@ -44,13 +44,43 @@ pub async fn execute_legacy_form_flow(
         anyhow::bail!("the focused tab isn't a Google Form ({url}) — click into the form's tab first");
     }
 
+    // User-requested behavior: "answer all" covers the whole form start to finish no matter which
+    // page the tab happens to be showing when the hotkey fires — not the narrower "walk forward
+    // from wherever you already are" this engine originally shipped with (design doc §7.4, a
+    // deliberate simplification at the time, now superseded by this request). Only page 1 has a
+    // stable URL (`.../viewform`); every later page reuses one shared `.../formResponse` URL
+    // (confirmed live), so navigating fresh to the `viewform` variant is what actually lands back
+    // on page 1. Google's own autosave means anything already answered survives that navigation,
+    // so the normal per-page `needs_attention` check below simply skips it rather than re-asking —
+    // this doesn't erase progress, it just re-starts the walk from the top.
+    // Known honest limitation: if the current page has a field edited but not yet committed by
+    // Forms' own autosave, this navigation can trigger the browser's native "leave site?"
+    // confirmation, which blocks until a human dismisses it — not something this codebase can
+    // safely auto-accept without risking clicking through a dialog it didn't mean to.
+    if matches!(mode, FormsMode::AnswerAll) {
+        // `?hl=en` (Google's own "host language" URL parameter, confirmed live) pins the UI to
+        // English deterministically. Root cause worth fixing here, not just working around:
+        // Google Forms' own UI chrome (Next/Submit/Back text, required-question markers, etc.)
+        // was observed switching to Filipino unpredictably between reloads with no action from
+        // this app or the user — broke `advance_to_next_page`'s English-only text match outright.
+        // Since this is a navigation this engine already forces itself, pinning the language it
+        // lands on is free; `advance_to_next_page`'s multi-language word list stays as a fallback
+        // for the (unforceable) case where the user's own already-open tab is in some other
+        // language — that path can't have a URL parameter retroactively applied without a
+        // disruptive reload of a tab this engine doesn't own.
+        let base_url = url.replacen("/formResponse", "/viewform", 1);
+        let start_url = if base_url.contains('?') { format!("{base_url}&hl=en") } else { format!("{base_url}?hl=en") };
+        page.goto(start_url).await.map_err(|e| anyhow::anyhow!("navigating back to page 1: {e}"))?;
+        tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+    }
+
     // Cross-page memory in `AnswerAll` (design doc §7.4): same flattened-text-prepend approach
     // §7.3/M8 already used — `run_turn` still has no multi-turn history parameter, an inherited
     // fidelity gap, not a new one introduced here.
     let mut prior_pages_context = String::new();
 
     loop {
-        let extracted = extract_page(&page).await?;
+        let extracted = extract_page_with_retry(&page).await?;
         log::info!("forms (legacy): page has {} question(s)", extracted.questions.len());
 
         let unanswered: Vec<&Question> = extracted.questions.iter().filter(|q| q.needs_attention()).collect();
@@ -66,6 +96,21 @@ pub async fn execute_legacy_form_flow(
             let answers = parse_answers(&answer);
             let inject_js = injector::build_injector_js(&answers);
             page.evaluate(inject_js).await.map_err(|e| anyhow::anyhow!("injecting Forms answers: {e}"))?;
+
+            // Dropdowns can't be filled by the JS injector above (see its comment) — real,
+            // OS-trusted clicks only. `id` is "q" + this question's position among
+            // `[role="listitem"]` elements, the same indexing the extractor and JS injector both
+            // already rely on.
+            for q in extracted.questions.iter().filter(|q| q.kind == QuestionKind::Dropdown) {
+                let Some(val) = answers.get(&q.id) else { continue };
+                let Some(idx) = q.id.strip_prefix('q').and_then(|s| s.parse::<usize>().ok()) else {
+                    continue;
+                };
+                if let Err(e) = injector::select_dropdown_option(&page, idx, val).await {
+                    log::warn!("forms (legacy): {e}");
+                }
+            }
+
             log::info!("forms (legacy): answered {} question id(s)", answers.len());
 
             prior_pages_context.push_str(&format!(
@@ -100,6 +145,34 @@ async fn extract_page(page: &Page) -> anyhow::Result<ExtractedPage> {
         .into_value()
         .map_err(|e| anyhow::anyhow!("extractor did not return a JSON string: {e}"))?;
     serde_json::from_str(&raw).map_err(|e| anyhow::anyhow!("parsing extracted page JSON: {e}; body={raw}"))
+}
+
+const EXTRACT_RETRIES: u32 = 5;
+const EXTRACT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// Confirmed live: clicking "Next" sometimes triggers a real browser navigation (page 1 → 2, a
+/// genuine URL change) and sometimes just client-side routing with no navigation at all (later
+/// pages all share one URL) — there's no way to tell which happened ahead of time, and calling
+/// `page.wait_for_navigation()` unconditionally would hang forever on the second case. When it
+/// is a real navigation, `extract_page` right after the click can race Chrome tearing down the
+/// old JS execution context before the new one is ready ("Cannot find context with specified
+/// id"), same class of CDP timing race `browser/forms/mod.rs`'s own `PAGE_DISCOVERY_RETRIES`
+/// already works around for a different call. A short bounded retry handles both cases the same
+/// way: the very first attempt just succeeds immediately when there was no real navigation.
+async fn extract_page_with_retry(page: &Page) -> anyhow::Result<ExtractedPage> {
+    let mut last_err = None;
+    for attempt in 0..EXTRACT_RETRIES {
+        match extract_page(page).await {
+            Ok(extracted) => return Ok(extracted),
+            Err(e) => {
+                last_err = Some(e);
+                if attempt + 1 < EXTRACT_RETRIES {
+                    tokio::time::sleep(EXTRACT_RETRY_DELAY).await;
+                }
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("extract_page_with_retry: exhausted retries with no error captured")))
 }
 
 /// Builds the model's turn content from *every* question on the page, answered or not — design
@@ -153,7 +226,7 @@ fn parse_answers(raw: &str) -> HashMap<String, String> {
         .unwrap_or(trimmed)
         .trim_end_matches("```")
         .trim();
-    if let Ok(map) = serde_json::from_str::<HashMap<String, String>>(stripped) {
+    if let Some(map) = try_parse_answer_map(stripped) {
         return map;
     }
 
@@ -175,7 +248,7 @@ fn parse_answers(raw: &str) -> HashMap<String, String> {
                     depth -= 1;
                     if depth == 0 {
                         let candidate = &stripped[start..=i];
-                        if let Ok(map) = serde_json::from_str::<HashMap<String, String>>(candidate) {
+                        if let Some(map) = try_parse_answer_map(candidate) {
                             return map;
                         }
                         break;
@@ -190,6 +263,30 @@ fn parse_answers(raw: &str) -> HashMap<String, String> {
     HashMap::new()
 }
 
+/// Confirmed live: the delivery prompt tells the model a Grid/CheckboxGrid answer is "a JSON
+/// object mapping row label to chosen column" — and a model that follows that literally puts a
+/// real nested object as the value, not a JSON-encoded string. Deserializing straight into
+/// `HashMap<String, String>` rejects the *entire* top-level object the moment any one value isn't
+/// a plain string, silently dropping every answer on the page, not just the Grid one. Values are
+/// parsed as `serde_json::Value` first and non-string ones re-serialized back to a JSON string,
+/// so the rest of the pipeline — and `injector.rs`'s own `JSON.parse(val)` for these two kinds —
+/// keeps seeing the single string-valued shape it already expects.
+fn try_parse_answer_map(candidate: &str) -> Option<HashMap<String, String>> {
+    let raw_map: HashMap<String, serde_json::Value> = serde_json::from_str(candidate).ok()?;
+    Some(
+        raw_map
+            .into_iter()
+            .map(|(k, v)| {
+                let s = match v {
+                    serde_json::Value::String(s) => s,
+                    other => other.to_string(),
+                };
+                (k, s)
+            })
+            .collect(),
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NextPageOutcome {
     Advanced,
@@ -201,20 +298,51 @@ enum NextPageOutcome {
 /// `advance_to_next_page` (design doc §7.3/§7.4), just via plain CSS-selector find/click
 /// (`Page::find_element`) instead of the AX-tree bridge, ported from v2's `submit_guard.rs`
 /// selectors. There is still no submit-clicking code anywhere in this codebase.
-async fn advance_to_next_page(page: &Page) -> anyhow::Result<NextPageOutcome> {
-    let submit_present = page.find_element(r#"div[role="button"][aria-label*="Submit"]"#).await.is_ok();
+/// Confirmed live: Google Forms doesn't reliably put "Next"/"Submit" in the button's `aria-label`
+/// at all — sometimes it's there, sometimes both buttons on the page have no `aria-label`
+/// whatsoever, and the page's own UI language flips unpredictably between reloads (English and
+/// Filipino both observed live in this same session). Checked against both the `aria-label` (when
+/// present) and the button's own visible text, in both languages actually seen. This only ever
+/// widens what counts as a *positive* match for "Next" or "Submit" — it never clicks by
+/// elimination (e.g. "not recognized as Back, so it must be Next"), so an unrecognized future
+/// locale fails safely (an error, not a wrong click) rather than risking Submit.
+const NEXT_WORDS: &[&str] = &["next", "susunod"];
+const SUBMIT_WORDS: &[&str] = &["submit", "isumite"];
 
-    match page.find_element(r#"div[role="button"][aria-label*="Next"]"#).await {
-        Ok(btn) => {
-            btn.click().await.map_err(|e| anyhow::anyhow!("clicking Next: {e}"))?;
-            tokio::time::sleep(std::time::Duration::from_millis(900)).await;
-            Ok(NextPageOutcome::Advanced)
-        }
-        Err(_) if submit_present => Ok(NextPageOutcome::SubmitOnly),
-        Err(_) => {
-            anyhow::bail!("advance_to_next_page (legacy): found neither a Next nor a Submit control on this page")
+async fn button_matches(btn: &chromiumoxide::Element, words: &[&str]) -> bool {
+    let aria = btn.attribute("aria-label").await.ok().flatten().unwrap_or_default().to_lowercase();
+    let text = btn.inner_text().await.ok().flatten().unwrap_or_default().to_lowercase();
+    words.iter().any(|w| aria.contains(w) || text.contains(w))
+}
+
+async fn advance_to_next_page(page: &Page) -> anyhow::Result<NextPageOutcome> {
+    let buttons = page
+        .find_elements(r#"div[role="button"]"#)
+        .await
+        .map_err(|e| anyhow::anyhow!("listing page-bottom controls: {e}"))?;
+
+    let mut next_btn = None;
+    let mut submit_present = false;
+    for btn in &buttons {
+        if button_matches(btn, NEXT_WORDS).await {
+            next_btn = Some(btn);
+        } else if button_matches(btn, SUBMIT_WORDS).await {
+            submit_present = true;
         }
     }
+
+    if let Some(btn) = next_btn {
+        btn.click().await.map_err(|e| anyhow::anyhow!("clicking Next: {e}"))?;
+        tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+        return Ok(NextPageOutcome::Advanced);
+    }
+    if submit_present {
+        return Ok(NextPageOutcome::SubmitOnly);
+    }
+    anyhow::bail!(
+        "advance_to_next_page (legacy): found neither a Next nor a Submit control on this page \
+         (checked aria-label and visible text, English/Filipino)"
+    )
 }
 
 #[cfg(test)]
@@ -240,6 +368,21 @@ mod tests {
         let map = parse_answers(r#"{"q0":"Blue","q1":"42"}"#);
         assert_eq!(map.get("q0"), Some(&"Blue".to_string()));
         assert_eq!(map.get("q1"), Some(&"42".to_string()));
+    }
+
+    #[test]
+    fn parse_answers_accepts_nested_object_for_grid_answers() {
+        // Real model output that broke this: q1 answered as a genuine nested object (following
+        // the delivery prompt's own instructions), which used to make the ENTIRE reply fail to
+        // parse — q0 and q3 were plain strings and got dropped too, not just q1/q2.
+        let map = parse_answers(
+            r#"{"q0":"Test fixture","q1":{"Algebra":"Very familiar","Geometry":"Very familiar"},"q3":"3"}"#,
+        );
+        assert_eq!(map.get("q0"), Some(&"Test fixture".to_string()));
+        assert_eq!(map.get("q3"), Some(&"3".to_string()));
+        let q1 = map.get("q1").expect("q1 must survive, not be dropped");
+        let reparsed: HashMap<String, String> = serde_json::from_str(q1).unwrap();
+        assert_eq!(reparsed.get("Algebra"), Some(&"Very familiar".to_string()));
     }
 
     #[test]

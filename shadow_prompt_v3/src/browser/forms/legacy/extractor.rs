@@ -38,12 +38,73 @@ pub const EXTRACTOR_JS: &str = r#"
   });
 
   const out = [];
-  const items = document.querySelectorAll('[role="listitem"]');
+  // Top-level questions only. Confirmed live: Google Forms also tags each individual
+  // checkbox/radio *option* inside a group with its own role="listitem" (nested inside the
+  // group's own listitem) — without the `:not()` guard, a 5-option checkbox question was read as
+  // 1 real question plus 5 phantom one-option ones, and the model answering those phantoms
+  // overwrote an already-correct multi-select with wrong extra picks. This selector must match
+  // the one in `injector.rs`'s `build_injector_js`/`select_dropdown_option` exactly, or their
+  // `qN` ids drift apart from what this file assigns.
+  const items = document.querySelectorAll('[role="listitem"]:not([role="listitem"] [role="listitem"])');
+
+  // Confirmed live: current Google Forms grid/checkbox-grid markup uses no
+  // role="columnheader"/"rowheader" at all, so both were always dead code here, silently falling
+  // through to fallback heuristics. The old column fallback (reading the first row's own option
+  // aria-labels) bakes the row name into the text (e.g. "Never heard of it, response for
+  // Algebra"), and there was no row-label fallback at all for CheckboxGrid specifically (its
+  // groups carry no aria-label at all, unlike Grid's, which happens to still have one) — every
+  // CheckboxGrid row read as "", indistinguishable from every other row. Replaced with structural
+  // detection that depends on neither ARIA roles nor Google's own (unstable) class names.
+  const gridColumnHeaders = (firstGroup) => {
+    // The real header row is a plain sibling of every row's own group, shared identically across
+    // all rows, rendered as one element whose text joins every column name with a tab character.
+    let p = firstGroup.parentElement;
+    for (let i = 0; i < 4 && p; i++) {
+      for (const c of Array.from(p.children)) {
+        if (c === firstGroup || c.contains(firstGroup)) continue;
+        const t = (c.innerText || '');
+        if (t.includes('\t')) return t.split('\t').map(s => s.trim()).filter(Boolean);
+      }
+      p = p.parentElement;
+    }
+    return [];
+  };
+  const gridRowLabel = (group) => {
+    const al = (group.getAttribute('aria-label') || '').trim();
+    if (al) return al;
+    // Every option's own label lives only in its aria-label, never as inner text, so the row's
+    // own single non-control leaf-text div is unambiguous where present.
+    const leaf = Array.from(group.querySelectorAll('div')).find(d => d.children.length === 0 && (d.innerText || '').trim());
+    return leaf ? leaf.innerText.trim() : '';
+  };
+
+  // Confirmed live: a Google Forms question image's URL is a signed, ephemeral, per-load token —
+  // handing that URL to OpenRouter makes every provider (and this app's own separate fetch of it)
+  // fetch it independently over the network a second time, which is both an unwanted extra point
+  // of failure on a bad connection and, worse, sometimes gets redirected by Google's own CDN to a
+  // mirror URL that's already dead by the time anything follows it. The browser has *already*
+  // downloaded and decoded these bytes once, just to render them on screen — reusing that via a
+  // canvas instead needs no network call at all. Works because the image and the page are both
+  // served from docs.google.com (same-origin), so the canvas is never cross-origin-tainted.
+  // Falls back to the raw URL (the old behavior) if the browser ever declines the canvas read.
+  const imgToDataUrl = (imgEl) => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = imgEl.naturalWidth || imgEl.width;
+      canvas.height = imgEl.naturalHeight || imgEl.height;
+      if (!canvas.width || !canvas.height) return null;
+      canvas.getContext('2d').drawImage(imgEl, 0, 0);
+      return canvas.toDataURL('image/png');
+    } catch (e) {
+      return null;
+    }
+  };
+
   items.forEach((item, idx) => {
     const titleEl = item.querySelector('[role="heading"]');
     const text = titleEl ? titleEl.innerText.trim() : '';
     const id = 'q' + idx;
-    const imgs = Array.from(item.querySelectorAll('img')).map(i => i.src).filter(Boolean);
+    const imgs = Array.from(item.querySelectorAll('img')).map(i => imgToDataUrl(i) || i.src).filter(Boolean);
 
     const dateInput = item.querySelector('input[type="date"]');
     if (dateInput) {
@@ -58,8 +119,7 @@ pub const EXTRACTOR_JS: &str = r#"
 
     const radioGroups = item.querySelectorAll('[role="radiogroup"]');
     if (radioGroups.length > 1) {
-      const headerCells = item.querySelectorAll('[role="columnheader"]');
-      let columns = Array.from(headerCells).map(h => h.innerText.trim()).filter(Boolean);
+      let columns = gridColumnHeaders(radioGroups[0]);
       if (columns.length === 0) {
         const firstRadios = radioGroups[0].querySelectorAll('[role="radio"]');
         columns = Array.from(firstRadios).map(r => (r.getAttribute('aria-label') || '').trim());
@@ -68,7 +128,7 @@ pub const EXTRACTOR_JS: &str = r#"
       const chosen = {};
       const blankRows = [];
       radioGroups.forEach(g => {
-        const label = (g.getAttribute('aria-label') || '').trim();
+        const label = gridRowLabel(g);
         rows.push(label);
         const checked = Array.from(g.querySelectorAll('[role="radio"]'))
           .find(r => r.getAttribute('aria-checked') === 'true');
@@ -97,8 +157,7 @@ pub const EXTRACTOR_JS: &str = r#"
     const checkGroups = Array.from(item.querySelectorAll('[role="group"]'))
       .filter(g => g.querySelector('[role="checkbox"]'));
     if (checkGroups.length > 1) {
-      const headerCells = item.querySelectorAll('[role="columnheader"]');
-      let columns = Array.from(headerCells).map(h => h.innerText.trim()).filter(Boolean);
+      let columns = gridColumnHeaders(checkGroups[0]);
       if (columns.length === 0) {
         const firstChecks = checkGroups[0].querySelectorAll('[role="checkbox"]');
         columns = Array.from(firstChecks).map(c => (c.getAttribute('aria-label') || '').trim());
@@ -107,7 +166,7 @@ pub const EXTRACTOR_JS: &str = r#"
       const chosen = {};
       const blankRows = [];
       checkGroups.forEach(g => {
-        const label = (g.getAttribute('aria-label') || '').trim();
+        const label = gridRowLabel(g);
         rows.push(label);
         const picks = Array.from(g.querySelectorAll('[role="checkbox"]'))
           .filter(c => c.getAttribute('aria-checked') === 'true')
@@ -136,10 +195,17 @@ pub const EXTRACTOR_JS: &str = r#"
 
     const listbox = item.querySelector('[role="listbox"]');
     if (listbox) {
-      const opts = Array.from(listbox.querySelectorAll('[role="option"]'))
+      // Confirmed live: the unselected placeholder option ("Choose"/"Pumili"/etc. — text is
+      // locale-dependent) always carries an empty `data-value`, unlike every real option, and by
+      // default *is itself* marked `aria-selected="true"` before anything is picked. Filtering by
+      // that empty value (not by matching English placeholder text, which silently breaks on
+      // other UI languages) is what tells "nothing chosen yet" apart from a real selection.
+      const allOpts = Array.from(listbox.querySelectorAll('[role="option"]'));
+      const opts = allOpts
+        .filter(o => (o.getAttribute('data-value') || '').trim() !== '')
         .map(o => (o.getAttribute('data-value') || o.innerText || '').trim())
-        .filter(s => s && s !== '...' && !s.toLowerCase().startsWith('choose') && !s.toLowerCase().startsWith('select'));
-      const sel = listbox.querySelector('[aria-selected="true"]');
+        .filter(s => s && s !== '...');
+      const sel = allOpts.find(o => o.getAttribute('aria-selected') === 'true' && (o.getAttribute('data-value') || '').trim() !== '');
       out.push({
         id, kind: 'Dropdown', text, options: opts, rows: [], blank_rows: [], image_urls: imgs,
         current_value: sel ? sel.innerText.trim() : null
@@ -162,7 +228,24 @@ pub const EXTRACTOR_JS: &str = r#"
 
     // Patch 1 (design doc §7.4): no recognized control at all (e.g. a picture-only question) —
     // still produces a field, never silently dropped the way v2's `if (!text) return` did.
-    out.push({ id, kind: 'Unknown', text, options: [], rows: [], blank_rows: [], image_urls: imgs, current_value: null });
+    //
+    // Patch (confirmed live): this also covers a section-break item — a heading plus a
+    // paragraph of instructions/context (e.g. "Reading Comprehension" + "A train travels 120km
+    // in 2 hours...") with no input control of its own. Without the block below, that paragraph
+    // was silently dropped entirely: the page-level description capture above explicitly skips
+    // anything inside a listitem (on the assumption this per-item branch would catch it), but
+    // this branch previously only ever kept the heading. The model was answering the very next
+    // question with zero knowledge of the passage it depends on. Same leaf-text heuristic as the
+    // page-level capture, just scoped to this item instead of the whole page.
+    const descParts = [];
+    Array.from(item.querySelectorAll('div, span, p')).forEach(el => {
+      if (el.closest('[role="heading"]')) return;
+      if (el.children.length > 0) return;
+      const t = (el.innerText || '').trim();
+      if (t && t !== text && !descParts.includes(t)) descParts.push(t);
+    });
+    const fullText = descParts.length ? `${text}\n${descParts.join('\n')}` : text;
+    out.push({ id, kind: 'Unknown', text: fullText, options: [], rows: [], blank_rows: [], image_urls: imgs, current_value: null });
   });
   return JSON.stringify({ page_context: pageContextParts.join('\n'), questions: out });
 })()
@@ -221,6 +304,15 @@ impl Question {
     pub fn needs_attention(&self) -> bool {
         match self.kind {
             QuestionKind::Grid | QuestionKind::CheckboxGrid => !self.blank_rows.is_empty(),
+            // Confirmed live: a plain section-header item ("Reading Comprehension" + a passage,
+            // no image, no input control) is `Unknown` kind with `current_value` hardcoded to
+            // null, so without this branch it read as "unanswered" forever — forcing a real
+            // OpenRouter call every single time the page was revisited, for an item the injector
+            // can never write an answer into either way (no branch there handles `Unknown` at
+            // all). An image-bearing `Unknown` item is different: that's a genuine picture-only
+            // question (the scenario this kind was built for, design doc §7.4 patch 1) and still
+            // needs a best-effort attempt.
+            QuestionKind::Unknown => !self.image_urls.is_empty(),
             _ => self.current_value.as_deref().unwrap_or("").trim().is_empty(),
         }
     }
@@ -256,6 +348,17 @@ mod tests {
                   "current_value": null }
             ]
         }"#
+    }
+
+    #[test]
+    fn text_only_unknown_item_does_not_need_attention() {
+        // A section header/divider ("Reading Comprehension" + a passage) — Unknown kind, no
+        // image, nothing the injector can ever fill in. Must not force a repeated LLM call.
+        let q = Question {
+            id: "q0".into(), kind: QuestionKind::Unknown, text: "Reading Comprehension".into(),
+            options: vec![], rows: vec![], blank_rows: vec![], image_urls: vec![], current_value: None,
+        };
+        assert!(!q.needs_attention());
     }
 
     #[test]
