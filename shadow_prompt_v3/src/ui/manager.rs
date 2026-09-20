@@ -32,10 +32,10 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW,
-    GetSystemMetrics, GetWindowDisplayAffinity, GetWindowLongPtrW, KillTimer, PostQuitMessage,
+    GetSystemMetrics, GetWindowDisplayAffinity, GetWindowLongPtrW, KillTimer, LoadCursorW, PostQuitMessage,
     PostThreadMessageW, RegisterClassExW, SetLayeredWindowAttributes, SetTimer, SetWindowDisplayAffinity,
     SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, UpdateLayeredWindow,
-    GWLP_USERDATA, HWND_TOPMOST, LWA_ALPHA, MSG, SM_CXSCREEN, SM_CYSCREEN,
+    GWLP_USERDATA, HWND_TOPMOST, IDC_ARROW, LWA_ALPHA, MSG, SM_CXSCREEN, SM_CYSCREEN,
     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA,
     WDA_EXCLUDEFROMCAPTURE, WM_DESTROY, WM_PAINT, WM_TIMER, WM_USER, WNDCLASSEXW, WS_EX_LAYERED,
     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_VISIBLE,
@@ -63,6 +63,11 @@ const CRAWL_SECOND_LINE_FADE: f32 = 0.35;
 const CRAWL_TIMER_ID: usize = 1;
 const FLASH_TIMER_ID: usize = 2;
 const FLASH_NOTICE_MS: u32 = 3000;
+/// How long the form indicator stays green on `FormIndicatorState::Done` before auto-hiding,
+/// same "flash then clear" shape as the overlay's own `FLASH_TIMER_ID` — a run finishing used to
+/// jump straight from Running to Hidden with no visible success state at all.
+const FORM_DONE_TIMER_ID: usize = 3;
+const FORM_DONE_MS: u32 = 3000;
 /// The help cheat-sheet's fixed anchor — bottom-right, its own small offset, distinct from the
 /// answer overlay's *configured* corner (`VisualsConfig::overlay_corner`, no config field of its
 /// own exists for this panel). Same rendering technique as the answer overlay either way — this
@@ -142,10 +147,17 @@ fn run_ui_thread(visuals: VisualsConfig, ready_tx: mpsc::Sender<u32>) -> anyhow:
         let hinstance = GetModuleHandleW(None)?;
         let class_name: Vec<u16> = WINDOW_CLASS_NAME.encode_utf16().collect();
 
+        // Real bug found live: with no `hCursor` here, Windows never resets the pointer while
+        // it's over any of these windows, so hovering the indicator showed whatever cursor
+        // happened to be active beforehand (often the "busy"/loading one) — making the app look
+        // unresponsive even while it was idle. `LoadCursorW(None, IDC_ARROW)` is the normal
+        // system arrow, same as every ordinary window gets by default.
+        let cursor = LoadCursorW(None, IDC_ARROW).unwrap_or_default();
         let wc = WNDCLASSEXW {
             cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
             lpfnWndProc: Some(wnd_proc),
             hInstance: hinstance.into(),
+            hCursor: cursor,
             lpszClassName: PCWSTR(class_name.as_ptr()),
             ..Default::default()
         };
@@ -301,7 +313,13 @@ fn drain_commands(ctx: &mut UiCtx) {
             UICommand::SetFormIndicator(s) => {
                 ctx.form = s;
                 unsafe {
+                    // Any new state cancels a pending auto-hide from a previous `Done` — most
+                    // relevantly, a run starting again right after the last one's green flash.
+                    let _ = KillTimer(ctx.hwnd_form, FORM_DONE_TIMER_ID);
                     let _ = ShowWindow(ctx.hwnd_form, if matches!(s, FormIndicatorState::Hidden) { SW_HIDE } else { SW_SHOWNOACTIVATE });
+                    if matches!(s, FormIndicatorState::Done) && SetTimer(ctx.hwnd_form, FORM_DONE_TIMER_ID, FORM_DONE_MS, None) == 0 {
+                        log::warn!("form indicator: SetTimer for the Done auto-hide failed");
+                    }
                 }
                 invalidate(ctx.hwnd_form);
             }
@@ -855,6 +873,12 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                         ctx.flash_text = None;
                         render_overlay(ctx, false);
                     }
+                    FORM_DONE_TIMER_ID => {
+                        let _ = KillTimer(ctx.hwnd_form, FORM_DONE_TIMER_ID);
+                        ctx.form = FormIndicatorState::Hidden;
+                        let _ = ShowWindow(ctx.hwnd_form, SW_HIDE);
+                        invalidate(ctx.hwnd_form);
+                    }
                     _ => {}
                 }
             }
@@ -917,6 +941,7 @@ unsafe fn paint(hwnd: HWND, ctx: &UiCtx) {
     } else {
         let c = match ctx.form {
             FormIndicatorState::Running => &ctx.visuals.form_color_running,
+            FormIndicatorState::Done => &ctx.visuals.form_color_done,
             FormIndicatorState::Failed => &ctx.visuals.form_color_failed,
             FormIndicatorState::Aborted => &ctx.visuals.form_color_aborted,
             FormIndicatorState::Hidden => &ctx.visuals.form_color_running,

@@ -87,6 +87,7 @@ pub struct VisualsConfig {
     pub form_indicator_corner: String,
     pub form_indicator_offset: [i32; 2],
     pub form_color_running: String,
+    pub form_color_done: String,
     pub form_color_failed: String,
     pub form_color_aborted: String,
 

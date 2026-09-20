@@ -5,12 +5,24 @@
 //   2. Never close until the save is confirmed, not just assumed — default to leaving it open
 //      if nothing confirms the save, rather than risk losing answers.
 //
-// M8: implemented for real. Guard 1 (`enough_tabs_open`) is a plain, fully verifiable count
-// check. Guard 2 (`save_confirmed`/`text_signals_saved`) is a best-effort implementation of an
-// inherently-unverifiable-here requirement — see `safe_to_close`'s doc comment for the honest
-// limitation.
+// M8's original guard 2 watched the accessibility tree for a node whose name contained "saved" —
+// confirmed live (2026-09-20) to actually miss a real "Draft saved" indicator outright, the exact
+// kind of fragility a UI-text/translation-dependent check was always going to have (this project
+// already hit auto-translate flakiness elsewhere breaking plain English matching). Replaced with
+// `SaveTracker`, which watches Google Forms' own autosave network request directly — confirmed
+// live via the Network domain: every field edit fires `POST .../draftresponse`, completing with
+// HTTP 200 on success. This is the actual save mechanism, not a downstream UI side effect of it:
+// no UI language dependency at all, and no fixed timer either — it's fully event-driven, so a
+// slow connection just takes as long as it takes rather than getting guessed at.
 
+use std::collections::HashSet;
+use std::time::Duration;
+
+use chromiumoxide::cdp::browser_protocol::network::{
+    EnableParams as NetworkEnableParams, EventLoadingFailed, EventLoadingFinished, EventRequestWillBeSent, RequestId,
+};
 use chromiumoxide::{Browser, Page};
+use futures::StreamExt;
 
 /// Same reasoning as `mod.rs`'s `PAGE_DISCOVERY_RETRIES` — chromiumoxide's internal target list
 /// is only populated once it's processed the async `Target.targetCreated` event, which can lag
@@ -82,6 +94,18 @@ pub async fn open_forms_tab(browser: &Browser, source_page: &Page, form_url: &st
             .map_err(|e| anyhow::anyhow!("listing open tabs after opening new Forms tab: {e}"))?;
         if let Some(page) = pages.into_iter().find(|p| !before.contains(p.target_id())) {
             wait_for_document_ready(&page).await;
+
+            // Confirmed live: `window.open(url, '_blank')` switches the active tab to the new one
+            // by default in this Chrome version — the opposite of what "left completely alone"
+            // requires. Page-level JS has no way to control which tab is active in the same
+            // window (that's browser-chrome territory, not exposed to scripts), so this restores
+            // it via CDP directly, which does have that authority. Best-effort: if this fails, the
+            // new tab still works, it's just visibly in front until the user clicks back.
+            use chromiumoxide::cdp::browser_protocol::target::ActivateTargetParams;
+            if let Err(e) = browser.execute(ActivateTargetParams::new(source_page.target_id().clone())).await {
+                log::warn!("forms: couldn't restore focus to the source tab after opening the background tab: {e}");
+            }
+
             return Ok(page);
         }
         if attempt + 1 < NEW_TAB_RETRIES {
@@ -118,36 +142,23 @@ async fn wait_for_document_ready(page: &Page) {
     }
 }
 
-/// Returns true if it's safe to close `page` — false if it's the only tab left in the browser,
-/// or if the save-confirmation signal can't be found.
+/// Returns true if it's safe to close the tab this `saved` verdict came from — false if it's the
+/// only tab left in the browser, regardless of `saved`.
 ///
 /// ## Guard 1 — never close the only tab left
 ///
 /// `Browser::pages()` (same call `mod.rs`'s `find_active_forms_url` already uses to enumerate
 /// every open target) is checked before closing; if this is the only open tab, closing it would
 /// take the whole debug-attached Chrome window (and CDP session) down with it, not just this
-/// one tab — refused unconditionally, regardless of the save signal below.
+/// one tab — refused unconditionally, regardless of the save signal.
 ///
-/// ## Guard 2 — save-confirmation signal — honest limitation, unverified against a live form
+/// ## Guard 2 — save confirmation
 ///
-/// Google Forms was directly observed, during this project's design-phase research (design doc
-/// §7.2), to show a live "Draft saved" indicator after interacting with fields — but the exact
-/// DOM/accessibility signal to poll for was never pinned down there, only confirmed to exist
-/// visually. It cannot be pinned down here either: there is no live browser available in this
-/// environment (the same constraint M6/M7's own honest-limitation notes already flagged for
-/// their AX-role/name assumptions). This is a best-effort implementation of an
-/// inherently-unverifiable-here requirement, not a confirmed one.
-///
-/// What it actually does: fetches a fresh accessibility-tree snapshot of `page` (reusing
-/// `fill::fetch_ax_snapshot`/`fill::name_of` — the exact same AX-tree bridge `fill_page` and
-/// `advance_to_next_page` already use, rather than a third independent one), and looks for any
-/// non-ignored node whose accessible name contains "saved" (case-insensitive, deliberately
-/// fuzzy — same spirit as `fill.rs`'s fuzzy label matching, for the same reason: Google's actual
-/// wording could just as easily be "Saved", "All changes saved", or something not observed
-/// during the design-phase research at all). If nothing matches, this returns `Ok(false)` —
-/// exactly as designed: default to "leave it open" whenever the signal can't be confirmed, never
-/// assume success just because nothing errored.
-pub async fn safe_to_close(browser: &Browser, page: &Page) -> anyhow::Result<bool> {
+/// Computed by the caller via `SaveTracker` (attached *before* any fill actions run, so it
+/// doesn't miss early autosave requests) and passed in here as `saved`, rather than this
+/// function re-deriving it from `page` — the tracker has to observe the whole run's network
+/// activity, not just a one-shot snapshot at close time.
+pub async fn safe_to_close(browser: &Browser, saved: bool) -> anyhow::Result<bool> {
     let pages = browser
         .pages()
         .await
@@ -158,17 +169,10 @@ pub async fn safe_to_close(browser: &Browser, page: &Page) -> anyhow::Result<boo
         return Ok(false);
     }
 
-    match save_confirmed(page).await {
-        Ok(true) => Ok(true),
-        Ok(false) => {
-            log::info!("forms: safe_to_close — no save-confirmation signal found on the page, leaving tab open");
-            Ok(false)
-        }
-        Err(e) => {
-            log::warn!("forms: safe_to_close — error reading page state for save signal ({e}), leaving tab open");
-            Ok(false)
-        }
+    if !saved {
+        log::info!("forms: safe_to_close — autosave not confirmed complete, leaving tab open");
     }
+    Ok(saved)
 }
 
 /// Pure "would closing this tab leave zero open" check — isolated so guard 1 has a real unit
@@ -177,16 +181,95 @@ fn enough_tabs_open(open_tab_count: usize) -> bool {
     open_tab_count > 1
 }
 
-async fn save_confirmed(page: &Page) -> anyhow::Result<bool> {
-    let nodes = super::fill::fetch_ax_snapshot(page).await?;
-    Ok(nodes.iter().filter(|n| !n.ignored).filter_map(super::fill::name_of).any(|name| text_signals_saved(&name)))
+/// How long to keep waiting, after the last outstanding autosave request settles, for a further
+/// one to show up before concluding nothing more is coming. Not the save-completion signal itself
+/// (that's fully event-driven, see `SaveTracker::all_saved`'s doc) — just a small grace window so
+/// a save request that's about to be sent but hasn't hit the wire yet isn't missed.
+const SETTLE_GRACE: Duration = Duration::from_millis(700);
+
+/// Upper bound on the whole wait, purely defensive against Chrome's Network domain misbehaving
+/// (e.g. never delivering a completion event at all) — not a substitute for the event-driven
+/// wait above it. A real autosave taking this long would be a genuinely broken connection, not
+/// this project's problem to work around further.
+const OVERALL_TIMEOUT: Duration = Duration::from_secs(25);
+
+/// Watches Google Forms' own autosave network requests directly, instead of any DOM/UI signal —
+/// see this module's doc comment for why. Must be attached *before* any fill actions run: it only
+/// sees requests fired after subscription, and the very first field edit on a page can save
+/// almost immediately.
+pub struct SaveTracker {
+    requests: chromiumoxide::listeners::EventStream<EventRequestWillBeSent>,
+    finished: chromiumoxide::listeners::EventStream<EventLoadingFinished>,
+    failed: chromiumoxide::listeners::EventStream<EventLoadingFailed>,
 }
 
-/// Pure fuzzy match against a node's accessible name — isolated so guard 2's matching logic has
-/// a real unit test independent of the (unverifiable-here) question of whether this is actually
-/// the right text to look for at all. See `safe_to_close`'s doc comment.
-fn text_signals_saved(name: &str) -> bool {
-    name.to_ascii_lowercase().contains("saved")
+impl SaveTracker {
+    pub async fn attach(page: &Page) -> anyhow::Result<Self> {
+        page.execute(NetworkEnableParams::default())
+            .await
+            .map_err(|e| anyhow::anyhow!("enabling Network domain for save tracking: {e}"))?;
+        let requests = page
+            .event_listener::<EventRequestWillBeSent>()
+            .await
+            .map_err(|e| anyhow::anyhow!("subscribing to outgoing requests: {e}"))?;
+        let finished = page
+            .event_listener::<EventLoadingFinished>()
+            .await
+            .map_err(|e| anyhow::anyhow!("subscribing to request completions: {e}"))?;
+        let failed = page
+            .event_listener::<EventLoadingFailed>()
+            .await
+            .map_err(|e| anyhow::anyhow!("subscribing to request failures: {e}"))?;
+        Ok(Self { requests, finished, failed })
+    }
+
+    /// True if every `.../draftresponse` autosave request seen since `attach` completed
+    /// successfully, with none still outstanding and none failed, and at least one was seen at
+    /// all (an empty page with nothing to save shouldn't vacuously read as "confirmed saved").
+    /// Fully event-driven: a slow connection just makes this take longer, not fail — `attach`'s
+    /// events already sat buffered in an unbounded channel for however long the run itself took,
+    /// so this only needs to actually wait out whatever is still genuinely in flight right now.
+    pub async fn all_saved(mut self) -> bool {
+        let mut pending: HashSet<RequestId> = HashSet::new();
+        let mut completed: HashSet<RequestId> = HashSet::new();
+        let mut saw_any = false;
+        let mut any_failed = false;
+        let deadline = tokio::time::Instant::now() + OVERALL_TIMEOUT;
+
+        loop {
+            let now = tokio::time::Instant::now();
+            if now >= deadline {
+                break;
+            }
+            let settled = saw_any && pending.iter().all(|id| completed.contains(id));
+            let wait = if settled { SETTLE_GRACE } else { deadline - now };
+
+            tokio::select! {
+                Some(ev) = self.requests.next() => {
+                    if ev.request.url.contains("/draftresponse") {
+                        pending.insert(ev.request_id.clone());
+                        saw_any = true;
+                    }
+                }
+                Some(ev) = self.finished.next() => {
+                    completed.insert(ev.request_id.clone());
+                }
+                Some(ev) = self.failed.next() => {
+                    if pending.contains(&ev.request_id) {
+                        any_failed = true;
+                    }
+                    completed.insert(ev.request_id.clone());
+                }
+                _ = tokio::time::sleep(wait) => {
+                    if settled {
+                        break;
+                    }
+                }
+            }
+        }
+
+        saw_any && !any_failed && pending.iter().all(|id| completed.contains(id))
+    }
 }
 
 #[cfg(test)]
@@ -203,19 +286,5 @@ mod tests {
     fn enough_tabs_open_true_when_more_than_one() {
         assert!(enough_tabs_open(2));
         assert!(enough_tabs_open(5));
-    }
-
-    #[test]
-    fn text_signals_saved_matches_plausible_variants_case_insensitively() {
-        assert!(text_signals_saved("Draft saved"));
-        assert!(text_signals_saved("All changes saved"));
-        assert!(text_signals_saved("SAVED"));
-    }
-
-    #[test]
-    fn text_signals_saved_false_for_unrelated_text() {
-        assert!(!text_signals_saved("Submit"));
-        assert!(!text_signals_saved("Question 3 of 5"));
-        assert!(!text_signals_saved(""));
     }
 }

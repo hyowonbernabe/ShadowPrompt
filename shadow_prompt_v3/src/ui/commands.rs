@@ -39,6 +39,9 @@ pub enum IndicatorState {
 pub enum FormIndicatorState {
     Hidden,
     Running,
+    /// A run just finished successfully — shown briefly (green) before auto-hiding, so a
+    /// successful run has a visible end state instead of jumping straight back to `Hidden`.
+    Done,
     Failed,
     Aborted,
 }

@@ -55,6 +55,7 @@ color_error = "#FFFF00"
 form_indicator_corner = "top_right"
 form_indicator_offset = [4, 12]
 form_color_running = "#FFFF00"
+form_color_done = "#00FF00"
 form_color_failed = "#FF0000"
 form_color_aborted = "#808080"
 

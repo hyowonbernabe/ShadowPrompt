@@ -16,7 +16,7 @@
 // this environment to confirm Google's exact markup for the description block.
 
 pub const EXTRACTOR_JS: &str = r#"
-(() => {
+(async () => {
   const pageContextParts = [];
   document.querySelectorAll('[role="heading"]').forEach(h => {
     if (h.closest('[role="listitem"]')) return;
@@ -87,7 +87,22 @@ pub const EXTRACTOR_JS: &str = r#"
   // canvas instead needs no network call at all. Works because the image and the page are both
   // served from docs.google.com (same-origin), so the canvas is never cross-origin-tainted.
   // Falls back to the raw URL (the old behavior) if the browser ever declines the canvas read.
-  const imgToDataUrl = (imgEl) => {
+  //
+  // Confirmed live: that fallback was firing on a real exam form, leaking the signed CDN URL to
+  // OpenRouter anyway (every provider then failed to fetch it a second time, exactly what this
+  // was built to avoid) — not a same-origin/taint problem, but a timing one. Right after a page
+  // load/navigation, an `<img>` below the fold can still have `naturalWidth === 0` because the
+  // browser hasn't finished decoding it yet, so the old synchronous version bailed out before the
+  // image was ever actually ready. Waiting for `load`/`error` (or a 2s cap so one stuck image
+  // can't hang the whole page's extraction) gives the browser the chance to finish first.
+  const imgToDataUrl = async (imgEl) => {
+    if (!imgEl.complete || !imgEl.naturalWidth) {
+      await new Promise(res => {
+        imgEl.addEventListener('load', res, { once: true });
+        imgEl.addEventListener('error', res, { once: true });
+        setTimeout(res, 2000);
+      });
+    }
     try {
       const canvas = document.createElement('canvas');
       canvas.width = imgEl.naturalWidth || imgEl.width;
@@ -100,21 +115,49 @@ pub const EXTRACTOR_JS: &str = r#"
     }
   };
 
-  items.forEach((item, idx) => {
+  // A plain `.forEach` can't `await` per item — needs a real loop now that `imgToDataUrl` does.
+  for (const [idx, item] of Array.from(items).entries()) {
     const titleEl = item.querySelector('[role="heading"]');
     const text = titleEl ? titleEl.innerText.trim() : '';
     const id = 'q' + idx;
-    const imgs = Array.from(item.querySelectorAll('img')).map(i => imgToDataUrl(i) || i.src).filter(Boolean);
+    const imgEls = Array.from(item.querySelectorAll('img'));
+    const imgs = (await Promise.all(imgEls.map(imgToDataUrl)))
+      .map((d, i2) => d || imgEls[i2].src)
+      .filter(Boolean);
 
     const dateInput = item.querySelector('input[type="date"]');
     if (dateInput) {
       out.push({ id, kind: 'Date', text, options: [], rows: [], blank_rows: [], image_urls: imgs, current_value: dateInput.value || null });
-      return;
+      continue;
     }
     const timeInput = item.querySelector('input[type="time"]');
     if (timeInput) {
       out.push({ id, kind: 'Time', text, options: [], rows: [], blank_rows: [], image_urls: imgs, current_value: timeInput.value || null });
-      return;
+      continue;
+    }
+
+    // Confirmed live: current Google Forms Time questions render as a hour/minute pair of text
+    // inputs (aria-label "Hour"/"Minute", 12-hour range) plus a separate AM/PM `role="listbox"` —
+    // never the native `input[type="time"]` checked above (that branch is now legacy/dead for any
+    // form built recently, kept only in case an older form still uses it). Must be checked before
+    // the generic listbox/Dropdown branch below, or this item's own AM/PM picker gets mistaken for
+    // the whole question being a 2-option Dropdown, silently hiding the Hour/Minute inputs from
+    // ever being read at all — confirmed live to be exactly why a real Time question came back
+    // blank end to end. Google's AM/PM listbox defaults to showing "AM" pre-selected with a real
+    // (non-placeholder) value even on a totally untouched question, unlike Dropdown's own
+    // placeholder — so hour/minute both being empty, not the listbox's selection state, is the
+    // only reliable "still blank" signal here (see injector.rs's matching comment).
+    const hourInput = item.querySelector('input[aria-label="Hour"]');
+    const minuteInput = item.querySelector('input[aria-label="Minute"]');
+    if (hourInput && minuteInput) {
+      const meridiemSel = item.querySelector('[role="listbox"] [aria-selected="true"]');
+      const meridiemText = meridiemSel ? meridiemSel.innerText.trim() : '';
+      const filled = hourInput.value && minuteInput.value;
+      out.push({
+        id, kind: 'Time', text, options: [], rows: [], blank_rows: [], image_urls: imgs,
+        current_value: filled ? `${hourInput.value}:${minuteInput.value} ${meridiemText}`.trim() : null
+      });
+      continue;
     }
 
     const radioGroups = item.querySelectorAll('[role="radiogroup"]');
@@ -139,7 +182,7 @@ pub const EXTRACTOR_JS: &str = r#"
         id, kind: 'Grid', text, options: columns, rows, blank_rows: blankRows, image_urls: imgs,
         current_value: Object.keys(chosen).length ? JSON.stringify(chosen) : null
       });
-      return;
+      continue;
     }
 
     const radios = item.querySelectorAll('[role="radio"]');
@@ -151,7 +194,7 @@ pub const EXTRACTOR_JS: &str = r#"
         id, kind: allNumeric ? 'Scale' : 'Radio', text, options, rows: [], blank_rows: [], image_urls: imgs,
         current_value: checked ? (checked.getAttribute('aria-label') || checked.innerText.trim()) : null
       });
-      return;
+      continue;
     }
 
     const checkGroups = Array.from(item.querySelectorAll('[role="group"]'))
@@ -177,7 +220,7 @@ pub const EXTRACTOR_JS: &str = r#"
         id, kind: 'CheckboxGrid', text, options: columns, rows, blank_rows: blankRows, image_urls: imgs,
         current_value: Object.keys(chosen).length ? JSON.stringify(chosen) : null
       });
-      return;
+      continue;
     }
 
     const checks = item.querySelectorAll('[role="checkbox"]');
@@ -190,7 +233,7 @@ pub const EXTRACTOR_JS: &str = r#"
         id, kind: 'Checkbox', text, options, rows: [], blank_rows: [], image_urls: imgs,
         current_value: picks.length ? picks.join(', ') : null
       });
-      return;
+      continue;
     }
 
     const listbox = item.querySelector('[role="listbox"]');
@@ -210,20 +253,20 @@ pub const EXTRACTOR_JS: &str = r#"
         id, kind: 'Dropdown', text, options: opts, rows: [], blank_rows: [], image_urls: imgs,
         current_value: sel ? sel.innerText.trim() : null
       });
-      return;
+      continue;
     }
 
     const textarea = item.querySelector('textarea');
     if (textarea) {
       out.push({ id, kind: 'LongText', text, options: [], rows: [], blank_rows: [], image_urls: imgs, current_value: textarea.value || null });
-      return;
+      continue;
     }
 
     const input = item.querySelector('input[type="text"], input[type="email"], input[type="number"], input[type="tel"], input[type="url"]');
     if (input) {
       const kind = input.getAttribute('type') === 'number' ? 'Numeric' : 'ShortText';
       out.push({ id, kind, text, options: [], rows: [], blank_rows: [], image_urls: imgs, current_value: input.value || null });
-      return;
+      continue;
     }
 
     // Patch 1 (design doc §7.4): no recognized control at all (e.g. a picture-only question) —
@@ -246,7 +289,7 @@ pub const EXTRACTOR_JS: &str = r#"
     });
     const fullText = descParts.length ? `${text}\n${descParts.join('\n')}` : text;
     out.push({ id, kind: 'Unknown', text: fullText, options: [], rows: [], blank_rows: [], image_urls: imgs, current_value: null });
-  });
+  }
   return JSON.stringify({ page_context: pageContextParts.join('\n'), questions: out });
 })()
 "#;

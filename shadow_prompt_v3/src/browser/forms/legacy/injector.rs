@@ -64,11 +64,32 @@ pub fn build_injector_js(answers: &HashMap<String, String>) -> String {
       setNative(dateInput, val); continue;
     }}
 
-    // Time
+    // Time (native <input type="time">) — legacy/dead branch on current Google Forms markup,
+    // kept for any older form that still renders this way.
     const timeInput = item.querySelector('input[type="time"]');
     if (timeInput) {{
       if (timeInput.value) continue;
       setNative(timeInput, val); continue;
+    }}
+
+    // Time (current Google Forms widget): Hour/Minute text inputs (12-hour) + a separate AM/PM
+    // listbox. The listbox is deliberately NOT touched here — same reason as Dropdown below, a
+    // plain `.click()` doesn't register on it — `select_time_meridiem` in injector.rs (Rust side)
+    // does that with a real click right after this script runs (see mod.rs). Write-lock is
+    // Hour+Minute both being filled already, not the listbox's own selection: it always shows
+    // "AM" pre-selected with a real value even on a totally untouched question, so it can't tell
+    // "genuinely already answered" apart from "still default" the way Dropdown's own placeholder
+    // can (see extractor.rs's matching comment).
+    const hourInput = item.querySelector('input[aria-label="Hour"]');
+    const minuteInput = item.querySelector('input[aria-label="Minute"]');
+    if (hourInput && minuteInput) {{
+      if (hourInput.value && minuteInput.value) continue;
+      const m = /^(\d{{1,2}}):(\d{{2}})$/.exec(String(val).trim());
+      if (!m) continue;
+      const hour12 = ((parseInt(m[1], 10) % 12) || 12).toString();
+      setNative(hourInput, hour12);
+      setNative(minuteInput, m[2]);
+      continue;
     }}
 
     // Grid (multiple radiogroups) — row-level write-lock (design doc §7.4)
@@ -207,7 +228,41 @@ pub async fn select_dropdown_option(
         }
     }
 
-    listbox.click().await.map_err(|e| anyhow::anyhow!("dropdown q{idx}: opening: {e}"))?;
+    click_listbox_option(page, &listbox, idx, val, "dropdown").await
+}
+
+/// Real-clicks a Time question's AM/PM listbox — same widget and same broken-plain-`.click()`
+/// problem as `select_dropdown_option`, but deliberately skips that function's write-lock check:
+/// this listbox always shows "AM" pre-selected with a real (non-placeholder) value even on a
+/// totally untouched question, so "already has a real value" can't tell genuinely-answered apart
+/// from still-default here the way it can for an actual Dropdown. The caller (`mod.rs`) only
+/// reaches this for a question `needs_attention()` already said was blank this round — Hour and
+/// Minute both empty at extraction time — which is this field's real write-lock signal instead.
+/// Silently a no-op if the question has no listbox at all (the legacy native `input[type="time"]`
+/// case has no AM/PM picker to click).
+pub async fn select_time_meridiem(page: &chromiumoxide::Page, idx: usize, meridiem: &str) -> anyhow::Result<()> {
+    let listitems = page
+        .find_elements(r#"[role="listitem"]:not([role="listitem"] [role="listitem"])"#)
+        .await
+        .map_err(|e| anyhow::anyhow!("time q{idx}: listing questions: {e}"))?;
+    let item = listitems
+        .get(idx)
+        .ok_or_else(|| anyhow::anyhow!("time q{idx}: page has only {} question(s)", listitems.len()))?;
+
+    let Ok(listbox) = item.find_element(r#"[role="listbox"]"#).await else {
+        return Ok(());
+    };
+    click_listbox_option(page, &listbox, idx, meridiem, "time").await
+}
+
+async fn click_listbox_option(
+    page: &chromiumoxide::Page,
+    listbox: &chromiumoxide::Element,
+    idx: usize,
+    val: &str,
+    label: &str,
+) -> anyhow::Result<()> {
+    listbox.click().await.map_err(|e| anyhow::anyhow!("{label} q{idx}: opening: {e}"))?;
     tokio::time::sleep(std::time::Duration::from_millis(250)).await;
 
     // Options render into a portal outside the listitem (confirmed live), so search the whole
@@ -215,18 +270,18 @@ pub async fn select_dropdown_option(
     let options = page
         .find_elements(r#"[role="option"]"#)
         .await
-        .map_err(|e| anyhow::anyhow!("dropdown q{idx}: reading opened options: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("{label} q{idx}: reading opened options: {e}"))?;
 
     for opt in &options {
         let text = opt.inner_text().await.ok().flatten().unwrap_or_default();
         if loose_match(&text, val) {
-            opt.click().await.map_err(|e| anyhow::anyhow!("dropdown q{idx}: selecting {val:?}: {e}"))?;
+            opt.click().await.map_err(|e| anyhow::anyhow!("{label} q{idx}: selecting {val:?}: {e}"))?;
             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
             return Ok(());
         }
     }
 
-    anyhow::bail!("dropdown q{idx}: no option matched {val:?}")
+    anyhow::bail!("{label} q{idx}: no option matched {val:?}")
 }
 
 /// Same fuzzy-match rule as the JS injector's `looseMatch`, ported to Rust since this path never

@@ -36,6 +36,8 @@ pub async fn execute_form_flow(llm: Arc<LlmClient>, mode: FormsMode, max_pages: 
     let browser = crate::browser::debugger::connect().await?;
     let (form_url, source_page) = find_active_forms_url(&browser).await?;
     let page = tab_lifecycle::open_forms_tab(&browser, &source_page, &form_url).await?;
+    // Must attach before any fill action runs — see `SaveTracker`'s doc comment.
+    let save_tracker = tab_lifecycle::SaveTracker::attach(&page).await?;
 
     let mut history: Vec<Message> = vec![Message::system_text(forms_prompt())];
 
@@ -148,7 +150,8 @@ pub async fn execute_form_flow(llm: Arc<LlmClient>, mode: FormsMode, max_pages: 
         }
     }
 
-    if tab_lifecycle::safe_to_close(&browser, &page).await.unwrap_or(false) {
+    let saved = save_tracker.all_saved().await;
+    if tab_lifecycle::safe_to_close(&browser, saved).await.unwrap_or(false) {
         if let Err(e) = page.close().await {
             log::warn!("forms: failed to close Forms tab after run: {e}");
         }

@@ -98,6 +98,7 @@ mod tests {
                 form_indicator_corner: "top_left".to_string(),
                 form_indicator_offset: [0, 0],
                 form_color_running: "#00FFFF".to_string(),
+                form_color_done: "#00FF00".to_string(),
                 form_color_failed: "#FF00FF".to_string(),
                 form_color_aborted: "#000000".to_string(),
                 overlay_enabled: true,

@@ -111,6 +111,20 @@ pub async fn execute_legacy_form_flow(
                 }
             }
 
+            // Same real-click requirement as Dropdown above, for a Time question's AM/PM listbox
+            // (the JS injector above only fills the Hour/Minute text inputs) — see
+            // `select_time_meridiem`'s doc comment for why it skips a write-lock check of its own.
+            for q in extracted.questions.iter().filter(|q| q.kind == QuestionKind::Time) {
+                let Some(val) = answers.get(&q.id) else { continue };
+                let Some(idx) = q.id.strip_prefix('q').and_then(|s| s.parse::<usize>().ok()) else {
+                    continue;
+                };
+                let Some(meridiem) = meridiem_of(val) else { continue };
+                if let Err(e) = injector::select_time_meridiem(&page, idx, meridiem).await {
+                    log::warn!("forms (legacy): {e}");
+                }
+            }
+
             log::info!("forms (legacy): answered {} question id(s)", answers.len());
 
             prior_pages_context.push_str(&format!(
@@ -287,6 +301,14 @@ fn try_parse_answer_map(candidate: &str) -> Option<HashMap<String, String>> {
     )
 }
 
+/// The model answers Time questions as 24-hour "HH:MM" (delivery prompt's own instruction) —
+/// this reads just the hour back out to tell which half of Google's AM/PM listbox to click.
+fn meridiem_of(answer: &str) -> Option<&'static str> {
+    let (h, _) = answer.trim().split_once(':')?;
+    let h: u32 = h.trim().parse().ok()?;
+    (h < 24).then(|| if h < 12 { "AM" } else { "PM" })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NextPageOutcome {
     Advanced,
@@ -424,5 +446,19 @@ mod tests {
         let ContentPart::Text { text, .. } = &parts[0] else { panic!("expected text part") };
         assert!(text.contains("still blank rows: Row 2"));
         assert!(!text.contains("still blank rows: Row 1"));
+    }
+
+    #[test]
+    fn meridiem_of_reads_24_hour_answers() {
+        assert_eq!(meridiem_of("00:00"), Some("AM"));
+        assert_eq!(meridiem_of("09:05"), Some("AM"));
+        assert_eq!(meridiem_of("12:00"), Some("PM"));
+        assert_eq!(meridiem_of("23:59"), Some("PM"));
+    }
+
+    #[test]
+    fn meridiem_of_rejects_unparseable_input() {
+        assert_eq!(meridiem_of("not a time"), None);
+        assert_eq!(meridiem_of(""), None);
     }
 }
