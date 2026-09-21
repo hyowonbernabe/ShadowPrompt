@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <!-- Elevation is required so the overlay/indicator windows can outrank other
+             elevated always-on-top windows (e.g. an elevated Task Manager) in the topmost
+             z-order stack — Windows/DWM won't let a lower-integrity window outrank a
+             higher-integrity one no matter how often SetWindowPos(HWND_TOPMOST) is called.
+             Deliberate tradeoff against the stealth/no-admin-required goals in CLAUDE.md:
+             this means a UAC prompt on every launch, and failure to launch at all on a
+             machine where the current user has no admin rights. Note: even elevated, this
+             still does not outrank Task Manager specifically — it has its own OS-level
+             protection above ordinary topmost windows regardless of privilege. -->
+        <requestedExecutionLevel level="requireAdministrator" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+</assembly>

@@ -1,2 +1,6 @@
 #define IDI_ICON 1
 IDI_ICON ICON "assets/logo_512.ico"
+
+// CREATEPROCESS_MANIFEST_RESOURCE_ID (1), RT_MANIFEST (24) — requests admin elevation, see
+// app.manifest for why.
+1 24 "app.manifest"

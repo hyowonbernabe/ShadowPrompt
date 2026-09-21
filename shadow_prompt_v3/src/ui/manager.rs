@@ -68,6 +68,14 @@ const FLASH_NOTICE_MS: u32 = 3000;
 /// jump straight from Running to Hidden with no visible success state at all.
 const FORM_DONE_TIMER_ID: usize = 3;
 const FORM_DONE_MS: u32 = 3000;
+/// Windows' topmost band is a stack, not a guarantee: whichever window last called
+/// `SetWindowPos(HWND_TOPMOST, ...)` sits highest. Task Manager (or any other always-on-top
+/// window) asserting topmost after our one-shot calls at window creation would otherwise float
+/// above us until we happen to re-render for an unrelated reason. This timer keeps re-asserting
+/// topmost on all our windows so we're never the stale entry at the bottom of that stack for
+/// long — see `reassert_topmost`.
+const TOPMOST_REASSERT_TIMER_ID: usize = 4;
+const TOPMOST_REASSERT_MS: u32 = 1500;
 /// The help cheat-sheet's fixed anchor — bottom-right, its own small offset, distinct from the
 /// answer overlay's *configured* corner (`VisualsConfig::overlay_corner`, no config field of its
 /// own exists for this panel). Same rendering technique as the answer overlay either way — this
@@ -228,6 +236,10 @@ fn run_ui_thread(visuals: VisualsConfig, ready_tx: mpsc::Sender<u32>) -> anyhow:
         // Establishes the overlay's initial (hidden, empty-content) layered surface for real,
         // rather than force-showing it — render_overlay decides visibility from content+hidden.
         render_overlay(&mut ctx, false);
+
+        if SetTimer(hwnd_indicator, TOPMOST_REASSERT_TIMER_ID, TOPMOST_REASSERT_MS, None) == 0 {
+            log::warn!("topmost reassert: SetTimer failed");
+        }
 
         let tid = GetCurrentThreadId();
         let _ = ready_tx.send(tid);
@@ -412,6 +424,19 @@ fn topmost(hwnd: HWND) {
     unsafe {
         let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
+}
+
+/// Re-asserts topmost on every one of our windows, hidden or not — `SetWindowPos` on a hidden
+/// window just reorders it in the z-stack without showing it, so no visibility check is needed
+/// here. Called on a timer (see `TOPMOST_REASSERT_TIMER_ID`) since a one-shot topmost call gets
+/// silently outranked the moment anything else asserts topmost afterward.
+fn reassert_topmost(ctx: &UiCtx) {
+    topmost(ctx.hwnd_indicator);
+    topmost(ctx.hwnd_form);
+    topmost(ctx.hwnd_overlay);
+    topmost(ctx.hwnd_help);
+    #[cfg(feature = "debug")]
+    topmost(ctx.hwnd_debug);
 }
 
 fn start_crawl_timer(ctx: &UiCtx) {
@@ -879,6 +904,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                         let _ = ShowWindow(ctx.hwnd_form, SW_HIDE);
                         invalidate(ctx.hwnd_form);
                     }
+                    TOPMOST_REASSERT_TIMER_ID => reassert_topmost(ctx),
                     _ => {}
                 }
             }
