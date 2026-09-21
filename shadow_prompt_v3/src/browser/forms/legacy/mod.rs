@@ -306,7 +306,7 @@ fn try_parse_answer_map(candidate: &str) -> Option<HashMap<String, String>> {
 fn meridiem_of(answer: &str) -> Option<&'static str> {
     let (h, _) = answer.trim().split_once(':')?;
     let h: u32 = h.trim().parse().ok()?;
-    (h < 24).then(|| if h < 12 { "AM" } else { "PM" })
+    (h < 24).then_some(if h < 12 { "AM" } else { "PM" })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
