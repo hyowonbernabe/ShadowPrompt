@@ -25,15 +25,28 @@ jobs:
         with:
           workspaces: shadow_prompt_v3 -> target
 
-      - name: Build release
-        run: cargo build --release
+      # Two binaries from the same source, differing only in the embedded manifest
+      # (see app.manifest / app-asinvoker.manifest). Built sequentially into the same
+      # target dir, so each is copied out before the next build overwrites it.
+      - name: Build release (standard, no elevation)
+        run: |
+          cargo build --release
+          Copy-Item target/release/shadowprompt.exe -Destination shadowprompt.exe
+        shell: pwsh
+
+      - name: Build release (admin)
+        run: |
+          cargo build --release --features admin
+          Copy-Item target/release/shadowprompt.exe -Destination shadowprompt-admin.exe
+        shell: pwsh
 
       - name: Package
         shell: pwsh
         run: |
           $stage = "release-stage"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item target/release/shadowprompt.exe -Destination $stage/
+          Copy-Item shadowprompt.exe -Destination $stage/
+          Copy-Item shadowprompt-admin.exe -Destination $stage/
           New-Item -ItemType Directory -Force -Path "$stage/config" | Out-Null
           Copy-Item config/config.example.toml -Destination "$stage/config/"
           if (Test-Path knowledge) {
@@ -44,7 +57,7 @@ jobs:
           $tag = "${{ github.ref_name }}"
           $zip = "shadowprompt-$tag-windows-x64.zip"
           Compress-Archive -Path "$stage/*" -DestinationPath $zip -Force
-          Move-Item shadowprompt-$tag-windows-x64.zip ../
+          Move-Item $zip ../
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -53,5 +66,6 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
           make_latest: true
           files: |
-            shadow_prompt_v3/target/release/shadowprompt.exe
+            shadow_prompt_v3/shadowprompt.exe
+            shadow_prompt_v3/shadowprompt-admin.exe
             shadowprompt-${{ github.ref_name }}-windows-x64.zip

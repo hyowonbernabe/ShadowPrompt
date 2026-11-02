@@ -1,6 +1,6 @@
 [package]
 name = "shadowprompt"
-version = "3.0.3"
+version = "3.1.0"
 edition = "2021"
 description = "Lightweight stealth AI assistant for Windows — single executable, hotkey-driven."
 license = "Apache-2.0"
@@ -11,6 +11,9 @@ default = []
 # Enables console window + stdout/file logging. Off in release builds — see docs/SHADOWPROMPT_V3_DESIGN.md §13
 # ("log file only on dev flag, silent in prod").
 debug = []
+# Embeds the requireAdministrator manifest instead of the default asInvoker one — see
+# app.manifest / app-asinvoker.manifest for the z-order vs no-UAC tradeoff.
+admin = []
 
 [[bin]]
 name = "shadowprompt"

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <!-- Default build: runs at the invoking user's privilege level. No UAC prompt, works
+             on machines where the user has no admin rights, and keeps the stealth goal in
+             CLAUDE.md intact. Tradeoff vs app.manifest (the `admin` feature): the overlay and
+             indicator windows cannot outrank an *elevated* always-on-top window, so if an
+             elevated app is topmost the overlay can be covered by it. -->
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+</assembly>

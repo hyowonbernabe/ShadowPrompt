@@ -1,6 +1,12 @@
 #define IDI_ICON 1
 IDI_ICON ICON "assets/logo_512.ico"
 
-// CREATEPROCESS_MANIFEST_RESOURCE_ID (1), RT_MANIFEST (24) — requests admin elevation, see
-// app.manifest for why.
+// CREATEPROCESS_MANIFEST_RESOURCE_ID (1), RT_MANIFEST (24).
+// Which manifest gets embedded is picked by the `admin` cargo feature (see build.rs):
+// on  -> app.manifest           (requireAdministrator, UAC prompt, overlay wins z-order)
+// off -> app-asinvoker.manifest (default, no UAC, see that file for the tradeoff)
+#ifdef ADMIN
 1 24 "app.manifest"
+#else
+1 24 "app-asinvoker.manifest"
+#endif

@@ -8,9 +8,14 @@
 #
 # For verbose output, same pattern:
 #   & ([scriptblock]::Create((irm https://.../install.ps1))) -Verbose
+#
+# To install the elevated build instead (UAC prompt on every launch, but the overlay can outrank
+# other elevated always-on-top windows):
+#   & ([scriptblock]::Create((irm https://.../install.ps1))) -Admin
 
 param(
     [Parameter(Position = 0)][string]$Key,
+    [switch]$Admin,
     [switch]$Verbose
 )
 
@@ -56,6 +61,19 @@ Invoke-WebRequest -Uri $Zip.browser_download_url -OutFile $TempZip -UseBasicPars
 Log "Extracting ..."
 Expand-Archive -Path $TempZip -DestinationPath $InstallDir -Force
 Remove-Item $TempZip -Force -ErrorAction SilentlyContinue
+
+# The zip ships both builds. -Admin swaps the elevated one into place under the normal name so
+# the PATH entry, launch below and uninstall.ps1 all keep working unchanged; the unused build is
+# removed either way so only one exe is ever installed.
+$AdminExe = Join-Path $InstallDir "shadowprompt-admin.exe"
+if (Test-Path $AdminExe) {
+    if ($Admin) {
+        Log "Installing the elevated build (UAC prompt on every launch) ..."
+        Move-Item $AdminExe $ExePath -Force
+    } else {
+        Remove-Item $AdminExe -Force -ErrorAction SilentlyContinue
+    }
+}
 
 # Seeds config.toml from the bundled example on first install only — never overwrites a
 # config.toml that's already there, so re-installing never clobbers a key you've since swapped in
