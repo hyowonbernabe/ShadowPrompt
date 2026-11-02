@@ -25,9 +25,6 @@ jobs:
         with:
           workspaces: shadow_prompt_v3 -> target
 
-      # Two binaries from the same source, differing only in the embedded manifest
-      # (see app.manifest / app-asinvoker.manifest). Built sequentially into the same
-      # target dir, so each is copied out before the next build overwrites it.
       - name: Build release (standard, no elevation)
         run: |
           cargo build --release
@@ -52,6 +49,9 @@ jobs:
           if (Test-Path knowledge) {
             Copy-Item knowledge -Destination "$stage/" -Recurse
           }
+          if (Test-Path sebpatch) {
+            Copy-Item sebpatch -Destination "$stage/" -Recurse
+          }
           Copy-Item install.ps1 -Destination $stage/
           Copy-Item uninstall.ps1 -Destination $stage/
           $tag = "${{ github.ref_name }}"
@@ -62,10 +62,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # A tag with a suffix (v3.0.0-beta.3) is a prerelease; a plain vX.Y.Z tag is a real one.
           prerelease: ${{ contains(github.ref_name, '-') }}
           make_latest: true
           files: |
-            shadow_prompt_v3/shadowprompt.exe
-            shadow_prompt_v3/shadowprompt-admin.exe
             shadowprompt-${{ github.ref_name }}-windows-x64.zip
