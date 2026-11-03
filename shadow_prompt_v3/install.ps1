@@ -7,7 +7,7 @@
 #   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/hyowonbernabe/ShadowPrompt/main/shadow_prompt_v3/install.ps1))) sk-or-yourkeyhere
 #
 # For verbose output, same pattern:
-#   & ([scriptblock]::Create((irm https://.../install.ps1))) -Verbose
+#   & ([scriptblock]::Create((irm https://.../install.ps1))) -ShowLog
 #
 # To install the elevated build instead (UAC prompt on every launch, but the overlay can outrank
 # other elevated always-on-top windows):
@@ -16,11 +16,11 @@
 param(
     [Parameter(Position = 0)][string]$Key,
     [switch]$Admin,
-    [switch]$Verbose
+    [switch]$ShowLog
 )
 
 $ErrorActionPreference = "Stop"
-$ProgressPreference = if ($Verbose) { "Continue" } else { "SilentlyContinue" }
+$ProgressPreference = if ($ShowLog) { "Continue" } else { "SilentlyContinue" }
 
 $Owner = "hyowonbernabe"
 $Repo  = "ShadowPrompt"
@@ -32,7 +32,7 @@ $ConfigDir  = Join-Path $InstallDir "config"
 $ConfigPath = Join-Path $ConfigDir "config.toml"
 $ExePath    = Join-Path $InstallDir "shadowprompt.exe"
 
-function Log($msg) { if ($Verbose) { Write-Host $msg -ForegroundColor Cyan } }
+function Log($msg) { if ($ShowLog) { Write-Host $msg -ForegroundColor Cyan } }
 
 # Stop any running instance so we can overwrite the exe.
 Get-Process shadowprompt -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
