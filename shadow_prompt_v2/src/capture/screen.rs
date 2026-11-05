@@ -67,7 +67,7 @@ pub fn capture_region(x: i32, y: i32, w: i32, h: i32) -> anyhow::Result<Vec<u8>>
             anyhow::bail!("GetDIBits returned 0 rows");
         }
 
-        for chunk in buf.chunks_exact_mut(4) {
+        for chunk in buf.as_chunks_mut::<4>().0 {
             chunk.swap(0, 2);
             chunk[3] = 255;
         }

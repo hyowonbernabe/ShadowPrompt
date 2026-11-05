@@ -234,10 +234,8 @@ impl ListenerState {
                     return false;
                 }
             }
-            EventType::ButtonRelease(Button::Right) => {
-                if self.right_swallowed.swap(false, Ordering::SeqCst) {
-                    return false;
-                }
+            EventType::ButtonRelease(Button::Right) if self.right_swallowed.swap(false, Ordering::SeqCst) => {
+                return false;
             }
             _ => {}
         }
@@ -494,7 +492,7 @@ impl ListenerState {
     }
 
     fn take_injected_caps(&self) -> bool {
-        self.injected_caps.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok()
+        self.injected_caps.try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok()
     }
 
     /// The chord's Caps Lock press toggled caps; undo it while Caps Lock is still physically
@@ -513,7 +511,7 @@ impl ListenerState {
                 // press/release would be mistaken for ours.
                 let unsent = 2u8.saturating_sub(send_caps_up_down() as u8);
                 if unsent > 0 {
-                    let _ = counter.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| Some(n.saturating_sub(unsent)));
+                    let _ = counter.try_update(Ordering::SeqCst, Ordering::SeqCst, |n| Some(n.saturating_sub(unsent)));
                 }
             });
         }
