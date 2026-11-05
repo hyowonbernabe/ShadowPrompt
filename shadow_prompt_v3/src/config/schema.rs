@@ -169,9 +169,8 @@ pub struct KnowledgeConfig {
     pub cloud_url: String,
 }
 
-/// Public, read-only URL of the owner's Cloudflare Pages bundle — not a secret. Empty until the
-/// Pages project exists (cloud_docs/README.md, setup step 4).
-pub const DEFAULT_CLOUD_URL: &str = "";
+/// Public, read-only URL of the owner's GitHub Pages bundle (cloud_docs/) — not a secret.
+pub const DEFAULT_CLOUD_URL: &str = "https://hyowonbernabe.github.io/ShadowPrompt/bundle.json";
 
 fn default_cloud_url() -> String {
     DEFAULT_CLOUD_URL.to_string()

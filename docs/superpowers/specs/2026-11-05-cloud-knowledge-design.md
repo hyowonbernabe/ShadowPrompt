@@ -21,7 +21,7 @@ replace that folder.
 - The AI searches first, then reads only a line range, the way Claude Code does.
   It does not pull whole files into context.
 - A copy that exists both locally and in the cloud is shown to the AI once.
-- Hosting is free, always up, and fast worldwide.
+- Hosting is free, always up, and fast worldwide, with no account beyond GitHub.
 
 ## Non-goals
 
@@ -57,18 +57,19 @@ replace that folder.
   `modified` is the unix time of the last git commit that touched the file. When
   the clone is shallow, the script runs `git fetch --unshallow` first. If git has
   no date for a file, it falls back to the build time.
-- **Cloudflare Pages** uses Git integration on this repo. The root directory is
-  `cloud_docs`, the build command is `python build.py`, the output is `public`,
-  and the build watch path is `cloud_docs/*`. Every push that touches materials
-  redeploys. Cloudflare compresses JSON with gzip/brotli. The URL looks like
-  `https://<project>.pages.dev/bundle.json`.
+- **GitHub Pages**, built by `.github/workflows/cloud_docs.yml`. It runs on pushes to
+  `main` that touch `cloud_docs/**` and does a full-history checkout. Pages and Actions
+  are both free for this public repo, which is why it replaced the original Cloudflare
+  Pages plan on 2026-11-05 (owner wanted no third-party account). Pages serves gzip and
+  ETag. Its cache can add up to 10 minutes before users see an update. The URL is
+  `https://hyowonbernabe.github.io/ShadowPrompt/bundle.json`.
 - `cloud_docs/README.md` holds the owner's one-time setup clicks and the upload steps.
 
 ## Client side
 
 - **Config:** `[knowledge]` gains `cloud_url`. The built-in default is the owner's
   URL, so existing configs get cloud without being edited. An empty string turns
-  cloud off. Until the Cloudflare project exists, the default is `""`, which means off.
+  cloud off.
 - **Fetching never blocks a query.**
   - A background refresh starts at launch and at the start of each query. It sends
     a GET with `If-None-Match`. On 304 the app keeps its copy; on 200 it replaces it.
@@ -115,7 +116,7 @@ model can then search immediately without first calling `list_docs`.
 
 ## Calls made by the designer
 
-- Cloudflare Pages, with a single `bundle.json`. This holds up to roughly 20MB of
+- GitHub Pages, with a single `bundle.json`. This holds up to roughly 20MB of
   text; beyond that, split it into one file per doc plus an index.
 - No hash cache for local files. Local folders are small and hashing them costs
   milliseconds.
