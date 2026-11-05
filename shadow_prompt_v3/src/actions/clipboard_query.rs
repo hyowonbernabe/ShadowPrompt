@@ -87,6 +87,8 @@ mod tests {
                 insta_delete: "VK_F12".to_string(),
                 panic_kill: "VK_ESCAPE".to_string(),
                 debug_open_tab: "VK_F13".to_string(),
+                screen_answer: "VK_F14".to_string(),
+                clear_dots: "VK_F15".to_string(),
             },
             visuals: VisualsConfig {
                 indicator_corner: "top_right".to_string(),
@@ -107,10 +109,13 @@ mod tests {
                 overlay_font_size: 14,
                 crawl_trigger_lines: 2,
                 crawl_ms_per_line: 2000,
+                dot_color: "#FF0000".to_string(),
+                dot_size: 3,
             },
             http: HttpConfig { connect_timeout_secs: 5, read_timeout_secs: 30 },
             forms: FormsConfig { max_pages: 20, max_images_per_request: 4, max_image_long_edge_px: 1600 },
             knowledge: KnowledgeConfig { enabled: knowledge_enabled, max_doc_bytes: 100_000 },
+            screen_answer: Default::default(),
         }
     }
 
@@ -125,6 +130,7 @@ mod tests {
             ui_tx,
             answer_task: Arc::new(Mutex::new(None)),
             forms_task: Arc::new(Mutex::new(None)),
+            screen_task: Arc::new(Mutex::new(None)),
         }
     }
 

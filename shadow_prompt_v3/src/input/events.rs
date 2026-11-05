@@ -14,6 +14,9 @@ pub enum InputEvent {
     ScreenshotCancel,
     TestModel,
     SwitchModel,
+    /// Screen Answer: all monitors -> Claude -> tracked dots on click targets.
+    ScreenAnswer,
+    ClearDots,
     // Google Forms
     LaunchDebugger,
     /// v3 legacy (design doc §7.4) — default/primary as of 2026-09-20.

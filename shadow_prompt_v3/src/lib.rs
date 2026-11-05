@@ -96,6 +96,7 @@ fn run_daemon(cfg: config::Config) -> anyhow::Result<()> {
             ui_tx: ui_tx.clone(),
             answer_task: Arc::new(Mutex::new(None)),
             forms_task: Arc::new(Mutex::new(None)),
+            screen_task: Arc::new(Mutex::new(None)),
         };
 
         log::info!("daemon loop running; awaiting input events");

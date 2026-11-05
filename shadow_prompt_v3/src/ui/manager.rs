@@ -80,6 +80,15 @@ const TOPMOST_REASSERT_MS: u32 = 1500;
 /// answer overlay's *configured* corner (`VisualsConfig::overlay_corner`, no config field of its
 /// own exists for this panel). Same rendering technique as the answer overlay either way — this
 /// only affects *where* it sits, not what it looks like.
+/// Screen Answer dots — a fixed pool created at startup, hidden until used.
+// ponytail: fixed pool; a 17th mark is just dropped. Grow lazily if real questions ever need more.
+const MAX_DOTS: usize = 16;
+const DOT_PULSE_TIMER_ID: usize = 5;
+const DOT_PULSE_MS: u32 = 60;
+/// Ticks per full pulse cycle (60ms x 25 = 1.5s). Alpha swings between these bounds.
+const DOT_PULSE_TICKS: u32 = 25;
+const DOT_ALPHA_MIN: f32 = 90.0;
+const DOT_ALPHA_MAX: f32 = 255.0;
 const HELP_CORNER: &str = "bottom_right";
 const HELP_OFFSET: [i32; 2] = [8, 8];
 
@@ -148,6 +157,9 @@ struct UiCtx {
     overlay_crawl_line: usize,
     help_text: String,
     hidden: bool,
+    dots: Vec<HWND>,
+    dot_pts: Vec<(i32, i32)>,
+    dot_tick: u32,
 }
 
 fn run_ui_thread(visuals: VisualsConfig, ready_tx: mpsc::Sender<u32>) -> anyhow::Result<()> {
@@ -206,7 +218,16 @@ fn run_ui_thread(visuals: VisualsConfig, ready_tx: mpsc::Sender<u32>) -> anyhow:
         // comes from the first render once content exists.
         let hwnd_help = create_window(&class_name, overlay_ex, WS_POPUP, HELP_OFFSET[0], HELP_OFFSET[1], 10, visuals.overlay_font_size.max(1) as i32, hinstance.into());
 
+        let dots: Vec<HWND> = (0..MAX_DOTS)
+            .map(|_| {
+                let h = create_window(&class_name, overlay_ex, WS_POPUP, 0, 0, 1, 1, hinstance.into());
+                let _ = SetLayeredWindowAttributes(h, COLORREF(0), 0, LWA_ALPHA);
+                h
+            })
+            .collect();
+
         apply_capture_exclusion(&[hwnd_indicator, hwnd_form, hwnd_overlay, hwnd_help]);
+        apply_capture_exclusion(&dots);
 
         let mut ctx = Box::new(UiCtx {
             visuals: visuals.clone(),
@@ -223,6 +244,9 @@ fn run_ui_thread(visuals: VisualsConfig, ready_tx: mpsc::Sender<u32>) -> anyhow:
             overlay_crawl_line: 0,
             help_text: String::new(),
             hidden: false,
+            dots: dots.clone(),
+            dot_pts: Vec::new(),
+            dot_tick: 0,
         });
         let ctx_ptr: *mut UiCtx = &mut *ctx;
         SetWindowLongPtrW(hwnd_indicator, GWLP_USERDATA, ctx_ptr as isize);
@@ -230,6 +254,9 @@ fn run_ui_thread(visuals: VisualsConfig, ready_tx: mpsc::Sender<u32>) -> anyhow:
         SetWindowLongPtrW(hwnd_overlay, GWLP_USERDATA, ctx_ptr as isize);
         SetWindowLongPtrW(hwnd_debug, GWLP_USERDATA, ctx_ptr as isize);
         SetWindowLongPtrW(hwnd_help, GWLP_USERDATA, ctx_ptr as isize);
+        for &d in &dots {
+            SetWindowLongPtrW(d, GWLP_USERDATA, ctx_ptr as isize);
+        }
 
         let _ = ShowWindow(hwnd_indicator, SW_SHOWNOACTIVATE);
         topmost(hwnd_indicator);
@@ -393,6 +420,7 @@ fn drain_commands(ctx: &mut UiCtx) {
                 // touched hwnd_help before, so "hide everything" didn't hide an open cheat sheet).
                 render_overlay(ctx, false);
                 render_help_panel(ctx);
+                layout_dots(ctx);
             }
             UICommand::ShowHelp(t) => {
                 ctx.help_text = t;
@@ -406,6 +434,10 @@ fn drain_commands(ctx: &mut UiCtx) {
                 ctx.flash_text = Some(t);
                 start_flash_timer(ctx);
                 render_overlay(ctx, false);
+            }
+            UICommand::SetDots(pts) => {
+                ctx.dot_pts = pts;
+                layout_dots(ctx);
             }
             UICommand::Shutdown => unsafe {
                 PostQuitMessage(0);
@@ -437,6 +469,47 @@ fn reassert_topmost(ctx: &UiCtx) {
     topmost(ctx.hwnd_help);
     #[cfg(feature = "debug")]
     topmost(ctx.hwnd_debug);
+    for &d in &ctx.dots {
+        topmost(d);
+    }
+}
+
+/// Places/shows the first `dot_pts.len()` pool windows centred on their points, hides the rest,
+/// and runs the pulse timer only while at least one dot is visible. Respects the hide toggle.
+fn layout_dots(ctx: &mut UiCtx) {
+    let size = ctx.visuals.dot_size.max(1) as i32;
+    let visible = if ctx.hidden { 0 } else { ctx.dot_pts.len().min(MAX_DOTS) };
+    unsafe {
+        for (i, &d) in ctx.dots.iter().enumerate() {
+            if i < visible {
+                let (x, y) = ctx.dot_pts[i];
+                let _ = SetWindowPos(d, HWND_TOPMOST, x - size / 2, y - size / 2, size, size, SWP_NOACTIVATE);
+                let _ = ShowWindow(d, SW_SHOWNOACTIVATE);
+                invalidate(d);
+            } else {
+                let _ = ShowWindow(d, SW_HIDE);
+            }
+        }
+        if visible > 0 {
+            if SetTimer(ctx.hwnd_indicator, DOT_PULSE_TIMER_ID, DOT_PULSE_MS, None) == 0 {
+                log::warn!("dots: SetTimer for pulse failed");
+            }
+        } else {
+            let _ = KillTimer(ctx.hwnd_indicator, DOT_PULSE_TIMER_ID);
+        }
+    }
+}
+
+/// One pulse frame: smooth sine swing in alpha, same phase for every dot.
+fn pulse_dots(ctx: &mut UiCtx) {
+    ctx.dot_tick = (ctx.dot_tick + 1) % DOT_PULSE_TICKS;
+    let phase = ctx.dot_tick as f32 / DOT_PULSE_TICKS as f32 * std::f32::consts::TAU;
+    let alpha = DOT_ALPHA_MIN + (DOT_ALPHA_MAX - DOT_ALPHA_MIN) * (0.5 + 0.5 * phase.sin());
+    for &d in &ctx.dots {
+        unsafe {
+            let _ = SetLayeredWindowAttributes(d, COLORREF(0), alpha as u8, LWA_ALPHA);
+        }
+    }
 }
 
 fn start_crawl_timer(ctx: &UiCtx) {
@@ -905,6 +978,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                         invalidate(ctx.hwnd_form);
                     }
                     TOPMOST_REASSERT_TIMER_ID => reassert_topmost(ctx),
+                    DOT_PULSE_TIMER_ID => pulse_dots(ctx),
                     _ => {}
                 }
             }
@@ -957,7 +1031,9 @@ unsafe fn paint(hwnd: HWND, ctx: &UiCtx) {
         return;
     }
 
-    let fill_color = if hwnd == ctx.hwnd_indicator {
+    let fill_color = if ctx.dots.contains(&hwnd) {
+        super::colors::parse_hex(&ctx.visuals.dot_color).unwrap_or((255, 0, 0))
+    } else if hwnd == ctx.hwnd_indicator {
         let c = match ctx.indicator {
             IndicatorState::Ready => &ctx.visuals.color_ready,
             IndicatorState::Processing => &ctx.visuals.color_processing,

@@ -11,6 +11,7 @@ pub mod forms_run_legacy;
 pub mod help_toggle;
 pub mod hide_toggle;
 pub mod launch_debugger;
+pub mod screen_answer;
 pub mod screenshot_query;
 pub mod switch_model;
 pub mod test_model;
@@ -40,6 +41,8 @@ pub struct ActionContext {
     pub answer_task: TaskSlot,
     /// Forms runs get their own independent slot — design doc §7.3.
     pub forms_task: TaskSlot,
+    /// Screen Answer's own slot: holds the answer job and then its dot-tracking loop.
+    pub screen_task: TaskSlot,
 }
 
 pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
@@ -67,6 +70,15 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
             spawn_exclusive(ctx.answer_task.clone(), ctx.clone(), |c| async move { test_model::execute(c).await }).await;
         }
         InputEvent::SwitchModel => switch_model::execute(&ctx),
+        InputEvent::ScreenAnswer => {
+            spawn_exclusive(ctx.screen_task.clone(), ctx.clone(), |c| async move { screen_answer::execute(c).await }).await;
+        }
+        InputEvent::ClearDots => {
+            if let Some(h) = ctx.screen_task.lock().await.take() {
+                h.abort();
+            }
+            let _ = ctx.ui_tx.send(UICommand::SetDots(Vec::new()));
+        }
         // Design doc §7.4: v3 legacy is the default/primary engine as of 2026-09-20 — it takes
         // over these two main binds. v3 new (AX-tree/fill_page loop, §7.3) moved to the
         // `*Axtree` binds below, parked but reachable, not deleted.
