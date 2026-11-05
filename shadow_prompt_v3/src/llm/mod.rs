@@ -18,6 +18,7 @@
 // change at all. See docs/OPENROUTER.md §5 for the wire format this is built against.
 
 pub mod capabilities;
+pub mod conversation;
 pub mod messages;
 pub mod request;
 pub mod response;
@@ -48,11 +49,13 @@ pub struct LlmClient {
     /// Default fallback chain from config (design doc §8). `switch_model` (design doc §8/§10)
     /// mutates which of the first two entries leads — see `active_models()`.
     pub default_models: Arc<Vec<String>>,
-    /// Runtime toggle for `switch_model` — true once Sonnet 5 has been promoted to position #1.
-    /// Pure in-memory state, resets to default (false) on every daemon restart.
-    pub sonnet_primary: Arc<std::sync::atomic::AtomicBool>,
-    /// One per daemon launch — design doc §8, improves OpenRouter's cache-hit routing.
-    pub session_id: Arc<str>,
+    /// Runtime toggle for `switch_model` — true once the first two chain entries have been
+    /// swapped. Pure in-memory state, resets to default (false) on every daemon restart.
+    pub primary_swapped: Arc<std::sync::atomic::AtomicBool>,
+    /// Improves OpenRouter's provider-sticky cache-hit routing. One per conversation: starts
+    /// fresh on daemon launch and is replaced by `new_session()` on a conversation reset, so a
+    /// new test doesn't chase the old test's cache.
+    pub session_id: Arc<std::sync::Mutex<Arc<str>>>,
     /// The chat/completions URL to POST to. Always `ENDPOINT` in production — `new()` is the
     /// only production constructor and it always sets this to `ENDPOINT`. Private (not part of
     /// the public constructor signature) so nothing outside this module can accidentally point
@@ -92,18 +95,23 @@ impl LlmClient {
             http: Arc::new(http),
             api_key: Arc::from(api_key),
             default_models: Arc::new(models),
-            sonnet_primary: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            session_id: Arc::from(uuid_like_session_id()),
+            primary_swapped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            session_id: Arc::new(std::sync::Mutex::new(Arc::from(uuid_like_session_id()))),
             endpoint: Arc::from(ENDPOINT),
         })
     }
 
     /// The `switch_model` hotkey's action — design doc §8/§10. Toggles which of the two paid
     /// models leads; both stay in the chain either way, only their order changes. Returns the
-    /// name of the model now in front, for the overlay confirmation.
-    pub fn toggle_primary_model(&self) -> &'static str {
-        let was = self.sonnet_primary.fetch_xor(true, std::sync::atomic::Ordering::SeqCst);
-        if was { "Gemini 3.5 Flash Lite" } else { "Claude Sonnet 5" }
+    /// ID of the model now in front, for the overlay confirmation.
+    pub fn toggle_primary_model(&self) -> String {
+        self.primary_swapped.fetch_xor(true, std::sync::atomic::Ordering::SeqCst);
+        self.active_models().into_iter().next().unwrap_or_default()
+    }
+
+    /// Starts a new OpenRouter session id — called on a conversation reset.
+    pub fn new_session(&self) {
+        *self.session_id.lock().unwrap() = Arc::from(uuid_like_session_id());
     }
 
     /// The effective fallback chain right now, honoring `switch_model`'s toggle. Callers that
@@ -111,7 +119,7 @@ impl LlmClient {
     /// `capabilities::filter_for_vision` before use — see that module for why.
     fn active_models(&self) -> Vec<String> {
         let mut chain = (*self.default_models).clone();
-        if self.sonnet_primary.load(std::sync::atomic::Ordering::SeqCst) && chain.len() >= 2 {
+        if self.primary_swapped.load(std::sync::atomic::Ordering::SeqCst) && chain.len() >= 2 {
             chain.swap(0, 1);
         }
         chain
@@ -136,7 +144,26 @@ impl LlmClient {
         has_image: bool,
         on_delta: Option<DeltaSink<'_>>,
     ) -> anyhow::Result<String> {
-        let mut messages = vec![Message::system_text(system_prompt), Message::User { content: initial_content }];
+        self.run_turn_with_history(system_prompt, Vec::new(), initial_content, tools, has_image, on_delta).await
+    }
+
+    /// `run_turn` with earlier finished turns of the running conversation placed between the
+    /// system prompt and the new user message (the standard chatbot technique: the model has no
+    /// memory, so the whole conversation is resent each time). `has_image` must be true if the
+    /// history *or* the new content holds an image, so the vision filter applies.
+    pub async fn run_turn_with_history(
+        &self,
+        system_prompt: &str,
+        history: Vec<Message>,
+        initial_content: Vec<ContentPart>,
+        tools: &[Arc<dyn Tool>],
+        has_image: bool,
+        on_delta: Option<DeltaSink<'_>>,
+    ) -> anyhow::Result<String> {
+        let mut messages = Vec::with_capacity(history.len() + 2);
+        messages.push(Message::system_text(system_prompt));
+        messages.extend(history);
+        messages.push(Message::User { content: initial_content });
 
         let models = if has_image {
             capabilities::filter_for_vision(&self.active_models())
@@ -285,7 +312,8 @@ impl LlmClient {
         tools: Vec<ServerOrFunctionTool>,
         on_delta: Option<DeltaSink<'_>>,
     ) -> anyhow::Result<Response> {
-        let body = build(models, messages, tools, &self.session_id);
+        let session_id = self.session_id.lock().unwrap().clone();
+        let body = build(models, messages, tools, &session_id);
         let body = serde_json::to_string(&body)?;
         let http = self.http.clone();
         let api_key = self.api_key.clone();
@@ -562,8 +590,8 @@ mod tests {
             http: Arc::new(reqwest::Client::new()),
             api_key: Arc::from("test-key"),
             default_models: Arc::new(models),
-            sonnet_primary: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            session_id: Arc::from("test-session"),
+            primary_swapped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            session_id: Arc::new(std::sync::Mutex::new(Arc::from("test-session"))),
             endpoint: Arc::from(endpoint),
         }
     }
@@ -692,6 +720,28 @@ mod tests {
             vec!["4".to_string(), "2".to_string()],
             "the callback must fire once per non-empty content fragment, as it arrives"
         );
+    }
+
+    #[tokio::test]
+    async fn history_is_sent_between_system_prompt_and_new_message_and_new_session_changes_id() {
+        let server = MockServer::start().await;
+        let body = sse_body(&[serde_json::json!({"choices": [{"delta": {"content": "ok"}, "finish_reason": "stop"}]})]);
+        Mock::given(method("POST")).and(path("/")).respond_with(respond_sse(body)).mount(&server).await;
+        let client = test_client(server.uri(), vec!["anthropic/claude-sonnet-5.5".to_string()]);
+
+        let history = vec![Message::User { content: vec![ContentPart::text("q1")] }, Message::assistant_text("a1")];
+        client.run_turn_with_history("sys", history, vec![ContentPart::text("q2")], &[], false, None).await.unwrap();
+        client.new_session();
+        client.run_turn("sys", vec![ContentPart::text("q3")], &[], false, None).await.unwrap();
+
+        let reqs = server.received_requests().await.unwrap();
+        let first: serde_json::Value = serde_json::from_slice(&reqs[0].body).unwrap();
+        let roles: Vec<&str> = first["messages"].as_array().unwrap().iter().map(|m| m["role"].as_str().unwrap()).collect();
+        assert_eq!(roles, ["system", "user", "assistant", "user"]);
+        assert_eq!(first["messages"][3]["content"][0]["text"], "q2");
+        let second: serde_json::Value = serde_json::from_slice(&reqs[1].body).unwrap();
+        assert_eq!(first["session_id"], "test-session");
+        assert_ne!(second["session_id"], first["session_id"], "reset must start a new OpenRouter session");
     }
 
     #[tokio::test]

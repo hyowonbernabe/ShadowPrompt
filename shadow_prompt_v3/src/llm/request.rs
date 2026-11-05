@@ -16,7 +16,7 @@
 //     regardless of need and would contradict "autonomous, only when needed" (corrected during
 //     scaffolding; the design doc's plugin-based wording predates this correction).
 
-use super::messages::{Message, ToolDef};
+use super::messages::{CacheControl, Message, ToolDef};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -36,6 +36,11 @@ pub struct Request<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<ProviderPrefs>,
     pub session_id: &'a str,
+    /// OpenRouter's automatic prompt caching: one top-level marker that it places on the last
+    /// cacheable block and moves forward as the conversation grows, so the resent history is
+    /// billed at the cache-read rate. Anthropic-only feature — see `build` for when it's sent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<CacheControl>,
 }
 
 /// A request's `tools` array entries are either our own function-tool defs (`list_docs`,
@@ -120,5 +125,35 @@ pub fn build<'a>(
         //     now for a cited structural reason rather than an open question.
         provider: None,
         session_id,
+        // Only when an Anthropic model leads this request: an unknown field rejected by another
+        // provider would be a hard error that skips the rest of the fallback chain. 1h TTL
+        // because gaps between questions in one test can exceed the 5-minute default.
+        cache_control: models
+            .first()
+            .filter(|m| m.starts_with("anthropic/"))
+            .map(|_| CacheControl::ephemeral("1h")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn body_for(first: &str) -> serde_json::Value {
+        let models = vec![first.to_string(), "nex-agi/nex-n2.5-mini:free".to_string()];
+        serde_json::to_value(build(&models, &[], Vec::new(), "s")).unwrap()
+    }
+
+    #[test]
+    fn cache_control_sent_when_anthropic_leads() {
+        assert_eq!(
+            body_for("anthropic/claude-sonnet-5.5")["cache_control"],
+            serde_json::json!({"type": "ephemeral", "ttl": "1h"})
+        );
+    }
+
+    #[test]
+    fn cache_control_omitted_when_other_model_leads() {
+        assert!(body_for("google/gemini-3.8-flash").get("cache_control").is_none());
     }
 }

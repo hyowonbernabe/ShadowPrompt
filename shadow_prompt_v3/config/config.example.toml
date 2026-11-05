@@ -6,8 +6,8 @@
 api_key = "sk-or-REPLACE-ME"
 # Fallback chain, tried in order. Uncomment to override the built-in default (design doc §8):
 # models = [
-#   "google/gemini-3.5-flash-lite",
-#   "anthropic/claude-sonnet-5",
+#   "anthropic/claude-sonnet-5.5",
+#   "google/gemini-3.8-flash",
 #   "inclusionai/ling-3.0-flash-sante:free",
 #   "inclusionai/ling-3.0-flash-fin:free",
 #   "nex-agi/nex-n2.5-mini:free",

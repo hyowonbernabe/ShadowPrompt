@@ -21,7 +21,7 @@ pub struct OpenRouterConfig {
     pub api_key: String,
 
     /// Fallback chain, tried in order by OpenRouter's own `models` array — design doc §8.
-    /// Default order: gemini-3.5-flash-lite -> claude-sonnet-5 -> the three free models
+    /// Default order: claude-sonnet-5.5 -> gemini-3.8-flash -> the three free models
     /// ranked by actual uptime (nex last). `switch_model` (design doc §8/§10) swaps which of
     /// the first two entries is tried first at runtime; it does not remove either from the
     /// chain, both stay present, only their order changes.
@@ -31,8 +31,8 @@ pub struct OpenRouterConfig {
 
 fn default_model_chain() -> Vec<String> {
     vec![
-        "google/gemini-3.5-flash-lite".to_string(),
-        "anthropic/claude-sonnet-5".to_string(),
+        "anthropic/claude-sonnet-5.5".to_string(),
+        "google/gemini-3.8-flash".to_string(),
         "inclusionai/ling-3.0-flash-sante:free".to_string(),
         "inclusionai/ling-3.0-flash-fin:free".to_string(),
         "nex-agi/nex-n2.5-mini:free".to_string(),

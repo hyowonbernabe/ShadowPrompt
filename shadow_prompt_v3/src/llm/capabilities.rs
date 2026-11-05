@@ -5,8 +5,8 @@
 //
 // The one thing this table exists to prevent: silently sending an image to a model that can't
 // read one. Confirmed via live OpenRouter research (docs/OPENROUTER.md):
-//   - google/gemini-3.5-flash-lite: text+image+video+file+audio input. Vision: yes.
-//   - anthropic/claude-sonnet-5: text+image+file input. Vision: yes.
+//   - google/gemini-3.8-flash: text+image+video+file+audio input. Vision: yes.
+//   - anthropic/claude-sonnet-5.5: text+image+file input. Vision: yes.
 //   - nex-agi/nex-n2.5-mini:free: text+image input. Vision: yes.
 //   - inclusionai/ling-3.0-flash-fin:free: text-only. Vision: NO.
 //   - inclusionai/ling-3.0-flash-sante:free: text-only. Vision: NO.
@@ -39,16 +39,16 @@ mod tests {
 
     #[test]
     fn the_other_three_are_vision_capable() {
-        assert!(supports_vision("google/gemini-3.5-flash-lite"));
-        assert!(supports_vision("anthropic/claude-sonnet-5"));
+        assert!(supports_vision("google/gemini-3.8-flash"));
+        assert!(supports_vision("anthropic/claude-sonnet-5.5"));
         assert!(supports_vision("nex-agi/nex-n2.5-mini:free"));
     }
 
     #[test]
     fn filtering_preserves_order_and_drops_text_only() {
         let chain = vec![
-            "google/gemini-3.5-flash-lite".to_string(),
-            "anthropic/claude-sonnet-5".to_string(),
+            "google/gemini-3.8-flash".to_string(),
+            "anthropic/claude-sonnet-5.5".to_string(),
             "inclusionai/ling-3.0-flash-sante:free".to_string(),
             "inclusionai/ling-3.0-flash-fin:free".to_string(),
             "nex-agi/nex-n2.5-mini:free".to_string(),
@@ -57,8 +57,8 @@ mod tests {
         assert_eq!(
             filtered,
             vec![
-                "google/gemini-3.5-flash-lite".to_string(),
-                "anthropic/claude-sonnet-5".to_string(),
+                "google/gemini-3.8-flash".to_string(),
+                "anthropic/claude-sonnet-5.5".to_string(),
                 "nex-agi/nex-n2.5-mini:free".to_string(),
             ]
         );
