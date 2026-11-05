@@ -1,17 +1,17 @@
-﻿[package]
+[package]
 name = "shadowprompt"
 version = "3.2.0"
 edition = "2021"
-description = "Lightweight stealth AI assistant for Windows â€” single executable, hotkey-driven."
+description = "Lightweight stealth AI assistant for Windows — single executable, hotkey-driven."
 license = "Apache-2.0"
 repository = "https://github.com/hyowonbernabe/ShadowPrompt"
 
 [features]
 default = []
-# Enables console window + stdout/file logging. Off in release builds â€” see docs/SHADOWPROMPT_V3_DESIGN.md Â§13
+# Enables console window + stdout/file logging. Off in release builds — see docs/SHADOWPROMPT_V3_DESIGN.md §13
 # ("log file only on dev flag, silent in prod").
 debug = []
-# Embeds the requireAdministrator manifest instead of the default asInvoker one â€” see
+# Embeds the requireAdministrator manifest instead of the default asInvoker one — see
 # app.manifest / app-asinvoker.manifest for the z-order vs no-UAC tradeoff.
 admin = []
 
@@ -27,7 +27,7 @@ path = "src/lib.rs"
 # Async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
 
-# HTTP (OpenRouter transport; no native-tls, no gzip â€” rustls only)
+# HTTP (OpenRouter transport; no native-tls, no gzip — rustls only)
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 
 # Global hotkeys + mouse hook
@@ -35,10 +35,10 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # letter) never reach the focused app. Same WH_KEYBOARD_LL hook as `listen` on Windows.
 rdev = { version = "0.5", features = ["unstable_grab"] }
 
-# Clipboard (text only â€” image-on-clipboard support was proposed and declined, design doc Â§3)
+# Clipboard (text only — image-on-clipboard support was proposed and declined, design doc §3)
 arboard = "3"
 
-# Windows API (Win32 + WinRT). No Media_Ocr feature â€” OCR is fully removed in v3.
+# Windows API (Win32 + WinRT). No Media_Ocr feature — OCR is fully removed in v3.
 windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_Security",
@@ -56,7 +56,7 @@ windows = { version = "0.58", features = [
 ] }
 
 # Browser automation: pure-Rust, async-native CDP client. No Node, no Playwright, no bundled
-# Chromium â€” connects to an already-installed/launched Chrome/Edge. See design doc Â§7.3.
+# Chromium — connects to an already-installed/launched Chrome/Edge. See design doc §7.3.
 # No features needed: we don't use its browser-fetching capability (chromiumoxide_fetcher/
 # native-tls/rustls/zip), only its CDP client for connecting to an existing browser.
 chromiumoxide = { version = "0.9", default-features = false }
@@ -82,13 +82,13 @@ anyhow = "1"
 async-trait = "0.1.92"
 
 [dev-dependencies]
-# Mocked HTTP layer for llm/ tests (design doc Â§13's "no real OpenRouter key in CI" constraint
+# Mocked HTTP layer for llm/ tests (design doc §13's "no real OpenRouter key in CI" constraint
 # means the agentic loop, retry, and model-chain logic get exercised against a local mock
-# server instead â€” see llm/mod.rs's `mod tests` and llm/retry.rs's `mod tests`).
+# server instead — see llm/mod.rs's `mod tests` and llm/retry.rs's `mod tests`).
 wiremock = "0.6"
 
 [profile.release]
-# Size-optimized release profile â€” design doc Â§12 ("keep the download small"). This app is
+# Size-optimized release profile — design doc §12 ("keep the download small"). This app is
 # I/O-bound (HTTP calls, DOM reads), not CPU-bound, so trading a little runtime speed for a
 # smaller single EXE is the right call here.
 opt-level = "z"
