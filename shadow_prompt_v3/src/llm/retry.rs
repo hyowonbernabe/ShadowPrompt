@@ -18,7 +18,9 @@
 use std::future::Future;
 use std::time::Duration;
 
-const ATTEMPTS: u32 = 3;
+/// Waits 1s, 2s, 4s between tries: rides out a ~7s connection drop (common on the flaky networks
+/// this runs on) without hanging forever.
+const ATTEMPTS: u32 = 4;
 
 /// A `call()` attempt's outcome, distinguishing *why* it failed so `with_retry` knows whether
 /// retrying could plausibly help.

@@ -49,6 +49,13 @@ pub const CUT_OFF_NOTE: &str = "\n\n(answer cut off: too long)";
 /// Upper bound on one HTTP request, start to last byte (see `LlmClient::new`).
 const OVERALL_CAP: Duration = Duration::from_secs(300);
 
+/// No progress at all for this long = the connection froze (a common failure on the flaky
+/// networks this runs on): drop it and retry. Measured 2026-11-06: Claude sends a keep-alive
+/// comment about every 0.5 s while thinking and Gemini's longest silence was 1.6 s, so 25 s of
+/// silence is never a slow-but-alive answer. Applies to uploading the request (see
+/// `send_watched`) and to every gap while reading the streamed answer (`read_timeout`).
+const STALL: Duration = Duration::from_secs(25);
+
 /// A short, user-facing reason for a failed model call, for the overlay notice. The full error
 /// still goes to the log.
 pub fn user_facing_error(e: &anyhow::Error) -> &'static str {
@@ -130,8 +137,14 @@ impl LlmClient {
         // it off mid-stream on every retry. OVERALL_CAP still bounds a trickling stream.
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(connect_secs))
-            .read_timeout(Duration::from_secs(read_secs))
+            // A configured value above STALL only makes a frozen connection cost longer before
+            // the retry; it can't make a live answer succeed (see STALL).
+            .read_timeout(Duration::from_secs(read_secs).min(STALL))
             .timeout(OVERALL_CAP)
+            // On a flaky network a pooled connection can die silently between questions; reusing
+            // it costs a failed attempt. Drop idle ones quickly and probe live ones.
+            .pool_idle_timeout(Duration::from_secs(20))
+            .tcp_keepalive(Duration::from_secs(15))
             .build()?;
         Ok(Self {
             http: Arc::new(http),
@@ -396,18 +409,15 @@ impl LlmClient {
             async move {
                 // No HTTP response at all yet — a connect/send failure. This is the one thing
                 // this retry layer exists for (see retry.rs's module doc comment).
-                let resp = http
+                let req = http
                     .post(&*endpoint)
                     .bearer_auth(&*api_key)
                     .header("Content-Type", "application/json")
                     .header("HTTP-Referer", "https://github.com/hyowonbernabe/ShadowPrompt")
                     .header("X-Title", "ShadowPrompt")
                     // Design doc §8: keep out of OpenRouter's public app rankings.
-                    .header("X-OpenRouter-App-Visibility", "hidden")
-                    .body(body)
-                    .send()
-                    .await
-                    .map_err(|e| retry::CallError::Transport(e.into()))?;
+                    .header("X-OpenRouter-App-Visibility", "hidden");
+                let resp = send_watched(req, body, STALL).await.map_err(retry::CallError::Transport)?;
                 let status = resp.status();
                 if !status.is_success() {
                     // A real HTTP response came back — OpenRouter's own `models`-array fallback
@@ -427,6 +437,39 @@ impl LlmClient {
             }
         })
         .await
+    }
+}
+
+/// Sends `body` and waits for the response headers, failing if the upload makes no progress for
+/// `stall` (reqwest has no write timeout: a connection that freezes mid-upload would otherwise
+/// hang until OVERALL_CAP). The body goes out in 16 KB pieces; each piece handed to the socket
+/// counts as progress, and once it's all sent the server has `stall` to start answering.
+async fn send_watched(req: reqwest::RequestBuilder, body: String, stall: Duration) -> anyhow::Result<reqwest::Response> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let start = std::time::Instant::now();
+    let last = Arc::new(AtomicU64::new(0));
+    let len = body.len();
+    let pieces: Vec<Vec<u8>> = body.into_bytes().chunks(16 * 1024).map(<[u8]>::to_vec).collect();
+    let seen = last.clone();
+    let stream = futures::stream::iter(pieces).map(move |piece| {
+        seen.store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
+        Ok::<_, std::io::Error>(piece)
+    });
+    let send = req
+        .header(reqwest::header::CONTENT_LENGTH, len)
+        .body(reqwest::Body::wrap_stream(stream))
+        .send();
+    tokio::pin!(send);
+    loop {
+        tokio::select! {
+            r = &mut send => return r.map_err(Into::into),
+            _ = tokio::time::sleep(Duration::from_millis(500)) => {
+                let idle = start.elapsed().saturating_sub(Duration::from_millis(last.load(Ordering::Relaxed)));
+                if idle > stall {
+                    anyhow::bail!("connection stalled: no progress for {}s", stall.as_secs());
+                }
+            }
+        }
     }
 }
 
@@ -667,6 +710,35 @@ fn uuid_like_session_id() -> String {
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    #[tokio::test]
+    async fn send_watched_gives_up_on_a_frozen_connection() {
+        // Accepts the TCP connection, then never reads or answers: a frozen network.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (_sock, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        let http = reqwest::Client::new();
+        let t = std::time::Instant::now();
+        let body = "x".repeat(8 * 1024 * 1024); // bigger than socket buffers, so the upload blocks
+        let err = send_watched(http.post(format!("http://{addr}/")), body, Duration::from_secs(2)).await.unwrap_err();
+        assert!(format!("{err}").contains("stalled"), "{err}");
+        assert!(t.elapsed() < Duration::from_secs(6), "took {:?}", t.elapsed());
+    }
+
+    #[tokio::test]
+    async fn send_watched_passes_a_normal_request_through() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/x")).respond_with(ResponseTemplate::new(200).set_body_string("ok")).mount(&server).await;
+        let http = reqwest::Client::new();
+        let body = "y".repeat(100_000);
+        let resp = send_watched(http.post(format!("{}/x", server.uri())), body, Duration::from_secs(5)).await.unwrap();
+        assert_eq!(resp.text().await.unwrap(), "ok");
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs[0].body.len(), 100_000, "whole body arrives, with its length");
+    }
     use std::sync::Mutex;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};

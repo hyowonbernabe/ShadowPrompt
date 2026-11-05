@@ -19,11 +19,14 @@ pub const MAX_IMAGES: usize = 20;
 /// clears old context in batches for the same reason).
 pub const IMAGE_DROP_BATCH: usize = 5;
 pub const REMOVED_IMAGE_TEXT: &str = "(earlier screenshot removed)";
-/// Total base64 image bytes kept, well under OpenRouter/Anthropic request-size limits.
-pub const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
+/// Total base64 image bytes per request. Every question re-uploads the whole history, so this is
+/// sized for slow connections: ~6 MB is ~30 typical JPEG screenshots (capture/image.rs), far more
+/// than MAX_IMAGES, so the count cap normally bites first and this only stops a run of very busy
+/// screens from making each question a multi-minute upload.
+pub const MAX_IMAGE_BYTES: usize = 6 * 1024 * 1024;
 /// Room kept free under MAX_IMAGE_BYTES for the question's own screenshot, which is sent on top
-/// of the history (capture/image.rs keeps one at ≤3.5 MB, ~4.7 MB as base64).
-const IMAGE_BYTES_RESERVE: usize = 5 * 1024 * 1024;
+/// of the history (capture/image.rs keeps one at ≤1.2 MB, ~1.6 MB as base64).
+const IMAGE_BYTES_RESERVE: usize = 1_600_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnKind {

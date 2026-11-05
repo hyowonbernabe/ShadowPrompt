@@ -64,7 +64,7 @@ chromiumoxide = { version = "0.9", default-features = false }
 futures = "0.3"
 
 # Image resize + encode (screenshot -> PNG for vision requests)
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 base64 = "0.22"
 
 # Config
