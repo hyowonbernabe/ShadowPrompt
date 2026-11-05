@@ -90,6 +90,9 @@ fn is_account_error(e: &anyhow::Error) -> bool {
 #[derive(Clone)]
 pub struct LlmClient {
     pub http: Arc<reqwest::Client>,
+    /// Longest silence allowed while the answer streams in (config `read_timeout_secs`, capped
+    /// at STALL: a longer wait only makes a frozen connection cost more).
+    read_gap: Duration,
     pub api_key: Arc<str>,
     /// Default fallback chain from config (design doc §8). `switch_model` (design doc §8/§10)
     /// mutates which of the first two entries leads — see `active_models()`.
@@ -137,9 +140,10 @@ impl LlmClient {
         // it off mid-stream on every retry. OVERALL_CAP still bounds a trickling stream.
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(connect_secs))
-            // A configured value above STALL only makes a frozen connection cost longer before
-            // the retry; it can't make a live answer succeed (see STALL).
-            .read_timeout(Duration::from_secs(read_secs).min(STALL))
+            // No reqwest read_timeout: it also counts the time spent *uploading* (nothing comes back
+            // until the request is sent), so a slow upload was killed every time. Silence is
+            // measured only while the answer streams in (`read_sse_stream`), and a frozen upload
+            // is caught by `send_watched`.
             .timeout(OVERALL_CAP)
             // On a flaky network a pooled connection can die silently between questions; reusing
             // it costs a failed attempt. Drop idle ones quickly and probe live ones.
@@ -148,6 +152,7 @@ impl LlmClient {
             .build()?;
         Ok(Self {
             http: Arc::new(http),
+            read_gap: Duration::from_secs(read_secs.max(1)).min(STALL),
             api_key: Arc::from(api_key),
             default_models: Arc::new(models),
             primary_swapped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -401,6 +406,7 @@ impl LlmClient {
         let api_key = self.api_key.clone();
 
         let endpoint = self.endpoint.clone();
+        let read_gap = self.read_gap;
         retry::with_retry(|| {
             let http = http.clone();
             let api_key = api_key.clone();
@@ -433,7 +439,7 @@ impl LlmClient {
                 // same way the old non-streaming path judged it: a dropped connection mid-read is
                 // `Transport` (worth retrying), a malformed SSE frame from a server that did
                 // respond is `Fatal` (retrying identical bytes won't fix malformed JSON).
-                read_sse_stream(resp, on_delta).await
+                read_sse_stream(resp, on_delta, read_gap).await
             }
         })
         .await
@@ -494,13 +500,23 @@ fn truncate_for_log(s: &str) -> String {
 /// discarded; `data: [DONE]` ends the stream. `on_delta`, when present, is invoked once per
 /// non-empty `content` fragment *as it arrives* — not after the whole body is buffered — so a
 /// caller can paint partial text incrementally.
-async fn read_sse_stream(resp: reqwest::Response, on_delta: Option<DeltaSink<'_>>) -> Result<Response, retry::CallError> {
+async fn read_sse_stream(resp: reqwest::Response, on_delta: Option<DeltaSink<'_>>, gap: Duration) -> Result<Response, retry::CallError> {
     let mut assembler = StreamAssembler::new(on_delta);
     let mut buf: Vec<u8> = Vec::new();
     let mut byte_stream = resp.bytes_stream();
     let mut saw_done = false;
 
-    'outer: while let Some(next) = byte_stream.next().await {
+    'outer: loop {
+        let next = match tokio::time::timeout(gap, byte_stream.next()).await {
+            Ok(Some(next)) => next,
+            Ok(None) => break,
+            Err(_) => {
+                return Err(retry::CallError::Transport(anyhow::anyhow!(
+                    "connection stalled: no data for {}s while receiving the answer",
+                    gap.as_secs()
+                )))
+            }
+        };
         let bytes = next.map_err(|e| retry::CallError::Transport(e.into()))?;
         push_sse_bytes(&mut buf, &bytes);
         for frame in drain_sse_frames(&mut buf) {
@@ -729,6 +745,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_stream_that_goes_silent_is_abandoned_after_the_gap() {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut req = [0u8; 4096];
+            let _ = tokio::io::AsyncReadExt::read(&mut sock, &mut req).await;
+            let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+            sock.write_all(head.as_bytes()).await.unwrap();
+            sock.write_all(b"11\r\n: still thinking\n\n\r\n").await.unwrap();
+            tokio::time::sleep(Duration::from_secs(30)).await; // then silence
+        });
+        let resp = reqwest::get(format!("http://{addr}/")).await.unwrap();
+        let t = std::time::Instant::now();
+        match read_sse_stream(resp, None, Duration::from_secs(1)).await {
+            Err(retry::CallError::Transport(e)) => assert!(format!("{e}").contains("stalled"), "{e}"),
+            _ => panic!("expected a retryable stall"),
+        }
+        assert!(t.elapsed() < Duration::from_secs(4));
+    }
+
+    #[tokio::test]
     async fn send_watched_passes_a_normal_request_through() {
         let server = MockServer::start().await;
         Mock::given(method("POST")).and(path("/x")).respond_with(ResponseTemplate::new(200).set_body_string("ok")).mount(&server).await;
@@ -751,6 +790,7 @@ mod tests {
     fn test_client(endpoint: String, models: Vec<String>) -> LlmClient {
         LlmClient {
             http: Arc::new(reqwest::Client::new()),
+            read_gap: STALL,
             api_key: Arc::from("test-key"),
             default_models: Arc::new(models),
             primary_swapped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
