@@ -81,7 +81,18 @@ unsafe fn capture_region_raw(x: i32, y: i32, w: i32, h: i32) -> anyhow::Result<V
     };
 
     let mut bits_ptr: *mut core::ffi::c_void = std::ptr::null_mut();
-    let dib = CreateDIBSection(mem_dc, &bmi, DIB_RGB_COLORS, &mut bits_ptr, None, 0)?;
+    let dib = match CreateDIBSection(mem_dc, &bmi, DIB_RGB_COLORS, &mut bits_ptr, None, 0) {
+        Ok(d) => d,
+        Err(e) => {
+            // Release everything acquired so far — screen_answer's tracking loop calls this
+            // every 500ms, so a leak here would pile up handles fast.
+            SelectObject(mem_dc, old);
+            let _ = DeleteObject(bitmap);
+            let _ = DeleteDC(mem_dc);
+            ReleaseDC(HWND::default(), screen_dc);
+            return Err(e.into());
+        }
+    };
     let dib_dc = CreateCompatibleDC(screen_dc);
     let old_dib = SelectObject(dib_dc, dib);
     let _ = BitBlt(dib_dc, 0, 0, w, h, mem_dc, 0, 0, SRCCOPY);

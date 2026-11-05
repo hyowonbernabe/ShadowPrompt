@@ -1,7 +1,7 @@
 // Screenshot Query — design doc §3. Drag-select region -> vision query. No OCR anywhere in
 // this path; the image goes straight to the model.
 
-use super::ActionContext;
+use super::{idle_indicator, ActionContext, RestoreOverlaysOnDrop};
 use super::clipboard_query::{ask_in_conversation, memory_tools};
 use crate::capture::{clipboard, image, screen};
 use crate::llm::messages::ContentPart;
@@ -20,9 +20,10 @@ const OVERLAY_HIDE_SETTLE: std::time::Duration = std::time::Duration::from_milli
 /// part. Shared by Screenshot Query and add-context.
 pub async fn capture_image_part(ctx: &ActionContext, x: i32, y: i32, w: i32, h: i32) -> anyhow::Result<ContentPart> {
     let _ = ctx.ui_tx.send(UICommand::HideOverlaysForCapture);
+    let restore = RestoreOverlaysOnDrop(ctx.ui_tx.clone());
     tokio::time::sleep(OVERLAY_HIDE_SETTLE).await;
     let capture_result = tokio::task::spawn_blocking(move || screen::capture_region(x, y, w, h)).await;
-    let _ = ctx.ui_tx.send(UICommand::RestoreOverlaysAfterCapture);
+    drop(restore);
     let png = capture_result??;
     tokio::task::spawn_blocking(move || image::prepare_for_request(&png, MAX_IMAGE_LONG_EDGE_PX)).await?
 }
@@ -47,6 +48,6 @@ pub async fn execute(ctx: ActionContext, x: i32, y: i32, w: i32, h: i32) -> anyh
     let answer_for_write = answer.clone();
     tokio::task::spawn_blocking(move || clipboard::write_text(&answer_for_write)).await??;
     let _ = ctx.ui_tx.send(UICommand::SetOverlayText(answer));
-    let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Ready));
+    let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(idle_indicator(&ctx)));
     Ok(())
 }

@@ -139,12 +139,17 @@ pub fn make_anchor(full: &Gray, coarse: &Gray, anchor: (i32, i32), target: (i32,
 /// if not confidently found (see module comment).
 pub fn locate(a: &mut Anchor, full: &Gray, coarse: &Gray, threshold: f32) -> Option<(i32, i32)> {
     let (pw, ph) = (a.coarse.w, a.coarse.h);
-    if coarse.w < pw || coarse.h < ph {
+    // The screen can shrink mid-tracking (resolution change, monitor unplugged/reordered);
+    // a template larger than the frame, or an empty search band, would underflow below.
+    if coarse.w < pw || coarse.h < ph || full.w < a.full.w || full.h < a.full.h {
         return None;
     }
     let last_qx = a.last.0 / COARSE_FACTOR as i32;
     let x0 = (last_qx - SEARCH_X_Q).max(0) as usize;
     let x1 = (last_qx + SEARCH_X_Q).min((coarse.w - pw) as i32) as usize;
+    if x0 > x1 {
+        return None;
+    }
 
     // Best and best-not-overlapping-the-best, at coarse res.
     let mut scores = Vec::with_capacity((x1 + 1 - x0) * (coarse.h - ph + 1));
@@ -191,8 +196,14 @@ pub fn locate(a: &mut Anchor, full: &Gray, coarse: &Gray, threshold: f32) -> Opt
     if win.0 < threshold {
         return None;
     }
+    let dot = (win.1 + a.offset.0, win.2 + a.offset.1);
+    // Anchor still visible but its target scrolled off this monitor: no dot beats a dot on the
+    // neighbouring screen.
+    if dot.0 < 0 || dot.1 < 0 || dot.0 >= full.w as i32 || dot.1 >= full.h as i32 {
+        return None;
+    }
     a.last = (win.1, win.2);
-    Some((win.1 + a.offset.0, win.2 + a.offset.1))
+    Some(dot)
 }
 
 #[cfg(test)]

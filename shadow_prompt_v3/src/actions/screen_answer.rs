@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::clipboard_query::memory_tools;
-use super::ActionContext;
+use super::{busy, idle_indicator, ActionContext, RestoreOverlaysOnDrop};
 use crate::capture::screen::{self, MonitorShot};
 use crate::capture::track::{self, Gray, COARSE_FACTOR};
 use crate::capture::{clipboard, image};
@@ -135,17 +135,35 @@ struct Tracked {
     anchor: track::Anchor,
 }
 
+/// Clears the dots when dropped: every exit of `execute` (finished, error, abort) leaves no
+/// frozen dot behind on a page that may have scrolled.
+struct ClearDotsOnDrop(tokio::sync::mpsc::UnboundedSender<UICommand>);
+
+impl Drop for ClearDotsOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.send(UICommand::SetDots(Vec::new()));
+    }
+}
+
 pub async fn execute(ctx: ActionContext) -> anyhow::Result<()> {
     let _ = ctx.ui_tx.send(UICommand::SetDots(Vec::new()));
+    let _clear = ClearDotsOnDrop(ctx.ui_tx.clone());
     let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Processing));
+    let result = run(&ctx).await;
+    if result.is_err() {
+        let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Error));
+    }
+    result
+}
 
+async fn run(ctx: &ActionContext) -> anyhow::Result<()> {
     let _ = ctx.ui_tx.send(UICommand::HideOverlaysForCapture);
+    let restore = RestoreOverlaysOnDrop(ctx.ui_tx.clone());
     tokio::time::sleep(OVERLAY_HIDE_SETTLE).await;
     let shots = tokio::task::spawn_blocking(screen::capture_monitors).await;
-    let _ = ctx.ui_tx.send(UICommand::RestoreOverlaysAfterCapture);
+    drop(restore);
     let shots = Arc::new(shots??);
     if shots.is_empty() {
-        let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Error));
         anyhow::bail!("screen_answer: no monitors found");
     }
 
@@ -153,7 +171,7 @@ pub async fn execute(ctx: ActionContext) -> anyhow::Result<()> {
     let (content, scales, image_sizes) = tokio::task::spawn_blocking(move || build_content(&shots_for_encode)).await??;
 
     let marks = Arc::new(Mutex::new(Vec::new()));
-    let mut tools = memory_tools(&ctx);
+    let mut tools = memory_tools(ctx);
     tools.push(Arc::new(MarkTool { image_sizes, marks: marks.clone() }));
 
     let cfg = &ctx.config;
@@ -164,22 +182,23 @@ pub async fn execute(ctx: ActionContext) -> anyhow::Result<()> {
         cfg.http.read_timeout_secs,
     )?;
     let prompt = format!("{BASE}\n\n{DELIVERY}");
-    let answer = match llm.run_turn(&prompt, content, &tools, true, None).await {
-        Ok(a) => a,
-        Err(e) => {
-            let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Error));
-            return Err(e);
-        }
+    let answer = {
+        let _busy = busy(ctx);
+        llm.run_turn(&prompt, content, &tools, true, None).await?
     };
 
     if !answer.trim().is_empty() {
-        let a = answer.clone();
-        tokio::task::spawn_blocking(move || clipboard::write_text(&a)).await??;
-        let _ = ctx.ui_tx.send(UICommand::SetOverlayText(answer));
+        // Overlay first: a clipboard locked by another app must not cost the user the answer.
+        let _ = ctx.ui_tx.send(UICommand::SetOverlayText(answer.clone()));
+        if let Err(e) = tokio::task::spawn_blocking(move || clipboard::write_text(&answer)).await? {
+            log::warn!("screen_answer: clipboard write failed: {e}");
+        }
     }
-    let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Ready));
+    let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(idle_indicator(ctx)));
 
-    let marks: Vec<Mark> = marks.lock().unwrap().clone();
+    let mut marks: Vec<Mark> = marks.lock().unwrap().clone();
+    // Only MAX_DOTS can be drawn; tracking more just burns CPU every tick.
+    marks.truncate(crate::ui::manager::MAX_DOTS);
     if marks.is_empty() {
         return Ok(());
     }
@@ -206,7 +225,6 @@ pub async fn execute(ctx: ActionContext) -> anyhow::Result<()> {
         }
         tokio::time::sleep(TRACK_INTERVAL).await;
     }
-    let _ = ctx.ui_tx.send(UICommand::SetDots(Vec::new()));
     Ok(())
 }
 

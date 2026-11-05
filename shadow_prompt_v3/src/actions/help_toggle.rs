@@ -1,5 +1,5 @@
 // help_toggle — auto-generated hotkey cheat sheet from live config. Ported from v2, updated for
-// the final 13-hotkey list (design doc §10).
+// the current hotkey list (design doc §10).
 
 use std::sync::Mutex;
 

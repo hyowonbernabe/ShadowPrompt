@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use super::ActionContext;
+use super::{busy, idle_indicator, ActionContext};
 use crate::capture::clipboard;
 use crate::knowledge::{ListDocsTool, ReadDocTool};
 use crate::llm::messages::ContentPart;
@@ -33,7 +33,7 @@ pub async fn execute(ctx: ActionContext) -> anyhow::Result<()> {
     let answer_for_write = answer.clone();
     tokio::task::spawn_blocking(move || clipboard::write_text(&answer_for_write)).await??;
     let _ = ctx.ui_tx.send(UICommand::SetOverlayText(answer));
-    let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Ready));
+    let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(idle_indicator(&ctx)));
     Ok(())
 }
 
@@ -51,6 +51,7 @@ pub async fn ask_in_conversation(
         let c = ctx.conversation.lock().unwrap();
         (c.to_messages(), c.has_image(), c.len())
     };
+    let _busy = busy(ctx);
     let answer = ctx
         .llm
         .run_turn_with_history(&general_prompt(), history, content.clone(), tools, content_has_image || history_has_image, None)
@@ -153,6 +154,7 @@ mod tests {
             answer_task: Arc::new(Mutex::new(None)),
             forms_task: Arc::new(Mutex::new(None)),
             conversation: Default::default(),
+            busy: Default::default(),
             screen_task: Arc::new(Mutex::new(None)),
         }
     }
@@ -179,6 +181,25 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[tokio::test]
+    async fn indicator_stays_processing_until_every_model_call_ends_even_on_abort() {
+        use crate::actions::{abort_slot, busy, idle_indicator};
+        use crate::ui::commands::IndicatorState;
+        let ctx = test_ctx(std::env::temp_dir(), false);
+        let a = busy(&ctx);
+        let c2 = ctx.clone();
+        let handle = tokio::spawn(async move {
+            let _b = busy(&c2);
+            std::future::pending::<()>().await;
+        });
+        tokio::task::yield_now().await;
+        *ctx.screen_task.lock().await = Some(handle);
+        drop(a);
+        assert!(matches!(idle_indicator(&ctx), IndicatorState::Processing), "screen job still running");
+        abort_slot(&ctx.screen_task).await;
+        assert!(matches!(idle_indicator(&ctx), IndicatorState::Ready), "aborted job must release its count");
     }
 
     #[tokio::test]

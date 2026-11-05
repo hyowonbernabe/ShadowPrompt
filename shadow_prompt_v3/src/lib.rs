@@ -97,6 +97,7 @@ fn run_daemon(cfg: config::Config) -> anyhow::Result<()> {
             answer_task: Arc::new(Mutex::new(None)),
             forms_task: Arc::new(Mutex::new(None)),
             conversation: Default::default(),
+            busy: Default::default(),
             screen_task: Arc::new(Mutex::new(None)),
         };
 

@@ -18,6 +18,7 @@ pub mod screenshot_query;
 pub mod switch_model;
 pub mod test_model;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -47,6 +48,9 @@ pub struct ActionContext {
     /// Running conversation shared by Clipboard/Screenshot Query and add-context. Forms doesn't
     /// use it. std (not tokio) Mutex: only ever held for a quick copy/push, never across an await.
     pub conversation: Arc<std::sync::Mutex<Conversation>>,
+    /// Model calls in flight across every slot — drives the indicator so one job finishing
+    /// doesn't show Ready while another is still waiting on the model. See `busy()`.
+    pub busy: Arc<AtomicUsize>,
     /// Screen Answer's own slot: holds the answer job and then its dot-tracking loop.
     pub screen_task: TaskSlot,
 }
@@ -89,10 +93,8 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
             spawn_exclusive(ctx.screen_task.clone(), ctx.clone(), |c| async move { screen_answer::execute(c).await }).await;
         }
         InputEvent::ClearDots => {
-            if let Some(h) = ctx.screen_task.lock().await.take() {
-                h.abort();
-            }
-            let _ = ctx.ui_tx.send(UICommand::SetDots(Vec::new()));
+            clear_dots(&ctx).await;
+            let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(idle_indicator(&ctx)));
         }
         // Design doc §7.4: v3 legacy is the default/primary engine as of 2026-09-20 — it takes
         // over these two main binds. v3 new (AX-tree/fill_page loop, §7.3) moved to the
@@ -136,7 +138,7 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
             let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::InstaDeleteArmed));
         }
         InputEvent::InstaDeleteDisarmed => {
-            let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Ready));
+            let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(idle_indicator(&ctx)));
         }
         InputEvent::InstaDeleteConfirmed => {
             log::warn!("insta-delete confirmed");
@@ -153,15 +155,51 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
     }
 }
 
-/// The indicator state to fall back to when a side action (add context, a cancelled
-/// selection) finishes: still `Processing` if a question is being answered, else `Ready`.
+/// The indicator state to show when a job finishes: still `Processing` if any other model call
+/// is in flight (any slot), else `Ready`.
 pub fn idle_indicator(ctx: &ActionContext) -> IndicatorState {
-    let running = ctx
-        .answer_task
-        .try_lock()
-        .map(|g| g.as_ref().is_some_and(|h| !h.is_finished()))
-        .unwrap_or(true); // slot busy being swapped = a query is starting
-    if running { IndicatorState::Processing } else { IndicatorState::Ready }
+    if ctx.busy.load(Ordering::SeqCst) > 0 { IndicatorState::Processing } else { IndicatorState::Ready }
+}
+
+/// Counts one in-flight model call until dropped — including when the task is aborted, since
+/// an abort drops the future and with it this guard.
+pub struct BusyGuard(Arc<AtomicUsize>);
+
+impl Drop for BusyGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+pub fn busy(ctx: &ActionContext) -> BusyGuard {
+    ctx.busy.fetch_add(1, Ordering::SeqCst);
+    BusyGuard(ctx.busy.clone())
+}
+
+/// Sends `RestoreOverlaysAfterCapture` when dropped, so an abort mid-capture can't leave the
+/// answer/help overlays (and dots) hidden.
+pub struct RestoreOverlaysOnDrop(pub tokio::sync::mpsc::UnboundedSender<UICommand>);
+
+impl Drop for RestoreOverlaysOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.send(UICommand::RestoreOverlaysAfterCapture);
+    }
+}
+
+/// Aborts whatever runs in `slot` and waits until it is actually gone, so nothing it does can
+/// land after the caller's next UI update (e.g. a tracking tick re-showing cleared dots).
+pub async fn abort_slot(slot: &TaskSlot) {
+    let handle = slot.lock().await.take();
+    if let Some(h) = handle {
+        h.abort();
+        let _ = h.await;
+    }
+}
+
+/// Stops Screen Answer (answer + dot tracking) and removes its dots.
+pub async fn clear_dots(ctx: &ActionContext) {
+    abort_slot(&ctx.screen_task).await;
+    let _ = ctx.ui_tx.send(UICommand::SetDots(Vec::new()));
 }
 
 async fn spawn_exclusive<F, Fut>(slot: TaskSlot, ctx: ActionContext, action: F)

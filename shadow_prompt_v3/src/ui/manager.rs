@@ -82,7 +82,7 @@ const TOPMOST_REASSERT_MS: u32 = 1500;
 /// only affects *where* it sits, not what it looks like.
 /// Screen Answer dots — a fixed pool created at startup, hidden until used.
 // ponytail: fixed pool; a 17th mark is just dropped. Grow lazily if real questions ever need more.
-const MAX_DOTS: usize = 16;
+pub const MAX_DOTS: usize = 16;
 const DOT_PULSE_TIMER_ID: usize = 5;
 const DOT_PULSE_MS: u32 = 60;
 /// Ticks per full pulse cycle (60ms x 25 = 1.5s). Alpha swings between these bounds.
@@ -397,6 +397,11 @@ fn drain_commands(ctx: &mut UiCtx) {
             UICommand::HideOverlaysForCapture => unsafe {
                 let _ = ShowWindow(ctx.hwnd_overlay, SW_HIDE);
                 let _ = ShowWindow(ctx.hwnd_help, SW_HIDE);
+                // Dots too — belt-and-suspenders for Windows builds where the capture-exclusion
+                // flag isn't applied, so they never end up inside a stored screenshot.
+                for &d in &ctx.dots {
+                    let _ = ShowWindow(d, SW_HIDE);
+                }
             },
             UICommand::RestoreOverlaysAfterCapture => {
                 // Re-render rather than a plain `ShowWindow` — this naturally respects whatever
@@ -404,6 +409,7 @@ fn drain_commands(ctx: &mut UiCtx) {
                 // unconditionally re-showing a panel the user had hidden on purpose.
                 render_overlay(ctx, false);
                 render_help_panel(ctx);
+                layout_dots(ctx);
             }
             UICommand::ToggleHide => {
                 ctx.hidden = !ctx.hidden;

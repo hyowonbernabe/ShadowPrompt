@@ -23,6 +23,9 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 pub fn start(cfg: HotkeysConfig) -> anyhow::Result<UnboundedReceiver<InputEvent>> {
     let bindings = build(&cfg)?;
     let insta = insta_delete_combo(&cfg)?;
+    for w in bindings::duplicate_warnings(&bindings, &insta) {
+        log::warn!("hotkey clash: {w}");
+    }
 
     let (tx, rx) = unbounded_channel();
     let tx_listener = tx.clone();
