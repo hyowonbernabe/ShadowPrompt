@@ -27,7 +27,17 @@ use crate::ui::commands::{IndicatorState, UICommand};
 /// coordinates the model reports. Staying under both keeps image pixels == model pixels.
 const MAX_LONG_EDGE: f64 = 1568.0;
 const MAX_PIXELS: f64 = 1_150_000.0;
-const TRACK_INTERVAL: Duration = Duration::from_millis(500);
+/// How often dots re-check the screen. Cheap because each check normally looks only at the tiny
+/// patch around each dot (see `track_tick`), so this can be fast enough to feel instant.
+const TRACK_INTERVAL: Duration = Duration::from_millis(66);
+/// A lost dot (scrolled away, covered) is searched for across its whole monitor at most this
+/// often — the full search is the expensive one.
+const FULL_SEARCH_EVERY: Duration = Duration::from_millis(500);
+/// When a dot moves, search this far above/below its last spot (full-res px) before falling back
+/// to the whole monitor: one scroll step between checks stays well inside it.
+const BAND_Y: i32 = 360;
+/// ...and this far left/right (the tracker's own horizontal reach).
+const BAND_X: i32 = 256;
 /// Tracking (and its captures) stop after this; dots disappear with it.
 const TRACK_LIFETIME: Duration = Duration::from_secs(600);
 /// Same settle as Screenshot Query: let the UI thread actually hide our overlays before capture.
@@ -131,8 +141,12 @@ fn to_monitor(p: (f64, f64), scale: f64) -> (i32, i32) {
 }
 
 struct Tracked {
-    monitor: usize,
+    /// The monitor's virtual-screen rect at answer time: (left, top, width, height).
+    mon: (i32, i32, i32, i32),
     anchor: track::Anchor,
+    /// Not found last tick: skip the cheap checks and wait for the next full search.
+    lost: bool,
+    next_full: Instant,
 }
 
 /// Clears the dots when dropped: every exit of `execute` (finished, error, abort) leaves no
@@ -208,21 +222,16 @@ async fn run(ctx: &ActionContext) -> anyhow::Result<()> {
     while started.elapsed() < TRACK_LIFETIME {
         let tick = Instant::now();
         let (pts, back) = tokio::task::spawn_blocking(move || {
-            let pts = screen::capture_monitors().map(|s| locate_all(&mut tracked, &s, threshold));
+            let pts = track_tick(&mut tracked, threshold);
             (pts, tracked)
         })
         .await?;
         tracked = back;
-        if tick.elapsed() > Duration::from_secs(1) {
-            log::warn!("screen_answer: tracking tick took {:?}", tick.elapsed());
+        if tick.elapsed() > Duration::from_millis(300) {
+            log::debug!("screen_answer: tracking tick took {:?}", tick.elapsed());
         }
-        match pts {
-            Ok(p) => {
-                let _ = ctx.ui_tx.send(UICommand::SetDots(p));
-            }
-            Err(e) => log::warn!("screen_answer: tracking capture failed: {e}"),
-        }
-        tokio::time::sleep(TRACK_INTERVAL).await;
+        let _ = ctx.ui_tx.send(UICommand::SetDots(pts));
+        tokio::time::sleep(TRACK_INTERVAL.saturating_sub(tick.elapsed())).await;
     }
     Ok(())
 }
@@ -259,30 +268,69 @@ fn make_tracked(shots: &[MonitorShot], scales: &[f64], marks: &[Mark]) -> Vec<Tr
         .filter_map(|m| {
             let (full, coarse) = &g[m.monitor];
             let anchor = track::make_anchor(full, coarse, to_monitor(m.anchor, scales[m.monitor]), to_monitor(m.target, scales[m.monitor]))?;
-            Some(Tracked { monitor: m.monitor, anchor })
+            let s = &shots[m.monitor];
+            Some(Tracked { mon: (s.left, s.top, s.width, s.height), anchor, lost: false, next_full: Instant::now() })
         })
         .collect()
 }
 
-/// Dot positions in virtual-screen coordinates, for every anchor confidently found right now.
-/// A monitor that disappeared (unplugged) just yields no dots for its marks.
-fn locate_all(tracked: &mut [Tracked], shots: &[MonitorShot], threshold: f32) -> Vec<(i32, i32)> {
-    // Grayscale only the monitors that actually have dots — on a 4K/8K second screen without
-    // dots this conversion was most of the per-tick cost.
-    let g: Vec<Option<(Gray, Gray)>> = shots
-        .iter()
-        .enumerate()
-        .map(|(i, s)| tracked.iter().any(|t| t.monitor == i).then(|| grays(s)))
-        .collect();
+/// One tracking pass. Dot positions in virtual-screen coordinates, for every anchor confidently
+/// found right now. Per dot, cheapest first:
+///   1. grab just the patch around its last spot and check it's still there (the usual case:
+///      nothing moved — a few thousand pixels, well under a millisecond);
+///   2. it moved: grab a band around the last spot and search that (a scroll step lands here);
+///   3. still not found: it's lost — search its whole monitor, but only every FULL_SEARCH_EVERY.
+fn track_tick(tracked: &mut [Tracked], threshold: f32) -> Vec<(i32, i32)> {
+    let now = Instant::now();
     tracked
         .iter_mut()
         .filter_map(|t| {
-            let (full, coarse) = g.get(t.monitor)?.as_ref()?;
-            let (x, y) = track::locate(&mut t.anchor, full, coarse, threshold)?;
-            let s = &shots[t.monitor];
-            Some((s.left + x, s.top + y))
+            let (ml, mt, mw, mh) = t.mon;
+            let found = if t.lost { None } else { near(t, threshold).or_else(|| band(t, threshold)) };
+            let found = found.or_else(|| {
+                t.lost = true;
+                if now < t.next_full {
+                    return None;
+                }
+                t.next_full = now + FULL_SEARCH_EVERY;
+                let (full, coarse) = grab(ml, mt, 0, 0, mw, mh)?;
+                track::locate(&mut t.anchor, &full, &coarse, threshold)
+            });
+            if found.is_some() {
+                t.lost = false;
+            }
+            found.map(|(x, y)| (ml + x, mt + y))
         })
         .collect()
+}
+
+/// Step 1: the patch plus a few pixels all round.
+fn near(t: &mut Tracked, threshold: f32) -> Option<(i32, i32)> {
+    let (ml, mt, mw, mh) = t.mon;
+    let ((lx, ly), (pw, ph), n) = (t.anchor.last(), t.anchor.size(), track::NEAR_PX);
+    let (x0, y0) = ((lx - n).max(0), (ly - n).max(0));
+    let (x1, y1) = ((lx + pw + n).min(mw), (ly + ph + n).min(mh));
+    let rgba = screen::capture_region_rgba(ml + x0, mt + y0, x1 - x0, y1 - y0).ok()?;
+    let img = Gray::from_rgba((x1 - x0) as usize, (y1 - y0) as usize, &rgba, 1);
+    track::still_there(&mut t.anchor, &img, (x0, y0), threshold)
+}
+
+/// Step 2: a band around the last spot, at both resolutions.
+fn band(t: &mut Tracked, threshold: f32) -> Option<(i32, i32)> {
+    let (ml, mt, mw, mh) = t.mon;
+    let ((lx, ly), (pw, ph)) = (t.anchor.last(), t.anchor.size());
+    let align = |v: i32| v - v.rem_euclid(COARSE_FACTOR as i32);
+    let (x0, y0) = (align((lx - BAND_X).max(0)), align((ly - BAND_Y).max(0)));
+    let (x1, y1) = ((lx + pw + BAND_X).min(mw), (ly + ph + BAND_Y).min(mh));
+    let (full, coarse) = grab(ml, mt, x0, y0, x1 - x0, y1 - y0)?;
+    track::locate_in(&mut t.anchor, &full, &coarse, (x0, y0), (mw, mh), threshold)
+}
+
+/// Captures monitor-local rect (x, y, w, h) of the monitor at (ml, mt) as full + coarse gray.
+fn grab(ml: i32, mt: i32, x: i32, y: i32, w: i32, h: i32) -> Option<(Gray, Gray)> {
+    let rgba = screen::capture_region_rgba(ml + x, mt + y, w, h).ok()?;
+    let (w, h) = (w as usize, h as usize);
+    Some((Gray::from_rgba(w, h, &rgba, 1), Gray::from_rgba(w, h, &rgba, COARSE_FACTOR)))
 }
 
 #[cfg(test)]

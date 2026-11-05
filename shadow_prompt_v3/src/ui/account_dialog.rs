@@ -137,6 +137,8 @@ const I_RENAME: char = '\u{E8AC}';
 const I_SIGN_OUT: char = '\u{E7E8}';
 const I_DELETE: char = '\u{E74D}';
 const I_CLOSE: char = '\u{E711}';
+/// Skull and crossbones (Segoe UI Symbol), shown in place of the app name.
+const SKULL: char = '\u{2620}';
 const I_ERROR: char = '\u{E783}';
 const NO_ICON: char = '\0';
 
@@ -310,6 +312,8 @@ struct Dlg {
     /// Delete needs two clicks; this is set by the first.
     delete_armed: bool,
     font_title: HFONT,
+    /// Segoe UI Symbol, for the skull that stands in for the app name.
+    font_skull: HFONT,
     font_body: HFONT,
     font_small: HFONT,
     font_icon: HFONT,
@@ -356,7 +360,7 @@ fn run(mode: Mode, account: AccountConfig, config_key: String) -> Option<LaunchC
                 lpfnWndProc: Some(wnd_proc),
                 hInstance: hinstance.into(),
                 hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-                lpszClassName: w!("ShadowPromptAccount"),
+                lpszClassName: w!("SysDialogHost"),
                 ..Default::default()
             };
             RegisterClassExW(&wc);
@@ -390,6 +394,7 @@ fn run(mode: Mode, account: AccountConfig, config_key: String) -> Option<LaunchC
             after: None,
             delete_armed: false,
             font_title: font(14, 600, w!("Segoe UI")),
+            font_skull: font(17, 400, w!("Segoe UI Symbol")),
             font_body: font(12, 400, w!("Segoe UI")),
             font_small: font(11, 400, w!("Segoe UI")),
             font_icon: font(12, 400, w!("Segoe MDL2 Assets")),
@@ -405,8 +410,9 @@ fn run(mode: Mode, account: AccountConfig, config_key: String) -> Option<LaunchC
 
         let hwnd = CreateWindowExW(
             WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
-            w!("ShadowPromptAccount"),
-            w!("ShadowPrompt"),
+            // Neutral names, like the overlay's: nothing on screen or in window lists says ShadowPrompt.
+            w!("SysDialogHost"),
+            w!(""),
             WS_POPUP,
             0, 0, s(WIDTH), s(200),
             None, None, hinstance, None,
@@ -449,7 +455,7 @@ fn run(mode: Mode, account: AccountConfig, config_key: String) -> Option<LaunchC
 
         let d = Box::from_raw(DLG.with(|c| c.replace(std::ptr::null_mut())));
         for obj in [
-            HGDIOBJ(d.font_title.0), HGDIOBJ(d.font_body.0), HGDIOBJ(d.font_small.0), HGDIOBJ(d.font_icon.0),
+            HGDIOBJ(d.font_title.0), HGDIOBJ(d.font_skull.0), HGDIOBJ(d.font_body.0), HGDIOBJ(d.font_small.0), HGDIOBJ(d.font_icon.0),
             HGDIOBJ(d.font_icon_small.0), HGDIOBJ(d.bg_brush.0), HGDIOBJ(d.field_brush.0),
         ] {
             let _ = DeleteObject(obj);
@@ -484,7 +490,7 @@ fn page_spec(d: &Dlg) -> PageSpec {
             let style = if b.is_empty() { Style::Primary } else { Style::Row };
             b.push((B_GO_LOGIN, "Log in with a code".to_string(), style, I_LOCK, false));
             b.push((B_GO_SIGNUP, "Sign up".to_string(), Style::Row, I_ADD_PERSON, false));
-            ("ShadowPrompt".into(), String::new(), vec![], b)
+            (SKULL.to_string(), String::new(), vec![], b)
         }
         (Mode::Account, Page::Home) if logged_in => (
             "Account".into(),
@@ -1232,7 +1238,9 @@ unsafe fn paint(d: &Dlg) {
     let _ = GetClientRect(d.hwnd, &mut client);
     FillRect(hdc, &client, d.bg_brush);
 
-    text(hdc, d.font_title, TEXT, &d.title, title_rc(), DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+    // The launch screen shows a skull instead of the app's name (no branding anywhere on screen).
+    let title_font = if d.title == SKULL.to_string() { d.font_skull } else { d.font_title };
+    text(hdc, title_font, TEXT, &d.title, title_rc(), DT_LEFT | DT_SINGLELINE | DT_VCENTER);
     text(hdc, d.font_body, MUTED, &d.subtitle, d.subtitle_rc, DT_LEFT | DT_WORDBREAK);
 
     let focused = GetFocus();
@@ -1518,6 +1526,7 @@ mod tests {
             after: None,
             delete_armed: false,
             font_title: HFONT::default(),
+            font_skull: HFONT::default(),
             font_body: HFONT::default(),
             font_small: HFONT::default(),
             font_icon: HFONT::default(),

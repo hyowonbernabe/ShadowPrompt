@@ -47,6 +47,15 @@ fn monitor_rects() -> Vec<RECT> {
     rects
 }
 
+/// The given screen-space rectangle as raw RGBA pixels (no encoding). Used by dot tracking, which
+/// grabs small areas many times a second.
+pub fn capture_region_rgba(x: i32, y: i32, w: i32, h: i32) -> anyhow::Result<Vec<u8>> {
+    if w <= 0 || h <= 0 {
+        anyhow::bail!("capture_region: non-positive dimensions {w}x{h}");
+    }
+    unsafe { capture_region_raw(x, y, w, h) }
+}
+
 /// Captures the given screen-space rectangle to a raw BGRA buffer, then encodes it to PNG bytes.
 pub fn capture_region(x: i32, y: i32, w: i32, h: i32) -> anyhow::Result<Vec<u8>> {
     if w <= 0 || h <= 0 {

@@ -135,16 +135,69 @@ pub fn make_anchor(full: &Gray, coarse: &Gray, anchor: (i32, i32), target: (i32,
     })
 }
 
+/// How far the cheap "still there?" check looks around the last spot (full-res px). Covers
+/// sub-pixel jitter and a nudge of a few pixels; anything more is a real move.
+pub const NEAR_PX: i32 = REFINE_PX;
+
+impl Anchor {
+    /// Full-res patch size.
+    pub fn size(&self) -> (i32, i32) {
+        (self.full.w as i32, self.full.h as i32)
+    }
+    /// Monitor-local top-left of the patch where it was last found.
+    pub fn last(&self) -> (i32, i32) {
+        self.last
+    }
+}
+
+/// The cheap check, run many times a second: is the patch still (about) where it was? `img` is a
+/// full-res crop of the monitor whose top-left is monitor pixel `origin`, normally just the patch
+/// plus `NEAR_PX` all round. Tries the exact old spot first (one comparison — the usual case,
+/// nothing moved), then the few pixels around it. Returns the dot position (monitor-local).
+pub fn still_there(a: &mut Anchor, img: &Gray, origin: (i32, i32), threshold: f32) -> Option<(i32, i32)> {
+    let (lx, ly) = (a.last.0 - origin.0, a.last.1 - origin.1);
+    let fits = |x: i32, y: i32| x >= 0 && y >= 0 && x as usize + a.full.w <= img.w && y as usize + a.full.h <= img.h;
+    let mut best = (f32::MIN, lx, ly);
+    if fits(lx, ly) {
+        best = (a.full.score(img, lx as usize, ly as usize), lx, ly);
+    }
+    if best.0 < threshold {
+        for y in ly - NEAR_PX..=ly + NEAR_PX {
+            for x in lx - NEAR_PX..=lx + NEAR_PX {
+                if fits(x, y) {
+                    let s = a.full.score(img, x as usize, y as usize);
+                    if s > best.0 {
+                        best = (s, x, y);
+                    }
+                }
+            }
+        }
+    }
+    if best.0 < threshold {
+        return None;
+    }
+    a.last = (best.1 + origin.0, best.2 + origin.1);
+    Some((a.last.0 + a.offset.0, a.last.1 + a.offset.1))
+}
+
 /// Finds the anchor in a fresh capture. Returns the dot's new monitor-local position, or None
 /// if not confidently found (see module comment).
 pub fn locate(a: &mut Anchor, full: &Gray, coarse: &Gray, threshold: f32) -> Option<(i32, i32)> {
+    let mon = (full.w as i32, full.h as i32);
+    locate_in(a, full, coarse, (0, 0), mon, threshold)
+}
+
+/// `locate` within a crop of the monitor: `full`/`coarse` cover the area whose top-left is
+/// monitor pixel `origin` (a multiple of COARSE_FACTOR, so both resolutions line up) on a
+/// monitor of size `mon`. Used to search just a band around the last spot first.
+pub fn locate_in(a: &mut Anchor, full: &Gray, coarse: &Gray, origin: (i32, i32), mon: (i32, i32), threshold: f32) -> Option<(i32, i32)> {
     let (pw, ph) = (a.coarse.w, a.coarse.h);
     // The screen can shrink mid-tracking (resolution change, monitor unplugged/reordered);
     // a template larger than the frame, or an empty search band, would underflow below.
     if coarse.w < pw || coarse.h < ph || full.w < a.full.w || full.h < a.full.h {
         return None;
     }
-    let last_qx = a.last.0 / COARSE_FACTOR as i32;
+    let last_qx = (a.last.0 - origin.0) / COARSE_FACTOR as i32;
     let x0 = (last_qx - SEARCH_X_Q).max(0) as usize;
     let x1 = (last_qx + SEARCH_X_Q).min((coarse.w - pw) as i32) as usize;
     if x0 > x1 {
@@ -196,13 +249,14 @@ pub fn locate(a: &mut Anchor, full: &Gray, coarse: &Gray, threshold: f32) -> Opt
     if win.0 < threshold {
         return None;
     }
-    let dot = (win.1 + a.offset.0, win.2 + a.offset.1);
+    let (wx, wy) = (win.1 + origin.0, win.2 + origin.1);
+    let dot = (wx + a.offset.0, wy + a.offset.1);
     // Anchor still visible but its target scrolled off this monitor: no dot beats a dot on the
     // neighbouring screen.
-    if dot.0 < 0 || dot.1 < 0 || dot.0 >= full.w as i32 || dot.1 >= full.h as i32 {
+    if dot.0 < 0 || dot.1 < 0 || dot.0 >= mon.0 || dot.1 >= mon.1 {
         return None;
     }
-    a.last = (win.1, win.2);
+    a.last = (wx, wy);
     Some(dot)
 }
 
@@ -290,5 +344,43 @@ mod tests {
         let mut a = make_anchor(&f, &c, (320, 240), (320, 240)).unwrap();
         let (f2, c2) = grays(&textured(w, h, 999), w, h);
         assert_eq!(locate(&mut a, &f2, &c2, 0.9), None);
+    }
+
+    #[test]
+    fn still_there_is_cheap_and_follows_small_nudges() {
+        let (w, h) = (640, 480);
+        let rgba = textured(w, h, 3);
+        let (f, c) = (Gray::from_rgba(w, h, &rgba, 1), Gray::from_rgba(w, h, &rgba, COARSE_FACTOR));
+        let mut a = make_anchor(&f, &c, (300, 200), (310, 205)).unwrap();
+        let (lx, ly) = a.last();
+        let (pw, ph) = a.size();
+        let crop = |g: &Gray, x: i32, y: i32| g.crop(x as usize, y as usize, (pw + 2 * NEAR_PX) as usize, (ph + 2 * NEAR_PX) as usize);
+        // unchanged screen: found at the same place
+        let img = crop(&f, lx - NEAR_PX, ly - NEAR_PX);
+        assert_eq!(still_there(&mut a, &img, (lx - NEAR_PX, ly - NEAR_PX), 0.9), Some((310, 205)));
+        // page nudged down 3 px: still found, dot follows
+        let moved = shift_down(&rgba, w, h, 3);
+        let f2 = Gray::from_rgba(w, h, &moved, 1);
+        let img = crop(&f2, lx - NEAR_PX, ly - NEAR_PX);
+        assert_eq!(still_there(&mut a, &img, (lx - NEAR_PX, ly - NEAR_PX), 0.9), Some((310, 208)));
+        // scrolled far: not here any more (the band/full search takes over)
+        let far = shift_down(&rgba, w, h, 120);
+        let f3 = Gray::from_rgba(w, h, &far, 1);
+        let (lx, ly) = a.last();
+        let img = crop(&f3, lx - NEAR_PX, ly - NEAR_PX);
+        assert_eq!(still_there(&mut a, &img, (lx - NEAR_PX, ly - NEAR_PX), 0.9), None);
+    }
+
+    #[test]
+    fn locate_in_a_band_matches_a_full_search() {
+        let (w, h) = (640, 480);
+        let rgba = textured(w, h, 5);
+        let (f, c) = (Gray::from_rgba(w, h, &rgba, 1), Gray::from_rgba(w, h, &rgba, COARSE_FACTOR));
+        let mut a = make_anchor(&f, &c, (300, 120), (305, 125)).unwrap();
+        let moved = shift_down(&rgba, w, h, 80);
+        // band: rows 40..440 of the monitor, all columns (origin a multiple of COARSE_FACTOR)
+        let band = &moved[40 * w * 4..440 * w * 4];
+        let (bf, bc) = (Gray::from_rgba(w, 400, band, 1), Gray::from_rgba(w, 400, band, COARSE_FACTOR));
+        assert_eq!(locate_in(&mut a, &bf, &bc, (0, 40), (w as i32, h as i32), 0.9), Some((305, 205)));
     }
 }
