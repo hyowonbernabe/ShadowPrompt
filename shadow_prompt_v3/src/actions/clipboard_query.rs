@@ -43,11 +43,16 @@ pub async fn execute(ctx: ActionContext) -> anyhow::Result<()> {
     }
 }
 
+/// Keeps the start and the end and cuts the middle: in a pasted passage the question usually
+/// comes last, so the end matters as much as the beginning.
 fn truncate_question(q: String) -> String {
-    match q.char_indices().nth(MAX_QUESTION_CHARS) {
-        Some((cut, _)) => format!("{}\n\n(clipboard text cut off here: too long)", &q[..cut]),
-        None => q,
+    let n = q.chars().count();
+    if n <= MAX_QUESTION_CHARS {
+        return q;
     }
+    let head: String = q.chars().take(MAX_QUESTION_CHARS * 7 / 10).collect();
+    let tail: String = q.chars().skip(n - MAX_QUESTION_CHARS * 3 / 10).collect();
+    format!("{head}\n\n(... middle of the clipboard text cut: too long ...)\n\n{tail}")
 }
 
 /// Runs one question as the next turn of the running conversation (shared by Clipboard and
@@ -201,10 +206,11 @@ mod tests {
 
     #[test]
     fn huge_clipboard_text_is_cut_on_a_char_boundary() {
-        let q = "é".repeat(MAX_QUESTION_CHARS + 10);
+        let q = format!("{}QUESTION?", "é".repeat(MAX_QUESTION_CHARS + 10));
         let t = truncate_question(q);
-        assert!(t.starts_with(&"é".repeat(MAX_QUESTION_CHARS)));
-        assert!(t.ends_with("too long)"));
+        assert!(t.starts_with("éé") && t.contains("middle of the clipboard text cut"));
+        assert!(t.ends_with("QUESTION?"), "the question at the end survives");
+        assert!(t.chars().count() < MAX_QUESTION_CHARS + 100);
         assert_eq!(truncate_question("short".into()), "short");
     }
 
