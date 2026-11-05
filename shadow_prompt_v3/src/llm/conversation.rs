@@ -21,6 +21,9 @@ pub const IMAGE_DROP_BATCH: usize = 5;
 pub const REMOVED_IMAGE_TEXT: &str = "(earlier screenshot removed)";
 /// Total base64 image bytes kept, well under OpenRouter/Anthropic request-size limits.
 pub const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
+/// Room kept free under MAX_IMAGE_BYTES for the question's own screenshot, which is sent on top
+/// of the history (capture/image.rs keeps one at ≤3.5 MB, ~4.7 MB as base64).
+const IMAGE_BYTES_RESERVE: usize = 5 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnKind {
@@ -107,10 +110,11 @@ impl Conversation {
     fn enforce_image_cap(&mut self) {
         // History stays at MAX_IMAGES - 1 or fewer: the question being asked adds its own
         // screenshot on top, and the request as a whole must stay within MAX_IMAGES.
-        if self.image_count() < MAX_IMAGES && self.image_bytes() <= MAX_IMAGE_BYTES {
+        let byte_cap = MAX_IMAGE_BYTES - IMAGE_BYTES_RESERVE;
+        if self.image_count() < MAX_IMAGES && self.image_bytes() <= byte_cap {
             return;
         }
-        while self.image_count() > MAX_IMAGES - IMAGE_DROP_BATCH || self.image_bytes() > MAX_IMAGE_BYTES {
+        while self.image_count() > MAX_IMAGES - IMAGE_DROP_BATCH || self.image_bytes() > byte_cap {
             let victim = [TurnKind::Question, TurnKind::Context].into_iter().find_map(|kind| {
                 self.turns.iter().enumerate().filter(|(_, t)| t.kind == kind).find_map(|(ti, t)| {
                     t.user.iter().position(|p| matches!(p, ContentPart::Image { .. })).map(|pi| (ti, pi))

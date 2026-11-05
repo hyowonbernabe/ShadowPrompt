@@ -427,20 +427,20 @@ fn inner_name(name: &str) -> &str {
 fn match_forms<'a>(name: &'a str, path: Option<&str>) -> Option<Vec<&'a str>> {
     let mut forms = vec![name, inner_name(name)];
     let p = path.map(|p| p.replace('\\', "/")).unwrap_or_default();
-    let p = p.trim_matches('/').to_lowercase();
+    // ASCII-only case folding keeps byte offsets identical between `n` and its folded copy, so
+    // slicing `n` at `p.len()` below can never land inside a character.
+    let p = p.trim_matches('/').to_ascii_lowercase();
     if p.is_empty() || p == "." {
         return Some(forms);
     }
     let mut under = false;
     for n in [name, inner_name(name)] {
-        let nl = n.to_lowercase();
+        let nl = n.to_ascii_lowercase();
         if nl == p {
             under = true;
         } else if nl.len() > p.len() && nl.starts_with(&p) && nl.as_bytes()[p.len()] == b'/' {
             under = true;
-            if nl.len() == n.len() {
-                forms.push(&n[p.len() + 1..]); // same byte layout, so the offset is valid in `n`
-            }
+            forms.push(&n[p.len() + 1..]);
         }
     }
     under.then_some(forms)
@@ -664,7 +664,7 @@ impl Tool for GrepTool {
                 .dot_matches_new_line(multiline)
                 .build()
         };
-        if !multiline && (a.pattern.contains('\n') || a.pattern.contains("\\n")) {
+        if !multiline && (a.pattern.contains('\n') || has_newline_escape(&a.pattern)) {
             anyhow::bail!("the pattern spans lines; pass \"multiline\": true");
         }
         // A pattern that isn't valid regex (e.g. `(cell`) is searched literally, and the result
@@ -731,6 +731,22 @@ impl Tool for GrepTool {
     }
 }
 
+/// A `\n` escape in a regex (not an escaped backslash followed by `n`).
+fn has_newline_escape(p: &str) -> bool {
+    let mut escaped = false;
+    for c in p.chars() {
+        if escaped {
+            if c == 'n' {
+                return true;
+            }
+            escaped = false;
+        } else if c == '\\' {
+            escaped = true;
+        }
+    }
+    false
+}
+
 /// regex errors end with the useful part ("error: unclosed group").
 fn last_line(s: &str) -> &str {
     s.lines().rfind(|l| !l.trim().is_empty()).unwrap_or(s).trim()
@@ -770,7 +786,7 @@ fn content_entries(
 ) {
     // `hits` is ascending; merge overlapping/adjacent context windows as we go, so the work is
     // bounded by the doc's length however large -A/-B/-C are.
-    let last = lines.len() - 1;
+    let last = lines.len().saturating_sub(1);
     let mut ranges: Vec<(usize, usize)> = Vec::new();
     for &h in hits {
         let (s, e) = (h.saturating_sub(before), h.saturating_add(after).min(last));
@@ -1021,6 +1037,7 @@ mod tests {
         // invalid regex is searched literally, and says so
         assert!(run(&g, json!({"pattern": "(cell"})).await.starts_with("No files found\n[pattern isn't usable as a regex"));
         assert!(g.execute(r#"{"pattern":"a\\nb"}"#).await.is_err(), "newline pattern needs multiline");
+        assert!(g.execute(r#"{"pattern":"a\\\\nb"}"#).await.is_ok(), "escaped backslash then n is not a newline");
         // loose argument types are accepted
         assert_eq!(
             run(&g, json!({"pattern": "AGAIN", "-i": "true", "output_mode": "content", "head_limit": 10.0, "-C": -1})).await,
@@ -1066,6 +1083,9 @@ mod tests {
         assert_eq!(run(&g, json!({"pattern": "x/*.md"})).await, "No files found");
         assert_eq!(run(&g, json!({"pattern": "**/CELLS*"})).await, "local/bio/cells.md");
         assert!(g.execute(r#"{"pattern":"{a,b"}"#).await.is_err());
+        // non-ASCII folders whose lowercase changes byte length must not panic
+        d.write("İ/ẞ.md", b"x", 1);
+        assert_eq!(run(&g, json!({"pattern": "*", "path": "local/İ"})).await, "local/İ/ẞ.md");
     }
 
     #[tokio::test]
