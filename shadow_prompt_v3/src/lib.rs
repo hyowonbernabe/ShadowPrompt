@@ -126,7 +126,11 @@ fn run_daemon(cfg: config::Config) -> anyhow::Result<()> {
 /// closed the dialog (exit without starting).
 fn choose_key(cfg: &mut config::Config) -> anyhow::Result<bool> {
     use lifecycle::self_restart::{KEY_SOURCE_ENV, RESUME_ENV};
-    let from_account = if std::env::var_os(RESUME_ENV).is_some() {
+    let resumed = std::env::var_os(RESUME_ENV).is_some();
+    // Read once, then drop it, so nothing this instance starts (e.g. Chrome) inherits it and a
+    // copy launched from there by the user still shows the dialog.
+    std::env::remove_var(RESUME_ENV);
+    let from_account = if resumed {
         let wants_account = std::env::var(KEY_SOURCE_ENV).map(|v| v != "config").unwrap_or(true);
         let use_account = wants_account && cfg.account.logged_in();
         if use_account {

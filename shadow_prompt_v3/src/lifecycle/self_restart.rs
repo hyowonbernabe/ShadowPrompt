@@ -30,17 +30,15 @@ pub const KEY_SOURCE_ENV: &str = "SHADOWPROMPT_KEY_SOURCE";
 
 /// Restart and skip the launch dialog (the child inherits this process's environment).
 pub fn execute() -> anyhow::Result<()> {
-    std::env::set_var(RESUME_ENV, "1");
-    relaunch()
+    relaunch(true)
 }
 
 /// Restart and show the launch dialog again (after logging out or deleting the account).
 pub fn execute_fresh() -> anyhow::Result<()> {
-    std::env::remove_var(RESUME_ENV);
-    relaunch()
+    relaunch(false)
 }
 
-fn relaunch() -> anyhow::Result<()> {
+fn relaunch(resume: bool) -> anyhow::Result<()> {
     let exe = std::env::current_exe()?;
     let exe_str = normalize_path(&exe);
 
@@ -54,7 +52,15 @@ fn relaunch() -> anyhow::Result<()> {
         arg_list_clause
     );
 
-    Command::new("powershell.exe")
+    let mut cmd = Command::new("powershell.exe");
+    // Only the relauncher (and so the new instance) gets the marker — never this process, so it
+    // can't leak into anything else it starts.
+    if resume {
+        cmd.env(RESUME_ENV, "1");
+    } else {
+        cmd.env_remove(RESUME_ENV);
+    }
+    cmd
         .args(["-WindowStyle", "Hidden", "-NoProfile", "-NonInteractive", "-Command", &ps])
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()?;

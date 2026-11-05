@@ -58,7 +58,7 @@ pub fn user_facing_error(e: &anyhow::Error) -> &'static str {
     } else if s.contains("screen capture") {
         "Screen capture failed"
     } else if s.contains("openrouter 401") {
-        "API key invalid or expired"
+        "API key invalid or expired: log in again"
     } else if s.contains("openrouter 402") {
         "Out of OpenRouter credits"
     } else if s.contains("openrouter 429") {
@@ -862,7 +862,7 @@ mod tests {
         let models: Vec<String> = (0..5).map(|i| format!("m{i}")).collect();
         let client = test_client(server.uri(), models);
         let err = client.run_turn("s", vec![ContentPart::text("q")], &[], false, None).await.unwrap_err();
-        assert_eq!(user_facing_error(&err), "API key invalid or expired");
+        assert_eq!(user_facing_error(&err), "API key invalid or expired: log in again");
     }
 
     #[test]
