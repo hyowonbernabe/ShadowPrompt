@@ -48,6 +48,23 @@ pub enum LaunchChoice {
 }
 
 /// Shows the launch dialog on the calling thread and blocks until the user picks something.
+/// Dev preview (`cargo run --example dialog_preview --features debug -- <launch|account>
+/// [logged-in] [has-key]`): shows the dialog alone, with a made-up account, without starting
+/// the app — no single-instance lock, no hotkeys, no clipboard. Buttons that talk to the server
+/// still do.
+#[doc(hidden)]
+pub fn preview(account_screen: bool, logged_in: bool, has_key: bool) {
+    let account = if logged_in {
+        AccountConfig { code: "preview-2244644".into(), api_key: "sk-or-v1-preview".into() }
+    } else {
+        AccountConfig::default()
+    };
+    let key = if has_key { "sk-or-v1-preview-config" } else { "" };
+    let mode = if account_screen { Mode::Account } else { Mode::Launch };
+    let r = run(mode, account, key.into());
+    println!("result: {r:?}");
+}
+
 pub fn run_launch(account: &AccountConfig, config_key: &str) -> LaunchChoice {
     run(Mode::Launch, account.clone(), config_key.to_string()).unwrap_or(LaunchChoice::Quit)
 }
@@ -73,23 +90,40 @@ pub fn open_account_screen() {
 const fn rgb(r: u8, g: u8, b: u8) -> COLORREF {
     COLORREF(r as u32 | (g as u32) << 8 | (b as u32) << 16)
 }
-const BG: COLORREF = rgb(0x12, 0x14, 0x19);
-const FIELD_BG: COLORREF = rgb(0x1B, 0x1E, 0x26);
-const BORDER: COLORREF = rgb(0x2B, 0x30, 0x3B);
-const TEXT: COLORREF = rgb(0xF1, 0xF3, 0xF7);
-const MUTED: COLORREF = rgb(0x9A, 0xA3, 0xB2);
-const ACCENT: COLORREF = rgb(0x63, 0x66, 0xF1);
-const ACCENT_DOWN: COLORREF = rgb(0x4F, 0x46, 0xE5);
-const SECONDARY: COLORREF = rgb(0x20, 0x24, 0x2D);
-const SECONDARY_DOWN: COLORREF = rgb(0x2A, 0x2F, 0x3A);
-const DANGER: COLORREF = rgb(0xE5, 0x48, 0x4D);
-const DANGER_DOWN: COLORREF = rgb(0xC5, 0x34, 0x39);
-const ERROR_TEXT: COLORREF = rgb(0xFF, 0x7A, 0x7A);
-const OK_TEXT: COLORREF = rgb(0x6E, 0xE7, 0xA8);
+const BG: COLORREF = rgb(0x1F, 0x1E, 0x1D);
+const SURFACE: COLORREF = rgb(0x30, 0x30, 0x2E);
+const SURFACE_DOWN: COLORREF = rgb(0x3A, 0x39, 0x36);
+const FIELD_BG: COLORREF = rgb(0x26, 0x26, 0x24);
+const BORDER: COLORREF = rgb(0x3E, 0x3D, 0x39);
+const TEXT: COLORREF = rgb(0xF5, 0xF4, 0xEE);
+const MUTED: COLORREF = rgb(0xA8, 0xA6, 0x9D);
+const ACCENT: COLORREF = rgb(0xD9, 0x77, 0x57);
+const ACCENT_DOWN: COLORREF = rgb(0xC2, 0x61, 0x3F);
+const ON_ACCENT: COLORREF = rgb(0xFF, 0xFF, 0xFF);
+const DANGER: COLORREF = rgb(0xE0, 0x64, 0x5A);
+const DANGER_DOWN: COLORREF = rgb(0xC5, 0x4E, 0x45);
+const ERROR_TEXT: COLORREF = rgb(0xEC, 0x86, 0x7A);
+const OK_TEXT: COLORREF = rgb(0x8F, 0xC2, 0x7E);
 
-const WIDTH: i32 = 420;
-const PAD: i32 = 28;
-const RADIUS: i32 = 12;
+const WIDTH: i32 = 300;
+const PAD: i32 = 16;
+const RADIUS: i32 = 7;
+const ROW_H: i32 = 32;
+const FIELD_H: i32 = 30;
+const GAP: i32 = 6;
+
+// Segoe MDL2 Assets glyphs (built into Windows 10 and 11).
+const I_PERSON: char = '\u{E77B}';
+const I_KEY: char = '\u{E8D7}';
+const I_LOCK: char = '\u{E72E}';
+const I_ADD_PERSON: char = '\u{E8FA}';
+const I_BACK: char = '\u{E72B}';
+const I_FORWARD: char = '\u{E72A}';
+const I_CHECK: char = '\u{E73E}';
+const I_RENAME: char = '\u{E8AC}';
+const I_SIGN_OUT: char = '\u{E7E8}';
+const I_DELETE: char = '\u{E74D}';
+const I_CLOSE: char = '\u{E711}';
 
 fn s(px: i32) -> i32 {
     // SAFETY: plain Win32 query, no arguments.
@@ -117,6 +151,7 @@ const ES_PASSWORD: u32 = 0x0020;
 const ES_AUTOHSCROLL: u32 = 0x0080;
 const ODS_SELECTED: u32 = 0x0001;
 const ODS_DISABLED: u32 = 0x0004;
+const ODS_FOCUS: u32 = 0x0010;
 const DWMWA_USE_IMMERSIVE_DARK_MODE: i32 = 20;
 const DWMWA_WINDOW_CORNER_PREFERENCE: i32 = 33;
 const DWMWA_BORDER_COLOR: i32 = 34;
@@ -194,6 +229,7 @@ struct Btn {
     id: i32,
     text: String,
     style: Style,
+    icon: char,
     hwnd: HWND,
 }
 
@@ -209,13 +245,15 @@ struct Dlg {
     status_color: COLORREF,
     fields: Vec<Field>,
     buttons: Vec<Btn>,
-    status_y: i32,
     busy: bool,
     /// Delete needs two clicks; this is set by the first.
     delete_armed: bool,
     font_title: HFONT,
     font_body: HFONT,
     font_small: HFONT,
+    font_icon: HFONT,
+    /// Bottom of the last control; the status line (if any) goes below it.
+    content_bottom: i32,
     bg_brush: HBRUSH,
     field_brush: HBRUSH,
     result: Option<LaunchChoice>,
@@ -282,12 +320,17 @@ fn run(mode: Mode, account: AccountConfig, config_key: String) -> Option<LaunchC
             status_color: MUTED,
             fields: Vec::new(),
             buttons: Vec::new(),
-            status_y: 0,
             busy: false,
             delete_armed: false,
-            font_title: font(22, 600),
-            font_body: font(14, 400),
-            font_small: font(12, 400),
+            font_title: font(15, 600),
+            font_body: font(12, 400),
+            font_small: font(11, 400),
+            font_icon: CreateFontW(
+                -s(13), 0, 0, 0, 400, 0, 0, 0,
+                DEFAULT_CHARSET.0 as u32, OUT_DEFAULT_PRECIS.0 as u32, CLIP_DEFAULT_PRECIS.0 as u32,
+                CLEARTYPE_QUALITY, (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32, w!("Segoe MDL2 Assets"),
+            ),
+            content_bottom: 0,
             bg_brush: CreateSolidBrush(BG),
             field_brush: CreateSolidBrush(FIELD_BG),
             result: None,
@@ -337,16 +380,16 @@ fn run(mode: Mode, account: AccountConfig, config_key: String) -> Option<LaunchC
         }
 
         let d = Box::from_raw(DLG.with(|c| c.replace(std::ptr::null_mut())));
-        for obj in [HGDIOBJ(d.font_title.0), HGDIOBJ(d.font_body.0), HGDIOBJ(d.font_small.0), HGDIOBJ(d.bg_brush.0), HGDIOBJ(d.field_brush.0)] {
+        for obj in [HGDIOBJ(d.font_title.0), HGDIOBJ(d.font_body.0), HGDIOBJ(d.font_small.0), HGDIOBJ(d.font_icon.0), HGDIOBJ(d.bg_brush.0), HGDIOBJ(d.field_brush.0)] {
             let _ = DeleteObject(obj);
         }
         d.result
     }
 }
 
-/// Page content: title, subtitle, fields and buttons for the current mode/page.
-/// (title, subtitle, fields as (id, label, password, initial text), buttons as (id, text, style)).
-type PageSpec = (String, String, Vec<(i32, &'static str, bool, String)>, Vec<(i32, String, Style)>);
+/// Page content: (title, subtitle, fields as (id, label, password, initial text),
+/// buttons as (id, text, style, icon)).
+type PageSpec = (String, String, Vec<(i32, &'static str, bool, String)>, Vec<(i32, String, Style, char)>);
 
 fn page_spec(d: &Dlg) -> PageSpec {
     let logged_in = d.account.logged_in();
@@ -355,27 +398,27 @@ fn page_spec(d: &Dlg) -> PageSpec {
         (Mode::Launch, Page::Home) => {
             let mut b = Vec::new();
             if logged_in {
-                b.push((B_CONT_ACCOUNT, format!("Continue as {who}"), Style::Primary));
+                b.push((B_CONT_ACCOUNT, format!("Continue as {who}"), Style::Primary, I_PERSON));
             }
             if !d.config_key.is_empty() {
                 let style = if logged_in { Style::Secondary } else { Style::Primary };
-                b.push((B_CONT_CONFIG, "Continue with my key".to_string(), style));
+                b.push((B_CONT_CONFIG, "Continue with my key".to_string(), style, I_KEY));
             }
             let style = if b.is_empty() { Style::Primary } else { Style::Secondary };
-            b.push((B_GO_LOGIN, "Log in with a code".to_string(), style));
-            b.push((B_GO_SIGNUP, "Sign up".to_string(), Style::Secondary));
-            ("ShadowPrompt".into(), "How do you want to start?".into(), vec![], b)
+            b.push((B_GO_LOGIN, "Log in with a code".to_string(), style, I_LOCK));
+            b.push((B_GO_SIGNUP, "Sign up".to_string(), Style::Secondary, I_ADD_PERSON));
+            ("ShadowPrompt".into(), "Choose how to start.".into(), vec![], b)
         }
         (Mode::Account, Page::Home) if logged_in => (
             "Account".into(),
-            format!("Logged in as {who}."),
+            format!("Logged in as {who}"),
             vec![],
             vec![
-                (B_GO_CHKEY, "Change API key".into(), Style::Secondary),
-                (B_GO_CHCODE, "Change code".into(), Style::Secondary),
-                (B_LOGOUT, "Log out of this computer".into(), Style::Secondary),
-                (B_DELETE, "Delete account".into(), Style::Danger),
-                (B_CLOSE, "Close".into(), Style::Primary),
+                (B_GO_CHKEY, "Change API key".into(), Style::Secondary, I_KEY),
+                (B_GO_CHCODE, "Change code".into(), Style::Secondary, I_RENAME),
+                (B_LOGOUT, "Log out".into(), Style::Secondary, I_SIGN_OUT),
+                (B_DELETE, "Delete account".into(), Style::Danger, I_DELETE),
+                (B_CLOSE, "Done".into(), Style::Primary, I_CHECK),
             ],
         ),
         (Mode::Account, Page::Home) => (
@@ -383,35 +426,85 @@ fn page_spec(d: &Dlg) -> PageSpec {
             "Not logged in. Using the key in config.toml.".into(),
             vec![],
             vec![
-                (B_GO_LOGIN, "Log in with a code".into(), Style::Primary),
-                (B_GO_SIGNUP, "Sign up".into(), Style::Secondary),
-                (B_CLOSE, "Close".into(), Style::Secondary),
+                (B_GO_LOGIN, "Log in with a code".into(), Style::Primary, I_LOCK),
+                (B_GO_SIGNUP, "Sign up".into(), Style::Secondary, I_ADD_PERSON),
             ],
         ),
         (_, Page::Login) => (
             "Log in".into(),
-            "Enter your code to load your API key.".into(),
+            "Enter your code to load your key.".into(),
             vec![(F_CODE, "Code", true, String::new())],
-            vec![(B_DO_LOGIN, "Log in".into(), Style::Primary), (B_BACK, "Back".into(), Style::Ghost)],
+            vec![(B_BACK, "Back".into(), Style::Ghost, I_BACK), (B_DO_LOGIN, "Log in".into(), Style::Primary, I_FORWARD)],
         ),
         (_, Page::Signup) => (
             "Sign up".into(),
-            "Your key is stored under this code. Anyone with the code can use the key, so pick one that's hard to guess.".into(),
-            vec![(F_CODE, "Choose a code", false, String::new()), (F_KEY, "OpenRouter API key", true, d.config_key.clone())],
-            vec![(B_DO_SIGNUP, "Create account".into(), Style::Primary), (B_BACK, "Back".into(), Style::Ghost)],
+            "Anyone with the code can use the key, so make it hard to guess.".into(),
+            vec![(F_CODE, "Code", false, String::new()), (F_KEY, "OpenRouter API key", true, d.config_key.clone())],
+            vec![(B_BACK, "Back".into(), Style::Ghost, I_BACK), (B_DO_SIGNUP, "Create".into(), Style::Primary, I_CHECK)],
         ),
         (_, Page::ChangeKey) => (
             "Change API key".into(),
-            format!("The new key replaces the one stored under {who}, on every computer that uses this code."),
+            format!("Replaces the key under {who} everywhere."),
             vec![(F_KEY, "New OpenRouter API key", true, String::new())],
-            vec![(B_SAVE_KEY, "Save key".into(), Style::Primary), (B_BACK, "Back".into(), Style::Ghost)],
+            vec![(B_BACK, "Back".into(), Style::Ghost, I_BACK), (B_SAVE_KEY, "Save".into(), Style::Primary, I_CHECK)],
         ),
         (_, Page::ChangeCode) => (
             "Change code".into(),
-            format!("{who} stops working. Your key moves to the new code."),
+            format!("{who} stops working; the key moves over."),
             vec![(F_CODE, "New code", false, String::new())],
-            vec![(B_SAVE_CODE, "Save code".into(), Style::Primary), (B_BACK, "Back".into(), Style::Ghost)],
+            vec![(B_BACK, "Back".into(), Style::Ghost, I_BACK), (B_SAVE_CODE, "Save".into(), Style::Primary, I_CHECK)],
         ),
+    }
+}
+
+/// Height `text` needs when wrapped to `width` in `font`.
+fn measure(d: &Dlg, font: HFONT, text: &str, width: i32) -> i32 {
+    if text.is_empty() {
+        return 0;
+    }
+    unsafe {
+        let hdc = windows::Win32::Graphics::Gdi::GetDC(d.hwnd);
+        let old = SelectObject(hdc, HGDIOBJ(font.0));
+        let mut rc = RECT { left: 0, top: 0, right: width, bottom: 0 };
+        let mut wide: Vec<u16> = text.encode_utf16().collect();
+        DrawTextW(hdc, &mut wide, &mut rc, DT_LEFT | DT_WORDBREAK | windows::Win32::Graphics::Gdi::DT_CALCRECT);
+        SelectObject(hdc, old);
+        windows::Win32::Graphics::Gdi::ReleaseDC(d.hwnd, hdc);
+        rc.bottom - rc.top
+    }
+}
+
+fn inner_w() -> i32 {
+    s(WIDTH) - 2 * s(PAD)
+}
+
+fn title_rc() -> RECT {
+    RECT { left: s(PAD), top: s(14), right: s(PAD) + inner_w() - s(26), bottom: s(14) + s(22) }
+}
+
+fn subtitle_rc(d: &Dlg) -> RECT {
+    let top = s(14) + s(22) + s(2);
+    RECT { left: s(PAD), top, right: s(PAD) + inner_w(), bottom: top + measure(d, d.font_body, &d.subtitle, inner_w()) }
+}
+
+fn status_rc(d: &Dlg) -> RECT {
+    let top = d.content_bottom + s(8);
+    RECT { left: s(PAD), top, right: s(PAD) + inner_w(), bottom: top + measure(d, d.font_small, &d.status, inner_w()) }
+}
+
+/// Window height for the current content (+ status line), keeping the window where it is.
+fn fit_height(d: &Dlg, recenter: bool) {
+    let bottom = if d.status.is_empty() { d.content_bottom } else { status_rc(d).bottom };
+    let height = bottom + s(PAD);
+    unsafe {
+        let mut rc = RECT::default();
+        let _ = windows::Win32::UI::WindowsAndMessaging::GetWindowRect(d.hwnd, &mut rc);
+        let (mut x, mut y) = (rc.left, rc.top);
+        if recenter {
+            x = (GetSystemMetrics(SM_CXSCREEN) - s(WIDTH)) / 2;
+            y = (GetSystemMetrics(SM_CYSCREEN) - height) / 2;
+        }
+        let _ = MoveWindow(d.hwnd, x, y, s(WIDTH), height, true);
     }
 }
 
@@ -428,59 +521,72 @@ fn build_page(d: &mut Dlg) {
         d.title = title;
         d.subtitle = subtitle;
         let hinstance = GetModuleHandleW(None).unwrap_or_default();
-        let w = s(WIDTH) - 2 * s(PAD);
-        let mut y = s(PAD) + s(34) + subtitle_height(d) + s(20);
+        let w = inner_w();
+        let mut y = subtitle_rc(d).bottom + s(12);
+        let has_fields = !fields.is_empty();
 
         for (id, label, password, initial) in fields {
             let label_y = y;
-            y += s(20);
-            let box_rc = RECT { left: s(PAD), top: y, right: s(PAD) + w, bottom: y + s(42) };
+            y += s(16);
+            let box_rc = RECT { left: s(PAD), top: y, right: s(PAD) + w, bottom: y + s(FIELD_H) };
             let style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(ES_AUTOHSCROLL | if password { ES_PASSWORD } else { 0 });
             let text: Vec<u16> = initial.encode_utf16().chain([0]).collect();
-            let edit_h = s(22);
+            let edit_h = s(16);
             let hwnd = CreateWindowExW(
                 WINDOW_EX_STYLE(0), w!("EDIT"), PCWSTR(text.as_ptr()), style,
-                box_rc.left + s(14), box_rc.top + (s(42) - edit_h) / 2, w - s(28), edit_h,
+                box_rc.left + s(9), box_rc.top + (s(FIELD_H) - edit_h) / 2, w - s(18), edit_h,
                 d.hwnd, HMENU(id as isize as *mut _), hinstance, None,
             )
             .unwrap_or_default();
             SendMessageW(hwnd, WM_SETFONT, WPARAM(d.font_body.0 as usize), LPARAM(1));
             d.fields.push(Field { id, label, hwnd, box_rc, label_y });
-            y = box_rc.bottom + s(16);
+            y = box_rc.bottom + s(10);
         }
-        y += s(4);
-        for (id, text, style) in buttons {
+        if has_fields {
+            y += s(2);
+        }
+
+        // Pages with fields: one row, [Back] small on the left, the action filling the rest.
+        // Menus: a compact list of full-width rows.
+        let mut row_x = s(PAD);
+        let count = buttons.len();
+        for (i, (id, text, style, icon)) in buttons.into_iter().enumerate() {
+            let (x, bw) = if has_fields {
+                let back_w = s(76);
+                if style == Style::Ghost { (row_x, back_w) } else { (row_x, s(PAD) + w - row_x) }
+            } else {
+                (s(PAD), w)
+            };
             let wide: Vec<u16> = text.encode_utf16().chain([0]).collect();
             let hwnd = CreateWindowExW(
                 WINDOW_EX_STYLE(0), w!("BUTTON"), PCWSTR(wide.as_ptr()),
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW),
-                s(PAD), y, w, s(44),
+                x, y, bw, s(ROW_H),
                 d.hwnd, HMENU(id as isize as *mut _), hinstance, None,
             )
             .unwrap_or_default();
-            d.buttons.push(Btn { id, text, style, hwnd });
-            y += s(44) + s(10);
+            d.buttons.push(Btn { id, text, style, icon, hwnd });
+            if has_fields {
+                row_x = x + bw + s(GAP);
+            } else if i + 1 < count {
+                y += s(ROW_H) + s(4);
+            }
         }
-        // The small × in the corner.
+        y += s(ROW_H);
+
+        // The × in the header row.
         let x_btn = CreateWindowExW(
-            WINDOW_EX_STYLE(0), w!("BUTTON"), w!("✕"), WS_CHILD | WS_VISIBLE | WINDOW_STYLE(BS_OWNERDRAW),
-            s(WIDTH) - s(PAD) - s(28), s(PAD) - s(6), s(28), s(28),
+            WINDOW_EX_STYLE(0), w!("BUTTON"), PCWSTR::null(), WS_CHILD | WS_VISIBLE | WINDOW_STYLE(BS_OWNERDRAW),
+            s(WIDTH) - s(PAD) - s(22) + s(4), s(14), s(22), s(22),
             d.hwnd, HMENU(B_X as isize as *mut _), hinstance, None,
         )
         .unwrap_or_default();
-        d.buttons.push(Btn { id: B_X, text: "✕".into(), style: Style::Ghost, hwnd: x_btn });
+        d.buttons.push(Btn { id: B_X, text: String::new(), style: Style::Ghost, icon: I_CLOSE, hwnd: x_btn });
 
-        d.status_y = y;
-        let height = y + s(26) + s(PAD) - s(4);
-        let (sw, sh) = (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
-        let _ = MoveWindow(d.hwnd, (sw - s(WIDTH)) / 2, (sh - height) / 2, s(WIDTH), height, true);
+        d.content_bottom = y;
+        fit_height(d, true);
         let _ = InvalidateRect(d.hwnd, None, true);
     }
-}
-
-fn subtitle_height(d: &Dlg) -> i32 {
-    // Long subtitles wrap to two lines; short ones take one.
-    if d.subtitle.chars().count() > 46 { s(42) } else { s(22) }
 }
 
 fn focus_first(d: &Dlg) {
@@ -505,6 +611,7 @@ fn text_of(d: &Dlg, id: i32) -> String {
 fn set_status(d: &mut Dlg, text: impl Into<String>, color: COLORREF) {
     d.status = text.into();
     d.status_color = color;
+    fit_height(d, false);
     unsafe {
         let _ = InvalidateRect(d.hwnd, None, true);
     }
@@ -755,28 +862,35 @@ unsafe fn text(hdc: HDC, font: HFONT, color: COLORREF, s_: &str, mut rc: RECT, f
     }
 }
 
+unsafe fn text_width(hdc: HDC, font: HFONT, s_: &str) -> i32 {
+    let mut rc = RECT::default();
+    SelectObject(hdc, HGDIOBJ(font.0));
+    let mut wide: Vec<u16> = s_.encode_utf16().collect();
+    if !wide.is_empty() {
+        DrawTextW(hdc, &mut wide, &mut rc, DT_SINGLELINE | windows::Win32::Graphics::Gdi::DT_CALCRECT);
+    }
+    rc.right - rc.left
+}
+
 unsafe fn paint(d: &Dlg) {
     let mut ps = PAINTSTRUCT::default();
     let hdc = BeginPaint(d.hwnd, &mut ps);
     let mut client = RECT::default();
     let _ = windows::Win32::UI::WindowsAndMessaging::GetClientRect(d.hwnd, &mut client);
     FillRect(hdc, &client, d.bg_brush);
-    let w = client.right - 2 * s(PAD);
-    let line = |top: i32, h: i32| RECT { left: s(PAD), top, right: s(PAD) + w, bottom: top + h };
 
-    text(hdc, d.font_title, TEXT, &d.title, line(s(PAD) - s(4), s(34)), DT_LEFT | DT_SINGLELINE | DT_VCENTER);
-    text(hdc, d.font_body, MUTED, &d.subtitle, line(s(PAD) + s(34), subtitle_height(d)), DT_LEFT | DT_WORDBREAK);
+    text(hdc, d.font_title, TEXT, &d.title, title_rc(), DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+    text(hdc, d.font_body, MUTED, &d.subtitle, subtitle_rc(d), DT_LEFT | DT_WORDBREAK);
 
     let focused = GetFocus();
     for f in &d.fields {
-        text(hdc, d.font_small, MUTED, f.label, line(f.label_y, s(18)), DT_LEFT | DT_SINGLELINE);
+        let label = RECT { left: s(PAD), top: f.label_y, right: s(PAD) + inner_w(), bottom: f.label_y + s(15) };
+        text(hdc, d.font_small, MUTED, f.label, label, DT_LEFT | DT_SINGLELINE);
         let border = if f.hwnd == focused { ACCENT } else { BORDER };
         round_rect(hdc, f.box_rc, FIELD_BG, border, s(RADIUS));
     }
     if !d.status.is_empty() {
-        let mut rc = line(d.status_y - s(2), s(40));
-        rc.right = client.right - s(PAD);
-        text(hdc, d.font_small, d.status_color, &d.status, rc, DT_LEFT | DT_WORDBREAK);
+        text(hdc, d.font_small, d.status_color, &d.status, status_rc(d), DT_LEFT | DT_WORDBREAK);
     }
     let _ = EndPaint(d.hwnd, &ps);
 }
@@ -785,21 +899,40 @@ unsafe fn draw_button(d: &Dlg, item: &DrawItem) {
     let Some(b) = d.buttons.iter().find(|b| b.id == item.ctl_id as i32) else { return };
     let pressed = item.item_state & ODS_SELECTED != 0;
     let disabled = item.item_state & ODS_DISABLED != 0;
-    FillRect(item.hdc, &item.rc, d.bg_brush);
-    let (fill, border, fg) = match b.style {
-        Style::Primary => (if pressed { ACCENT_DOWN } else { ACCENT }, if pressed { ACCENT_DOWN } else { ACCENT }, TEXT),
-        Style::Secondary => (if pressed { SECONDARY_DOWN } else { SECONDARY }, BORDER, TEXT),
-        Style::Danger => {
-            let armed = d.delete_armed;
-            let c = if pressed { DANGER_DOWN } else if armed { DANGER } else { SECONDARY };
-            (c, if armed { DANGER } else { BORDER }, if armed { TEXT } else { DANGER })
-        }
-        Style::Ghost => (if pressed { SECONDARY } else { BG }, if pressed { BORDER } else { BG }, MUTED),
+    let focus = item.item_state & ODS_FOCUS != 0;
+    let hdc = item.hdc;
+    FillRect(hdc, &item.rc, d.bg_brush);
+
+    let (fill, fg, icon_fg) = match b.style {
+        Style::Primary => (if pressed { ACCENT_DOWN } else { ACCENT }, ON_ACCENT, ON_ACCENT),
+        Style::Secondary => (if pressed { SURFACE_DOWN } else { SURFACE }, TEXT, MUTED),
+        Style::Danger if d.delete_armed => (if pressed { DANGER_DOWN } else { DANGER }, ON_ACCENT, ON_ACCENT),
+        Style::Danger => (if pressed { SURFACE_DOWN } else { SURFACE }, DANGER, DANGER),
+        Style::Ghost => (if pressed { SURFACE } else { BG }, MUTED, MUTED),
     };
-    let fg = if disabled { MUTED } else { fg };
-    round_rect(item.hdc, item.rc, fill, border, s(RADIUS));
-    let font = if b.id == B_X { d.font_small } else { d.font_body };
-    text(item.hdc, font, fg, &b.text, item.rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    let (fg, icon_fg) = if disabled { (MUTED, MUTED) } else { (fg, icon_fg) };
+    // Keyboard focus shows as a thin accent outline (Tab / Shift+Tab).
+    let border = if focus && b.id != B_X && b.style != Style::Primary { ACCENT } else { fill };
+    round_rect(hdc, item.rc, fill, border, s(RADIUS));
+
+    let icon: String = b.icon.to_string();
+    if b.text.is_empty() {
+        text(hdc, d.font_icon, icon_fg, &icon, item.rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        return;
+    }
+    // Menu rows: icon + label from the left. Row buttons (Back / action): centred.
+    let gap = s(8);
+    let icon_w = text_width(hdc, d.font_icon, &icon);
+    let label_w = text_width(hdc, d.font_body, &b.text);
+    let left = if d.fields.is_empty() {
+        item.rc.left + s(11)
+    } else {
+        item.rc.left + ((item.rc.right - item.rc.left) - (icon_w + gap + label_w)) / 2
+    };
+    let icon_rc = RECT { left, top: item.rc.top, right: left + icon_w, bottom: item.rc.bottom };
+    text(hdc, d.font_icon, icon_fg, &icon, icon_rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    let label_rc = RECT { left: left + icon_w + gap, top: item.rc.top, right: item.rc.right - s(8), bottom: item.rc.bottom };
+    text(hdc, d.font_body, fg, &b.text, label_rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 }
 
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -886,12 +1019,13 @@ mod tests {
             status_color: MUTED,
             fields: vec![],
             buttons: vec![],
-            status_y: 0,
             busy: false,
             delete_armed: false,
             font_title: HFONT::default(),
             font_body: HFONT::default(),
             font_small: HFONT::default(),
+            font_icon: HFONT::default(),
+            content_bottom: 0,
             bg_brush: HBRUSH::default(),
             field_brush: HBRUSH::default(),
             result: None,
