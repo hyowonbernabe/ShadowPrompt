@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use super::{busy, idle_indicator, ActionContext};
+use super::{busy, deliver_answer, report_failure, ActionContext};
 use crate::capture::clipboard;
 use crate::knowledge::{ListDocsTool, ReadDocTool};
 use crate::llm::messages::ContentPart;
@@ -11,30 +11,43 @@ use crate::llm::system_prompts::general_prompt;
 use crate::llm::Tool;
 use crate::ui::commands::{IndicatorState, UICommand};
 
+/// Clipboard text beyond this is cut: it's stored in the conversation and resent with every
+/// later question, so a huge accidental paste would slow and break the whole test.
+const MAX_QUESTION_CHARS: usize = 100_000;
+
 pub async fn execute(ctx: ActionContext) -> anyhow::Result<()> {
     let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Processing));
-
-    let question = tokio::task::spawn_blocking(clipboard::read_text).await??;
-    if question.trim().is_empty() {
-        let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Error));
-        anyhow::bail!("clipboard is empty");
-    }
-
-    let tools = memory_tools(&ctx);
-    let content = vec![ContentPart::text(question)];
-    let answer = match ask_in_conversation(&ctx, content, false, &tools).await {
-        Ok(a) => a,
-        Err(e) => {
-            let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Error));
-            return Err(e);
+    let result = async {
+        let question = match tokio::task::spawn_blocking(clipboard::read_text).await? {
+            Ok(q) => q,
+            // No text (an image, a file) or locked by another app — both mean "nothing to ask".
+            Err(e) => anyhow::bail!("clipboard is empty or unreadable: {e}"),
+        };
+        if question.trim().is_empty() {
+            anyhow::bail!("clipboard is empty");
         }
-    };
+        let question = truncate_question(question);
+        let tools = memory_tools(&ctx);
+        ask_in_conversation(&ctx, vec![ContentPart::text(question)], false, &tools).await
+    }
+    .await;
+    match result {
+        Ok(answer) => {
+            deliver_answer(&ctx, answer).await;
+            Ok(())
+        }
+        Err(e) => {
+            report_failure(&ctx, &e);
+            Err(e)
+        }
+    }
+}
 
-    let answer_for_write = answer.clone();
-    tokio::task::spawn_blocking(move || clipboard::write_text(&answer_for_write)).await??;
-    let _ = ctx.ui_tx.send(UICommand::SetOverlayText(answer));
-    let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(idle_indicator(&ctx)));
-    Ok(())
+fn truncate_question(q: String) -> String {
+    match q.char_indices().nth(MAX_QUESTION_CHARS) {
+        Some((cut, _)) => format!("{}\n\n(clipboard text cut off here: too long)", &q[..cut]),
+        None => q,
+    }
 }
 
 /// Runs one question as the next turn of the running conversation (shared by Clipboard and
@@ -181,6 +194,15 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn huge_clipboard_text_is_cut_on_a_char_boundary() {
+        let q = "é".repeat(MAX_QUESTION_CHARS + 10);
+        let t = truncate_question(q);
+        assert!(t.starts_with(&"é".repeat(MAX_QUESTION_CHARS)));
+        assert!(t.ends_with("too long)"));
+        assert_eq!(truncate_question("short".into()), "short");
     }
 
     #[tokio::test]

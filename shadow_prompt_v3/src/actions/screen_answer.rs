@@ -14,10 +14,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::clipboard_query::memory_tools;
-use super::{busy, idle_indicator, ActionContext, RestoreOverlaysOnDrop};
+use super::{busy, deliver_answer, report_failure, ActionContext, RestoreOverlaysOnDrop};
 use crate::capture::screen::{self, MonitorShot};
 use crate::capture::track::{self, Gray, COARSE_FACTOR};
-use crate::capture::{clipboard, image};
+use crate::capture::image;
 use crate::llm::messages::{ContentPart, ToolDef, ToolFunctionDef};
 use crate::llm::system_prompts::BASE;
 use crate::llm::{LlmClient, Tool};
@@ -150,8 +150,8 @@ pub async fn execute(ctx: ActionContext) -> anyhow::Result<()> {
     let _clear = ClearDotsOnDrop(ctx.ui_tx.clone());
     let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Processing));
     let result = run(&ctx).await;
-    if result.is_err() {
-        let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Error));
+    if let Err(e) = &result {
+        report_failure(&ctx, e);
     }
     result
 }
@@ -162,7 +162,7 @@ async fn run(ctx: &ActionContext) -> anyhow::Result<()> {
     tokio::time::sleep(OVERLAY_HIDE_SETTLE).await;
     let shots = tokio::task::spawn_blocking(screen::capture_monitors).await;
     drop(restore);
-    let shots = Arc::new(shots??);
+    let shots = Arc::new(shots?.map_err(|e| anyhow::anyhow!("screen capture: {e}"))?);
     if shots.is_empty() {
         anyhow::bail!("screen_answer: no monitors found");
     }
@@ -187,14 +187,7 @@ async fn run(ctx: &ActionContext) -> anyhow::Result<()> {
         llm.run_turn(&prompt, content, &tools, true, None).await?
     };
 
-    if !answer.trim().is_empty() {
-        // Overlay first: a clipboard locked by another app must not cost the user the answer.
-        let _ = ctx.ui_tx.send(UICommand::SetOverlayText(answer.clone()));
-        if let Err(e) = tokio::task::spawn_blocking(move || clipboard::write_text(&answer)).await? {
-            log::warn!("screen_answer: clipboard write failed: {e}");
-        }
-    }
-    let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(idle_indicator(ctx)));
+    deliver_answer(ctx, answer).await;
 
     let mut marks: Vec<Mark> = marks.lock().unwrap().clone();
     // Only MAX_DOTS can be drawn; tracking more just burns CPU every tick.
@@ -268,11 +261,17 @@ fn make_tracked(shots: &[MonitorShot], scales: &[f64], marks: &[Mark]) -> Vec<Tr
 /// Dot positions in virtual-screen coordinates, for every anchor confidently found right now.
 /// A monitor that disappeared (unplugged) just yields no dots for its marks.
 fn locate_all(tracked: &mut [Tracked], shots: &[MonitorShot], threshold: f32) -> Vec<(i32, i32)> {
-    let g: Vec<(Gray, Gray)> = shots.iter().map(grays).collect();
+    // Grayscale only the monitors that actually have dots — on a 4K/8K second screen without
+    // dots this conversion was most of the per-tick cost.
+    let g: Vec<Option<(Gray, Gray)>> = shots
+        .iter()
+        .enumerate()
+        .map(|(i, s)| tracked.iter().any(|t| t.monitor == i).then(|| grays(s)))
+        .collect();
     tracked
         .iter_mut()
         .filter_map(|t| {
-            let (full, coarse) = g.get(t.monitor)?;
+            let (full, coarse) = g.get(t.monitor)?.as_ref()?;
             let (x, y) = track::locate(&mut t.anchor, full, coarse, threshold)?;
             let s = &shots[t.monitor];
             Some((s.left + x, s.top + y))

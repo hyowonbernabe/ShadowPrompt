@@ -65,7 +65,9 @@ unsafe fn capture_region_raw(x: i32, y: i32, w: i32, h: i32) -> anyhow::Result<V
     let bitmap = CreateCompatibleBitmap(screen_dc, w, h);
     let old = SelectObject(mem_dc, bitmap);
 
-    let _ = BitBlt(mem_dc, 0, 0, w, h, screen_dc, x, y, SRCCOPY);
+    // Checked, not ignored: a failed copy (locked screen, UAC, out of memory) would otherwise
+    // come back as an all-black image reported as success.
+    let mut copied = !bitmap.is_invalid() && BitBlt(mem_dc, 0, 0, w, h, screen_dc, x, y, SRCCOPY).is_ok();
 
     let mut bmi = BITMAPINFO {
         bmiHeader: BITMAPINFOHEADER {
@@ -95,7 +97,7 @@ unsafe fn capture_region_raw(x: i32, y: i32, w: i32, h: i32) -> anyhow::Result<V
     };
     let dib_dc = CreateCompatibleDC(screen_dc);
     let old_dib = SelectObject(dib_dc, dib);
-    let _ = BitBlt(dib_dc, 0, 0, w, h, mem_dc, 0, 0, SRCCOPY);
+    copied &= BitBlt(dib_dc, 0, 0, w, h, mem_dc, 0, 0, SRCCOPY).is_ok();
 
     let buf_len = (w as usize) * (h as usize) * 4;
     let mut out = vec![0u8; buf_len];
@@ -116,5 +118,8 @@ unsafe fn capture_region_raw(x: i32, y: i32, w: i32, h: i32) -> anyhow::Result<V
 
     let _ = &mut bmi; // silence unused-mut warning from the struct-update pattern above
 
+    if !copied {
+        anyhow::bail!("screen copy failed (locked screen, secure desktop or out of memory)");
+    }
     Ok(out)
 }

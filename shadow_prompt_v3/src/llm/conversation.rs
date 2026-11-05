@@ -14,6 +14,8 @@ use super::messages::{ContentPart, Message};
 /// Past this many images Anthropic applies a stricter per-image size limit to every image.
 pub const MAX_IMAGES: usize = 20;
 pub const REMOVED_IMAGE_TEXT: &str = "(earlier screenshot removed)";
+/// Total base64 image bytes kept, well under OpenRouter/Anthropic request-size limits.
+pub const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnKind {
@@ -83,11 +85,22 @@ impl Conversation {
         self.turns.iter().flat_map(|t| &t.user).filter(|p| matches!(p, ContentPart::Image { .. })).count()
     }
 
+    fn image_bytes(&self) -> usize {
+        self.turns
+            .iter()
+            .flat_map(|t| &t.user)
+            .map(|p| match p {
+                ContentPart::Image { image_url } => image_url.url.len(),
+                _ => 0,
+            })
+            .sum()
+    }
+
     /// Replaces the oldest images with a short note until at most `MAX_IMAGES` remain. Question
     /// screenshots go first; reference (context) screenshots only once no question image is
     /// left, since the reference picture is usually the oldest and the most important.
     fn enforce_image_cap(&mut self) {
-        while self.image_count() > MAX_IMAGES {
+        while self.image_count() > MAX_IMAGES || self.image_bytes() > MAX_IMAGE_BYTES {
             let victim = [TurnKind::Question, TurnKind::Context].into_iter().find_map(|kind| {
                 self.turns.iter().enumerate().filter(|(_, t)| t.kind == kind).find_map(|(ti, t)| {
                     t.user.iter().position(|p| matches!(p, ContentPart::Image { .. })).map(|pi| (ti, pi))
@@ -178,6 +191,19 @@ mod tests {
         let json = serde_json::to_value(c.to_messages()).unwrap();
         assert_eq!(json[0]["content"][0]["text"], "q");
         assert_eq!(json[2]["content"][0]["text"], "ctx");
+    }
+
+    #[test]
+    fn byte_cap_drops_oldest_question_image() {
+        let mut c = Conversation::default();
+        let big = "x".repeat(MAX_IMAGE_BYTES / 2 + 1);
+        c.push_context(vec![img(&big)]);
+        c.push_question(vec![img(&format!("q{big}"))], "a".into());
+        c.push_question(vec![img(&format!("r{big}"))], "a".into());
+        assert!(c.image_bytes() <= MAX_IMAGE_BYTES);
+        let urls = image_urls(&c);
+        assert_eq!(urls.len(), 1, "context alone already fills half the budget");
+        assert!(urls[0].contains(",x"), "context image kept");
     }
 
     #[test]

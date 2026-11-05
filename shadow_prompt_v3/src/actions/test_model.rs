@@ -2,7 +2,7 @@
 // write, no tools. Shows both the model's own (possibly wrong) self-report and the ground-truth
 // model id from the API response.
 
-use super::{busy, idle_indicator, ActionContext};
+use super::{busy, idle_indicator, report_failure, ActionContext};
 use crate::ui::commands::{IndicatorState, UICommand};
 
 pub async fn execute(ctx: ActionContext) -> anyhow::Result<()> {
@@ -21,7 +21,7 @@ pub async fn execute(ctx: ActionContext) -> anyhow::Result<()> {
     let result = match call {
         Ok(r) => r,
         Err(e) => {
-            let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Error));
+            report_failure(&ctx, &e);
             return Err(e);
         }
     };

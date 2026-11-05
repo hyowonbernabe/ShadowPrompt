@@ -161,6 +161,25 @@ pub fn idle_indicator(ctx: &ActionContext) -> IndicatorState {
     if ctx.busy.load(Ordering::SeqCst) > 0 { IndicatorState::Processing } else { IndicatorState::Ready }
 }
 
+/// Shows a failed job to the user: Error light plus a short reason on the overlay. The full
+/// error is logged by the caller (`spawn_exclusive`).
+pub fn report_failure(ctx: &ActionContext, e: &anyhow::Error) {
+    let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Error));
+    let _ = ctx.ui_tx.send(UICommand::FlashNotice(crate::llm::user_facing_error(e).to_string()));
+}
+
+/// Shows a finished answer: overlay first, then the clipboard copy. A clipboard locked by
+/// another app is logged, never allowed to cost the user the answer or stick the indicator.
+pub async fn deliver_answer(ctx: &ActionContext, answer: String) {
+    let _ = ctx.ui_tx.send(UICommand::SetOverlayText(answer.clone()));
+    match tokio::task::spawn_blocking(move || crate::capture::clipboard::write_text(&answer)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => log::warn!("clipboard write failed: {e}"),
+        Err(e) => log::warn!("clipboard write task failed: {e}"),
+    }
+    let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(idle_indicator(ctx)));
+}
+
 /// Counts one in-flight model call until dropped — including when the task is aborted, since
 /// an abort drops the future and with it this guard.
 pub struct BusyGuard(Arc<AtomicUsize>);

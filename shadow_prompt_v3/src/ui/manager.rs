@@ -38,7 +38,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GWLP_USERDATA, HWND_TOPMOST, IDC_ARROW, LWA_ALPHA, MSG, SM_CXSCREEN, SM_CYSCREEN,
     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA,
     WDA_EXCLUDEFROMCAPTURE, WM_DESTROY, WM_PAINT, WM_TIMER, WM_USER, WNDCLASSEXW, WS_EX_LAYERED,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_VISIBLE,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
     WINDOW_EX_STYLE, WINDOW_STYLE,
 };
 use windows::Wdk::System::SystemServices::RtlGetVersion;
@@ -186,12 +186,14 @@ fn run_ui_thread(visuals: VisualsConfig, ready_tx: mpsc::Sender<u32>) -> anyhow:
         let screen_w = GetSystemMetrics(SM_CXSCREEN);
         let screen_h = GetSystemMetrics(SM_CYSCREEN);
 
-        let ind_ex = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
-        let overlay_ex = ind_ex | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT;
+        // Every window is no-activate + click-through: clicking one must never pull focus
+        // from the test page (a focus change is detectable by proctoring pages).
+        let ind_ex = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT;
+        let overlay_ex = ind_ex;
 
         let ind_size = visuals.indicator_size.max(1) as i32;
         let (ix, iy) = corner_pos(&visuals.indicator_corner, visuals.indicator_offset, ind_size, ind_size, screen_w, screen_h);
-        let hwnd_indicator = create_window(&class_name, ind_ex, WS_POPUP | WS_VISIBLE, ix, iy, ind_size, ind_size, hinstance.into());
+        let hwnd_indicator = create_window(&class_name, ind_ex, WS_POPUP, ix, iy, ind_size, ind_size, hinstance.into());
         let _ = SetLayeredWindowAttributes(hwnd_indicator, COLORREF(0), 255, LWA_ALPHA);
 
         let (fx, fy) = corner_pos(&visuals.form_indicator_corner, visuals.form_indicator_offset, ind_size, ind_size, screen_w, screen_h);

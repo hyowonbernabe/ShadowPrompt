@@ -42,6 +42,40 @@ pub type DeltaSink<'a> = &'a (dyn Fn(&str) + Send + Sync);
 
 const ENDPOINT: &str = "https://openrouter.ai/api/v1/chat/completions";
 
+/// Upper bound on one HTTP request, start to last byte (see `LlmClient::new`).
+const OVERALL_CAP: Duration = Duration::from_secs(300);
+
+/// A short, user-facing reason for a failed model call, for the overlay notice. The full error
+/// still goes to the log.
+pub fn user_facing_error(e: &anyhow::Error) -> &'static str {
+    let s = format!("{e:#}");
+    if s.contains("clipboard is empty") {
+        "Clipboard has no text"
+    } else if s.contains("screen capture") {
+        "Screen capture failed"
+    } else if s.contains("openrouter 401") {
+        "API key invalid or expired"
+    } else if s.contains("openrouter 402") {
+        "Out of OpenRouter credits"
+    } else if s.contains("openrouter 429") {
+        "Rate limited, try again shortly"
+    } else if s.contains("empty answer") {
+        "Model gave an empty answer"
+    } else if s.contains("timed out") || s.contains("operation timed out") {
+        "Timed out"
+    } else if s.contains("openrouter 400") && (s.contains("context") || s.contains("too long") || s.contains("too large")) {
+        "Conversation too long, press Reset"
+    } else {
+        "Request failed"
+    }
+}
+
+/// 401/402 won't get better on the next model group — stop instead of repeating them.
+fn is_account_error(e: &anyhow::Error) -> bool {
+    let s = e.to_string();
+    s.contains("openrouter 401") || s.contains("openrouter 402")
+}
+
 #[derive(Clone)]
 pub struct LlmClient {
     pub http: Arc<reqwest::Client>,
@@ -87,9 +121,13 @@ pub trait Tool: Send + Sync {
 
 impl LlmClient {
     pub fn new(api_key: String, models: Vec<String>, connect_secs: u64, read_secs: u64) -> anyhow::Result<Self> {
+        // `read_secs` is a gap-between-bytes limit, not a total: a streamed answer with web search
+        // or a long history legitimately takes longer than that overall, and a total cap cut
+        // it off mid-stream on every retry. OVERALL_CAP still bounds a trickling stream.
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(connect_secs))
-            .timeout(Duration::from_secs(read_secs))
+            .read_timeout(Duration::from_secs(read_secs))
+            .timeout(OVERALL_CAP)
             .build()?;
         Ok(Self {
             http: Arc::new(http),
@@ -189,11 +227,23 @@ impl LlmClient {
                 .next()
                 .ok_or_else(|| anyhow::anyhow!("no choices in response"))?;
 
+            let cut_off = choice.finish_reason.as_deref() == Some("length");
             if choice.message.tool_calls.is_empty() {
                 // Trimmed: some models (e.g. dots-3-note) pad replies with leading blank lines.
-                let answer = choice.message.content.unwrap_or_default().trim().to_string();
+                let mut answer = choice.message.content.unwrap_or_default().trim().to_string();
                 log::debug!("round {round}: final answer: {}", truncate_for_log(&answer));
+                if answer.is_empty() {
+                    // An empty answer would blank the overlay and clipboard and, stored in the
+                    // conversation, make every later request invalid.
+                    anyhow::bail!("model returned an empty answer");
+                }
+                if cut_off {
+                    answer.push_str("\n\n(answer cut off: too long)");
+                }
                 return Ok(answer);
+            }
+            if cut_off {
+                anyhow::bail!("model output cut off mid tool call (finish_reason=length)");
             }
 
             // Real diagnostic gap found live: with no round cap left, a genuinely stuck loop
@@ -297,6 +347,7 @@ impl LlmClient {
         for (i, chunk) in chunks.iter().enumerate() {
             match self.call_one_chunk(chunk, messages, tools.clone(), on_delta).await {
                 Ok(resp) => return Ok(resp),
+                Err(e) if is_account_error(&e) => return Err(e),
                 Err(e) => {
                     log::warn!("model chunk {}/{} ({:?}) failed: {e}", i + 1, chunks.len(), chunk);
                     last_err = Some(e);
@@ -385,30 +436,52 @@ fn truncate_for_log(s: &str) -> String {
 /// caller can paint partial text incrementally.
 async fn read_sse_stream(resp: reqwest::Response, on_delta: Option<DeltaSink<'_>>) -> Result<Response, retry::CallError> {
     let mut assembler = StreamAssembler::new(on_delta);
-    let mut buf = String::new();
+    let mut buf: Vec<u8> = Vec::new();
     let mut byte_stream = resp.bytes_stream();
+    let mut saw_done = false;
 
     'outer: while let Some(next) = byte_stream.next().await {
         let bytes = next.map_err(|e| retry::CallError::Transport(e.into()))?;
-        // Normalize CRLF to LF up front so the `\n\n` frame delimiter check below is a single
-        // pattern regardless of which line ending the server used.
-        buf.push_str(&String::from_utf8_lossy(&bytes).replace("\r\n", "\n"));
-
-        while let Some(pos) = buf.find("\n\n") {
-            let frame: String = buf.drain(..pos + 2).collect();
-            if process_sse_frame(frame[..frame.len() - 2].trim_end_matches('\n'), &mut assembler)? {
-                break 'outer; // saw `data: [DONE]`
+        push_sse_bytes(&mut buf, &bytes);
+        for frame in drain_sse_frames(&mut buf) {
+            if process_sse_frame(&frame, &mut assembler)? {
+                saw_done = true;
+                break 'outer;
             }
         }
     }
     // Lenient: a stream that ends (connection close) without a final blank line still has its
     // last frame's data sitting in `buf` — process it rather than silently dropping it.
-    let remainder = buf.trim();
-    if !remainder.is_empty() {
-        let _ = process_sse_frame(remainder, &mut assembler)?;
+    let remainder = String::from_utf8_lossy(&buf);
+    let remainder = remainder.trim();
+    if !remainder.is_empty() && process_sse_frame(remainder, &mut assembler)? {
+        saw_done = true;
+    }
+    // Neither `[DONE]` nor a finish_reason: the connection closed mid-answer. Treat it as a
+    // transport failure (retried) rather than passing a half answer off as complete.
+    if !saw_done && assembler.finish_reason.is_none() {
+        return Err(retry::CallError::Transport(anyhow::anyhow!("stream ended before the answer was complete")));
     }
 
     assembler.finish()
+}
+
+/// Appends raw body bytes, dropping `\r` so CRLF and LF framing look the same. Safe on raw
+/// bytes: 0x0D is never part of a multi-byte UTF-8 sequence, and JSON escapes it inside strings.
+fn push_sse_bytes(buf: &mut Vec<u8>, bytes: &[u8]) {
+    buf.extend(bytes.iter().copied().filter(|&b| b != b'\r'));
+}
+
+/// Removes and returns every complete frame (up to a blank line) from `buf`. Decoding happens
+/// per complete frame, never per network chunk, so a multi-byte character split across two
+/// chunks isn't garbled.
+fn drain_sse_frames(buf: &mut Vec<u8>) -> Vec<String> {
+    let mut frames = Vec::new();
+    while let Some(pos) = buf.windows(2).position(|w| w == b"\n\n") {
+        let frame: Vec<u8> = buf.drain(..pos + 2).collect();
+        frames.push(String::from_utf8_lossy(&frame[..pos]).trim_end_matches('\n').to_string());
+    }
+    frames
 }
 
 /// Processes one already-delimited SSE frame (no trailing blank line). Returns `Ok(true)` when
@@ -721,6 +794,58 @@ mod tests {
             vec!["4".to_string(), "2".to_string()],
             "the callback must fire once per non-empty content fragment, as it arrives"
         );
+    }
+
+    #[test]
+    fn sse_framing_keeps_multibyte_chars_split_across_chunks() {
+        let frame = "data: {\"x\":\"café — 42\"}\n\n".as_bytes();
+        let split = frame.iter().position(|&b| b == 0xC3).unwrap() + 1; // inside "é"
+        let mut buf = Vec::new();
+        push_sse_bytes(&mut buf, &frame[..split]);
+        assert!(drain_sse_frames(&mut buf).is_empty());
+        push_sse_bytes(&mut buf, &frame[split..]);
+        assert_eq!(drain_sse_frames(&mut buf), vec!["data: {\"x\":\"café — 42\"}".to_string()]);
+    }
+
+    #[test]
+    fn sse_framing_handles_crlf() {
+        let mut buf = Vec::new();
+        push_sse_bytes(&mut buf, b"data: a\r\n\r\ndata: b\r\n\r\n");
+        assert_eq!(drain_sse_frames(&mut buf), vec!["data: a".to_string(), "data: b".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn empty_answer_is_an_error_and_length_is_flagged() {
+        let server = MockServer::start().await;
+        let empty = sse_body(&[serde_json::json!({"choices": [{"delta": {"content": "  "}, "finish_reason": "stop"}]})]);
+        Mock::given(method("POST")).and(path("/")).respond_with(respond_sse(empty)).up_to_n_times(1).mount(&server).await;
+        let cut = sse_body(&[serde_json::json!({"choices": [{"delta": {"content": "half"}, "finish_reason": "length"}]})]);
+        Mock::given(method("POST")).and(path("/")).respond_with(respond_sse(cut)).mount(&server).await;
+        let client = test_client(server.uri(), vec!["m".to_string()]);
+
+        let err = client.run_turn("s", vec![ContentPart::text("q")], &[], false, None).await.unwrap_err();
+        assert_eq!(user_facing_error(&err), "Model gave an empty answer");
+        let a = client.run_turn("s", vec![ContentPart::text("q")], &[], false, None).await.unwrap();
+        assert!(a.starts_with("half") && a.contains("cut off"), "{a}");
+    }
+
+    #[tokio::test]
+    async fn stream_closed_without_done_or_finish_reason_is_not_a_complete_answer() {
+        let server = MockServer::start().await;
+        let body = "data: {\"choices\":[{\"delta\":{\"content\":\"The answer is B because\"}}]}\n\n".to_string();
+        Mock::given(method("POST")).and(path("/")).respond_with(respond_sse(body)).mount(&server).await;
+        let client = test_client(server.uri(), vec!["m".to_string()]);
+        assert!(client.run_turn("s", vec![ContentPart::text("q")], &[], false, None).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn account_errors_stop_without_trying_the_next_model_group() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/")).respond_with(ResponseTemplate::new(401).set_body_string("expired")).expect(1).mount(&server).await;
+        let models: Vec<String> = (0..5).map(|i| format!("m{i}")).collect();
+        let client = test_client(server.uri(), models);
+        let err = client.run_turn("s", vec![ContentPart::text("q")], &[], false, None).await.unwrap_err();
+        assert_eq!(user_facing_error(&err), "API key invalid or expired");
     }
 
     #[tokio::test]

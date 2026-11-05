@@ -1,9 +1,9 @@
 // Screenshot Query — design doc §3. Drag-select region -> vision query. No OCR anywhere in
 // this path; the image goes straight to the model.
 
-use super::{idle_indicator, ActionContext, RestoreOverlaysOnDrop};
+use super::{deliver_answer, report_failure, ActionContext, RestoreOverlaysOnDrop};
 use super::clipboard_query::{ask_in_conversation, memory_tools};
-use crate::capture::{clipboard, image, screen};
+use crate::capture::{image, screen};
 use crate::llm::messages::ContentPart;
 use crate::ui::commands::{IndicatorState, UICommand};
 
@@ -24,7 +24,7 @@ pub async fn capture_image_part(ctx: &ActionContext, x: i32, y: i32, w: i32, h: 
     tokio::time::sleep(OVERLAY_HIDE_SETTLE).await;
     let capture_result = tokio::task::spawn_blocking(move || screen::capture_region(x, y, w, h)).await;
     drop(restore);
-    let png = capture_result??;
+    let png = capture_result?.map_err(|e| anyhow::anyhow!("screen capture: {e}"))?;
     tokio::task::spawn_blocking(move || image::prepare_for_request(&png, MAX_IMAGE_LONG_EDGE_PX)).await?
 }
 
@@ -37,17 +37,14 @@ pub async fn execute(ctx: ActionContext, x: i32, y: i32, w: i32, h: i32) -> anyh
         ask_in_conversation(&ctx, content, true, &memory_tools(&ctx)).await
     }
     .await;
-    let answer = match result {
-        Ok(a) => a,
-        Err(e) => {
-            let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Error));
-            return Err(e);
+    match result {
+        Ok(answer) => {
+            deliver_answer(&ctx, answer).await;
+            Ok(())
         }
-    };
-
-    let answer_for_write = answer.clone();
-    tokio::task::spawn_blocking(move || clipboard::write_text(&answer_for_write)).await??;
-    let _ = ctx.ui_tx.send(UICommand::SetOverlayText(answer));
-    let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(idle_indicator(&ctx)));
-    Ok(())
+        Err(e) => {
+            report_failure(&ctx, &e);
+            Err(e)
+        }
+    }
 }
