@@ -71,7 +71,10 @@ pub async fn ask_in_conversation(
         .await?;
     // Stored where the snapshot ended, so context added while this was in flight stays after
     // it — the history matches what the model actually saw.
-    ctx.conversation.lock().unwrap().insert_question(position, content, answer.clone());
+    // A cut-off answer is shown, not kept: a truncated turn would mislead every later question.
+    if !answer.ends_with(crate::llm::CUT_OFF_NOTE) {
+        ctx.conversation.lock().unwrap().insert_question(position, content, answer.clone());
+    }
     Ok(answer)
 }
 

@@ -42,6 +42,10 @@ pub type DeltaSink<'a> = &'a (dyn Fn(&str) + Send + Sync);
 
 const ENDPOINT: &str = "https://openrouter.ai/api/v1/chat/completions";
 
+/// Appended to an answer the model stopped mid-way (`finish_reason: length`). Such an answer is
+/// shown but never stored in the conversation (see `ask_in_conversation`).
+pub const CUT_OFF_NOTE: &str = "\n\n(answer cut off: too long)";
+
 /// Upper bound on one HTTP request, start to last byte (see `LlmClient::new`).
 const OVERALL_CAP: Duration = Duration::from_secs(300);
 
@@ -242,7 +246,7 @@ impl LlmClient {
                     anyhow::bail!("model returned an empty answer");
                 }
                 if cut_off {
-                    answer.push_str("\n\n(answer cut off: too long)");
+                    answer.push_str(CUT_OFF_NOTE);
                 }
                 return Ok(answer);
             }

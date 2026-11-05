@@ -23,7 +23,7 @@ use bindings::{build, insta_delete_combo, Binding};
 use parser::KeyCombo;
 use rdev::{grab, Button, Event, EventType, Key};
 use state_machine::{InstaDeleteState, Transition};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -83,6 +83,9 @@ const LISTEN_MAX_ATTEMPTS: u32 = 10;
 /// click-drag much later would silently capture and send a region.
 const SELECTION_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Longer than Windows' maximum keyboard repeat delay (1 s) — see `ListenerState::held`.
+const STALE_HELD: Duration = Duration::from_millis(1100);
+
 struct ListenerState {
     bindings: Vec<Binding>,
     insta: KeyCombo,
@@ -93,10 +96,13 @@ struct ListenerState {
     selecting: Mutex<bool>,
     /// When the current selection was armed — see `SELECTION_TIMEOUT`.
     armed_at: Mutex<Option<Instant>>,
-    /// Keys currently held. A press for a key already held is OS auto-repeat, never a new
+    /// Keys currently held, with when each was last seen. A press for a key already held is OS
+    /// auto-repeat, never a new press — unless that key has been silent longer than any repeat
+    /// interval (`STALE_HELD`), which means its release was missed (lock screen, elevated
+    /// window) and this is really a fresh press; otherwise that key would never fire again.
     /// press — without this, holding a combo re-fired it every debounce window, and holding the
     /// insta-delete combo for half a second counted as its confirming second tap.
-    held: Mutex<HashSet<Key>>,
+    held: Mutex<HashMap<Key, Instant>>,
     /// Backup-hotkey state (see module comment): Caps Lock currently held, and whether Tab was
     /// tapped during this hold (the mode is armed until Caps Lock is released).
     caps_down: Mutex<bool>,
@@ -148,7 +154,7 @@ impl ListenerState {
             cursor: Mutex::new((0, 0)),
             selecting: Mutex::new(false),
             armed_at: Mutex::new(None),
-            held: Mutex::new(HashSet::new()),
+            held: Mutex::new(HashMap::new()),
             caps_down: Mutex::new(false),
             backup_armed: Mutex::new(false),
             swallowed: Mutex::new(HashSet::new()),
@@ -321,7 +327,14 @@ impl ListenerState {
         if k == Key::CapsLock && self.take_injected_caps() {
             return true;
         }
-        if !self.held.lock().unwrap().insert(k) {
+        let repeat = {
+            let mut held = self.held.lock().unwrap();
+            let now = Instant::now();
+            let repeat = held.get(&k).is_some_and(|t| now.duration_since(*t) < STALE_HELD);
+            held.insert(k, now);
+            repeat
+        };
+        if repeat {
             // Auto-repeat of a key already down: same fate as its first press.
             return !self.swallowed.lock().unwrap().contains(&k);
         }
@@ -376,6 +389,9 @@ impl ListenerState {
     }
 
     /// Backup mode: `k` fires whichever action's normal combo uses that key, modifiers ignored.
+    /// Guard for the destructive ones reached this way (panic_kill's End, insta_delete's X): the
+    /// chord needs Caps Lock held AND Tab pressed first — two keys that never co-occur in normal
+    /// typing — and insta_delete still needs its double tap.
     fn fire_backup(&self, k: Key) {
         if k == Key::Escape && *self.selecting.lock().unwrap() {
             self.cancel_selection();
@@ -605,6 +621,18 @@ mod tests {
         std::thread::sleep(Duration::from_millis(210)); // past the per-combo debounce
         s.on_press(Key::F9);
         assert_eq!(drain(&mut rx), 1, "a fresh press after release fires again");
+    }
+
+    #[test]
+    fn a_key_whose_release_was_missed_fires_again_after_it_goes_stale() {
+        let (s, mut rx) = state_with("f9");
+        s.on_press(Key::F9);
+        assert_eq!(drain(&mut rx), 1);
+        // release never seen (e.g. happened on the lock screen) ...
+        s.held.lock().unwrap().insert(Key::F9, Instant::now() - STALE_HELD - Duration::from_millis(1));
+        std::thread::sleep(Duration::from_millis(210)); // past debounce
+        s.on_press(Key::F9);
+        assert_eq!(drain(&mut rx), 1, "a press after a long silence is a fresh press, not a repeat");
     }
 
     #[test]
