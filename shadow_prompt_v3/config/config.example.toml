@@ -82,3 +82,5 @@ max_image_long_edge_px = 1200
 [knowledge]
 enabled = true
 max_doc_bytes = 100000
+# Shared cloud docs. Leave out to use the built-in default; set to "" to turn cloud off.
+# cloud_url = ""

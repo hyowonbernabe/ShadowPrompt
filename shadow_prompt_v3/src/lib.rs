@@ -84,15 +84,19 @@ fn run_daemon(cfg: config::Config) -> anyhow::Result<()> {
 
         // Sandboxed knowledge/ folder — design doc §4. Exe-relative, never hardcoded absolute
         // (matches the USB-portability convention every other data dir already follows).
-        let knowledge = knowledge::KnowledgeStore::new(
+        let knowledge = Arc::new(knowledge::KnowledgeStore::new(
             config::paths::knowledge_dir()?,
             cfg.knowledge.max_doc_bytes,
-        );
+            cfg.knowledge.cloud_url.clone(),
+        )?);
+        if cfg.knowledge.enabled {
+            knowledge.refresh_in_background();
+        }
 
         let action_ctx = actions::ActionContext {
             config: Arc::new(cfg),
             llm: Arc::new(llm),
-            knowledge: Arc::new(knowledge),
+            knowledge,
             ui_tx: ui_tx.clone(),
             answer_task: Arc::new(Mutex::new(None)),
             forms_task: Arc::new(Mutex::new(None)),

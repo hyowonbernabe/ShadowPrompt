@@ -163,6 +163,18 @@ pub struct KnowledgeConfig {
     /// enumerates the whole sandboxed `knowledge/` tree on demand.
     #[serde(default = "default_max_doc_bytes")]
     pub max_doc_bytes: usize,
+    /// Owner's cloud doc bundle (cloud_docs/). Built-in default so existing configs get it
+    /// without editing; `""` turns cloud off.
+    #[serde(default = "default_cloud_url")]
+    pub cloud_url: String,
+}
+
+/// Public, read-only URL of the owner's Cloudflare Pages bundle — not a secret. Empty until the
+/// Pages project exists (cloud_docs/README.md, setup step 4).
+pub const DEFAULT_CLOUD_URL: &str = "";
+
+fn default_cloud_url() -> String {
+    DEFAULT_CLOUD_URL.to_string()
 }
 
 impl Default for KnowledgeConfig {
@@ -170,6 +182,7 @@ impl Default for KnowledgeConfig {
         Self {
             enabled: true,
             max_doc_bytes: default_max_doc_bytes(),
+            cloud_url: default_cloud_url(),
         }
     }
 }
