@@ -24,7 +24,7 @@ use parser::KeyCombo;
 use rdev::{grab, Button, Event, EventType, Key};
 use state_machine::{InstaDeleteState, Transition};
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -107,6 +107,9 @@ struct ListenerState {
     /// Caps Lock events we injected ourselves (to undo the chord's toggle) — passed through
     /// untouched instead of being treated as the user's.
     injected_caps: AtomicU8,
+    /// A mouse button press was swallowed (selection in progress) — swallow its release too.
+    left_swallowed: AtomicBool,
+    right_swallowed: AtomicBool,
     /// Which hotkey armed the current selection — carried on the resulting `ScreenshotRegion`.
     purpose: Mutex<RegionPurpose>,
     p1: Mutex<Option<(i32, i32)>>,
@@ -150,6 +153,8 @@ impl ListenerState {
             backup_armed: Mutex::new(false),
             swallowed: Mutex::new(HashSet::new()),
             injected_caps: AtomicU8::new(0),
+            left_swallowed: AtomicBool::new(false),
+            right_swallowed: AtomicBool::new(false),
             purpose: Mutex::new(RegionPurpose::Query),
             p1: Mutex::new(None),
             last_drag_send: Mutex::new(None),
@@ -188,15 +193,42 @@ impl ListenerState {
                     }
                 }
             }
-            EventType::ButtonPress(Button::Left) => self.on_left_click(),
+            // While a selection is being drawn, its clicks are swallowed: they belong to the
+            // selection, and passing them through could tick an answer or follow a link on the
+            // page underneath (a click-click selection over a multiple-choice option did).
+            EventType::ButtonPress(Button::Left) => {
+                let selecting = *self.selecting.lock().unwrap();
+                self.on_left_click();
+                if selecting {
+                    self.left_swallowed.store(true, Ordering::SeqCst);
+                    return false;
+                }
+            }
             // Real gap found by actually thinking through the gesture, not just the two-click
             // model this was originally built around: a natural press-drag-release never fires a
             // second `ButtonPress`, so without this the selection stayed "armed" waiting for P2
             // forever — the next unrelated click anywhere (a desktop icon, a link) would silently
             // become P2 and fire a capture nobody asked for. See `on_left_release`.
-            EventType::ButtonRelease(Button::Left) => self.on_left_release(),
-            // Right-click is the natural "never mind" during a selection.
-            EventType::ButtonPress(Button::Right) => self.cancel_selection(),
+            EventType::ButtonRelease(Button::Left) => {
+                self.on_left_release();
+                if self.left_swallowed.swap(false, Ordering::SeqCst) {
+                    return false;
+                }
+            }
+            // Right-click is the natural "never mind" during a selection (and must not open the
+            // page's context menu while doing so).
+            EventType::ButtonPress(Button::Right) => {
+                if *self.selecting.lock().unwrap() {
+                    self.cancel_selection();
+                    self.right_swallowed.store(true, Ordering::SeqCst);
+                    return false;
+                }
+            }
+            EventType::ButtonRelease(Button::Right) => {
+                if self.right_swallowed.swap(false, Ordering::SeqCst) {
+                    return false;
+                }
+            }
             _ => {}
         }
         true
@@ -225,7 +257,7 @@ impl ListenerState {
         if !*self.selecting.lock().unwrap() {
             return;
         }
-        let cur = *self.cursor.lock().unwrap();
+        let cur = self.cursor_now();
         let mut p1 = self.p1.lock().unwrap();
         match *p1 {
             None => {
@@ -261,7 +293,7 @@ impl ListenerState {
         if !*self.selecting.lock().unwrap() {
             return;
         }
-        let cur = *self.cursor.lock().unwrap();
+        let cur = self.cursor_now();
         let mut p1 = self.p1.lock().unwrap();
         let Some((x1, y1)) = *p1 else {
             return;
@@ -413,6 +445,15 @@ impl ListenerState {
         let _ = self.tx.send(event);
     }
 
+    /// Where the cursor is right now. Asked from Windows rather than taken only from tracked
+    /// move events: a click can arrive with no move event since the hotkey (cursor already in
+    /// place, or moved by software), which recorded a stale (0, 0) corner.
+    fn cursor_now(&self) -> (i32, i32) {
+        let pos = live_cursor().unwrap_or(*self.cursor.lock().unwrap());
+        *self.cursor.lock().unwrap() = pos;
+        pos
+    }
+
     fn take_injected_caps(&self) -> bool {
         self.injected_caps.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok()
     }
@@ -499,6 +540,20 @@ fn live_mods() -> Option<Mods> {
     None
 }
 
+/// The real cursor position (physical pixels — the process is per-monitor DPI aware).
+#[cfg(windows)]
+fn live_cursor() -> Option<(i32, i32)> {
+    let mut p = windows::Win32::Foundation::POINT::default();
+    // SAFETY: plain Win32 query writing into a local POINT.
+    unsafe { windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut p) }.ok()?;
+    Some((p.x, p.y))
+}
+
+#[cfg(not(windows))]
+fn live_cursor() -> Option<(i32, i32)> {
+    None
+}
+
 /// One synthetic Caps Lock press + release.
 #[cfg(all(windows, not(test)))]
 fn send_caps_tap() {
@@ -575,6 +630,25 @@ mod tests {
         assert!(rx.try_recv().is_err(), "and nothing fires");
         assert!(s.on_release(Key::F9) && s.on_release(Key::CapsLock));
         assert_eq!(s.injected_caps.load(Ordering::SeqCst), 0, "caps toggle left alone");
+    }
+
+    fn ev(t: EventType) -> Event {
+        Event { event_type: t, time: std::time::SystemTime::now(), name: None }
+    }
+
+    #[test]
+    fn clicks_are_swallowed_only_while_selecting() {
+        let (s, mut rx) = state_with("f9");
+        assert!(s.on_event(&ev(EventType::ButtonPress(Button::Left))), "normal clicks pass");
+        assert!(s.on_event(&ev(EventType::ButtonRelease(Button::Left))));
+        *s.selecting.lock().unwrap() = true;
+        assert!(!s.on_event(&ev(EventType::ButtonPress(Button::Left))), "selection click swallowed");
+        assert!(!s.on_event(&ev(EventType::ButtonRelease(Button::Left))), "and its release");
+        assert!(!s.on_event(&ev(EventType::ButtonPress(Button::Right))), "right-click cancel swallowed");
+        assert!(!s.on_event(&ev(EventType::ButtonRelease(Button::Right))));
+        assert!(!*s.selecting.lock().unwrap());
+        assert!(matches!(rx.try_recv(), Ok(InputEvent::ScreenshotCancel)));
+        assert!(s.on_event(&ev(EventType::ButtonPress(Button::Right))), "right-click passes when idle");
     }
 
     #[test]

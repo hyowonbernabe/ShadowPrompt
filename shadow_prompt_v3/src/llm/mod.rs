@@ -144,6 +144,10 @@ impl LlmClient {
     /// ID of the model now in front, for the overlay confirmation.
     pub fn toggle_primary_model(&self) -> String {
         self.primary_swapped.fetch_xor(true, std::sync::atomic::Ordering::SeqCst);
+        // OpenRouter's session stickiness pins the *model* that served earlier requests, not just
+        // the provider — verified live: with the old session id, a Gemini-first chain kept being
+        // answered by Sonnet. A new session makes the new order actually take effect.
+        self.new_session();
         self.active_models().into_iter().next().unwrap_or_default()
     }
 
@@ -846,6 +850,14 @@ mod tests {
         let client = test_client(server.uri(), models);
         let err = client.run_turn("s", vec![ContentPart::text("q")], &[], false, None).await.unwrap_err();
         assert_eq!(user_facing_error(&err), "API key invalid or expired");
+    }
+
+    #[test]
+    fn switching_model_starts_a_new_openrouter_session() {
+        let client = test_client("http://unused".into(), vec!["a".into(), "b".into()]);
+        let before = client.session_id.lock().unwrap().clone();
+        assert_eq!(client.toggle_primary_model(), "b");
+        assert_ne!(*client.session_id.lock().unwrap(), before);
     }
 
     #[tokio::test]

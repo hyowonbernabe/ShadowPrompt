@@ -346,6 +346,17 @@ fn os_build_supports_capture_exclusion() -> bool {
 fn drain_commands(ctx: &mut UiCtx) {
     let cmds: Vec<UICommand> = std::mem::take(&mut *PENDING.lock().unwrap());
     for cmd in cmds {
+        // Debug-log what the user would see: the overlay is excluded from screen capture, so
+        // this is the only way to verify UI results in a `--debug` run (normal runs log nothing).
+        match &cmd {
+            UICommand::SetIndicatorState(s) => log::debug!("ui: indicator {s:?}"),
+            UICommand::SetOverlayText(t) => {
+                log::debug!("ui: overlay {:?}", t.chars().take(300).collect::<String>())
+            }
+            UICommand::FlashNotice(t) => log::debug!("ui: notice {t:?}"),
+            UICommand::SetDots(p) => log::debug!("ui: dots {p:?}"),
+            _ => {}
+        }
         match cmd {
             UICommand::SetIndicatorState(s) => {
                 ctx.indicator = s;
