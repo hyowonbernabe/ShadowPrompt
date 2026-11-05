@@ -72,7 +72,7 @@ pub async fn ask_in_conversation(
     let _busy = busy(ctx);
     let answer = ctx
         .llm
-        .run_turn_with_history(&system_prompt(ctx), history, content.clone(), tools, content_has_image || history_has_image, None)
+        .run_turn_with_history(&system_prompt(ctx).await, history, content.clone(), tools, content_has_image || history_has_image, None)
         .await?;
     // Stored where the snapshot ended, so context added while this was in flight stays after
     // it — the history matches what the model actually saw.
@@ -85,10 +85,12 @@ pub async fn ask_in_conversation(
 
 /// General prompt plus the knowledge doc listing, so the model can search without first
 /// spending a round trip on `list_docs`.
-fn system_prompt(ctx: &ActionContext) -> String {
+/// Waits (≤2s, once) for a first cloud copy so the very first query after launch lists cloud docs too.
+async fn system_prompt(ctx: &ActionContext) -> String {
     if !ctx.config.knowledge.enabled {
         return general_prompt();
     }
+    ctx.knowledge.wait_for_cloud().await;
     general_prompt() + &ctx.knowledge.prompt_listing()
 }
 

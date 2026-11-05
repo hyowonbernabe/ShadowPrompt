@@ -1,4 +1,4 @@
-"""Bundle cloud_docs/materials/ into public/bundle.json for Cloudflare Pages.
+"""Bundle cloud_docs/materials/ into public/bundle.json for GitHub Pages.
 
 Stdlib only. Run from cloud_docs/ (Pages root dir): `python build.py`.
 Each doc records its text, a sha256 of that text with CRLF normalised to LF (so a Windows

@@ -18,7 +18,10 @@ use crate::llm::messages::{ToolDef, ToolFunctionDef};
 use crate::llm::retry::{with_retry, CallError};
 use crate::llm::Tool;
 
+/// Connect, and each read of the body: a slow-but-moving download of a big bundle still finishes.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(5);
+/// Hard ceiling on one whole download attempt.
+const FETCH_TOTAL_CAP: Duration = Duration::from_secs(120);
 const FAILURE_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 const MAX_CLOUD_WAIT: Duration = Duration::from_secs(2);
 const DEFAULT_MAX_RESULTS: usize = 50;
@@ -46,6 +49,9 @@ struct CloudState {
     in_flight: bool,
     retry_after: Option<Instant>,
     last_error: Option<String>,
+    /// A tool already waited the full `MAX_CLOUD_WAIT` on the current refresh: later tool calls
+    /// (several per query) don't wait again, so a slow network costs a query 2s at most.
+    waited_out: bool,
 }
 
 pub struct Doc {
@@ -70,7 +76,11 @@ pub struct KnowledgeStore {
 
 impl KnowledgeStore {
     pub fn new(root: PathBuf, max_doc_bytes: usize, cloud_url: String) -> anyhow::Result<Self> {
-        let http = reqwest::Client::builder().timeout(FETCH_TIMEOUT).build()?;
+        let http = reqwest::Client::builder()
+            .connect_timeout(FETCH_TIMEOUT)
+            .read_timeout(FETCH_TIMEOUT)
+            .timeout(FETCH_TOTAL_CAP)
+            .build()?;
         Ok(Self { root, max_doc_bytes, cloud_url, http, cloud: Mutex::new(CloudState::default()) })
     }
 
@@ -86,6 +96,7 @@ impl KnowledgeStore {
                 return;
             }
             s.in_flight = true;
+            s.waited_out = false;
             s.etag.clone()
         };
         let me = self.clone();
@@ -145,12 +156,13 @@ impl KnowledgeStore {
         while Instant::now() < deadline {
             {
                 let s = self.cloud.lock().unwrap();
-                if s.bundle.is_some() || !s.in_flight {
+                if s.bundle.is_some() || !s.in_flight || s.waited_out {
                     return;
                 }
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
+        self.cloud.lock().unwrap().waited_out = true;
     }
 
     #[cfg(test)]
@@ -232,9 +244,12 @@ impl KnowledgeStore {
 
     /// Appended to the system prompt so the model can search without a `list_docs` round trip.
     pub fn prompt_listing(&self) -> String {
-        let (docs, _) = self.docs();
+        let (docs, note) = self.docs();
         if docs.is_empty() {
-            return String::new();
+            return note.map_or_else(String::new, |n| format!("
+
+KNOWLEDGE DOCS: none yet {n}; list_docs may find them shortly.
+"));
         }
         let mut s = String::from(
             "\n\nKNOWLEDGE DOCS (search with search_docs, then read only the relevant lines with read_doc):\n",
@@ -342,7 +357,7 @@ impl Tool for SearchDocsTool {
             max_results: Option<usize>,
         }
         let args: Args = serde_json::from_str(args_json).map_err(|e| anyhow::anyhow!("invalid arguments: {e}"))?;
-        let max = args.max_results.unwrap_or(DEFAULT_MAX_RESULTS);
+        let max = args.max_results.unwrap_or(DEFAULT_MAX_RESULTS).max(1);
         // A model-written pattern that isn't valid regex (e.g. `C++`) is searched literally.
         let re = regex::RegexBuilder::new(&args.pattern)
             .case_insensitive(true)
@@ -408,7 +423,7 @@ impl Tool for ReadDocTool {
         if start > lines.len() {
             return Ok(format!("[offset {start} is past the end; {} has {} lines]", doc.name, lines.len()));
         }
-        let end = (start - 1 + args.limit.unwrap_or(DEFAULT_READ_LIMIT)).min(lines.len());
+        let end = (start - 1).saturating_add(args.limit.unwrap_or(DEFAULT_READ_LIMIT)).min(lines.len());
         let mut out: Vec<String> = (start..=end).map(|n| format!("{n:>6}\t{}", lines[n - 1])).collect();
         if end < lines.len() {
             out.push(format!("[{} more lines; call read_doc with offset={}]", lines.len() - end, end + 1));
@@ -443,6 +458,20 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[tokio::test]
+    async fn a_stuck_refresh_costs_one_two_second_wait_not_one_per_tool_call() {
+        let dir = TempDir::new("waitonce");
+        let k = KnowledgeStore::new(dir.0.clone(), 100_000, "http://unused".into()).unwrap();
+        k.cloud.lock().unwrap().in_flight = true; // a fetch that never finishes
+        let t = Instant::now();
+        k.wait_for_cloud().await;
+        assert!(t.elapsed() >= MAX_CLOUD_WAIT);
+        let t = Instant::now();
+        k.wait_for_cloud().await;
+        k.wait_for_cloud().await;
+        assert!(t.elapsed() < Duration::from_millis(200), "later calls on the same refresh don't wait");
     }
 
     fn sha(t: &str) -> String {
