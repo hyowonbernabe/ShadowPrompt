@@ -354,7 +354,7 @@ fn drain_commands(ctx: &mut UiCtx) {
                 log::debug!("ui: overlay {:?}", t.chars().take(300).collect::<String>())
             }
             UICommand::FlashNotice(t) => log::debug!("ui: notice {t:?}"),
-            UICommand::SetDots(p) => log::debug!("ui: dots {p:?}"),
+            UICommand::SetDots(p) if *p != ctx.dot_pts => log::debug!("ui: dots {p:?}"),
             _ => {}
         }
         match cmd {

@@ -196,7 +196,9 @@ async fn run(ctx: &ActionContext) -> anyhow::Result<()> {
         return Ok(());
     }
     let threshold = cfg.screen_answer.match_threshold;
+    let t0 = Instant::now();
     let mut tracked = tokio::task::spawn_blocking(move || make_tracked(&shots, &scales, &marks)).await?;
+    log::debug!("screen_answer: {} anchor(s) ready in {:?}", tracked.len(), t0.elapsed());
     if tracked.is_empty() {
         log::warn!("screen_answer: every mark landed on a blank patch; nothing to track");
         return Ok(());
@@ -204,12 +206,16 @@ async fn run(ctx: &ActionContext) -> anyhow::Result<()> {
 
     let started = Instant::now();
     while started.elapsed() < TRACK_LIFETIME {
+        let tick = Instant::now();
         let (pts, back) = tokio::task::spawn_blocking(move || {
             let pts = screen::capture_monitors().map(|s| locate_all(&mut tracked, &s, threshold));
             (pts, tracked)
         })
         .await?;
         tracked = back;
+        if tick.elapsed() > Duration::from_secs(1) {
+            log::warn!("screen_answer: tracking tick took {:?}", tick.elapsed());
+        }
         match pts {
             Ok(p) => {
                 let _ = ctx.ui_tx.send(UICommand::SetDots(p));
