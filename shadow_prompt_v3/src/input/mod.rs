@@ -112,7 +112,7 @@ struct ListenerState {
     swallowed: Mutex<HashSet<Key>>,
     /// Caps Lock events we injected ourselves (to undo the chord's toggle) — passed through
     /// untouched instead of being treated as the user's.
-    injected_caps: AtomicU8,
+    injected_caps: Arc<AtomicU8>,
     /// A mouse button press was swallowed (selection in progress) — swallow its release too.
     left_swallowed: AtomicBool,
     right_swallowed: AtomicBool,
@@ -158,7 +158,7 @@ impl ListenerState {
             caps_down: Mutex::new(false),
             backup_armed: Mutex::new(false),
             swallowed: Mutex::new(HashSet::new()),
-            injected_caps: AtomicU8::new(0),
+            injected_caps: Arc::new(AtomicU8::new(0)),
             left_swallowed: AtomicBool::new(false),
             right_swallowed: AtomicBool::new(false),
             purpose: Mutex::new(RegionPurpose::Query),
@@ -330,8 +330,13 @@ impl ListenerState {
         let repeat = {
             let mut held = self.held.lock().unwrap();
             let now = Instant::now();
-            let repeat = held.get(&k).is_some_and(|t| now.duration_since(*t) < STALE_HELD);
-            held.insert(k, now);
+            let prev = held.insert(k, now);
+            let repeat = prev.is_some_and(|t| now.duration_since(t) < STALE_HELD);
+            if prev.is_some() && !repeat {
+                // Fresh press of a key whose release was missed: forget it was swallowed, or its
+                // next release would be hidden from the app.
+                self.swallowed.lock().unwrap().remove(&k);
+            }
             repeat
         };
         if repeat {
@@ -342,6 +347,12 @@ impl ListenerState {
             *self.caps_down.lock().unwrap() = true;
             *self.backup_armed.lock().unwrap() = false;
             return true;
+        }
+        // A missed Caps release (lock screen / UAC / elevated window mid-chord) must not leave
+        // the backup chord armed: every later key would be swallowed and fired as an action.
+        if *self.caps_down.lock().unwrap() && caps_physically_down() == Some(false) {
+            *self.caps_down.lock().unwrap() = false;
+            *self.backup_armed.lock().unwrap() = false;
         }
         if *self.caps_down.lock().unwrap() {
             if k == Key::Tab {
@@ -487,7 +498,17 @@ impl ListenerState {
     fn undo_caps_toggle(&self) {
         self.injected_caps.fetch_add(2, Ordering::SeqCst);
         #[cfg(not(test))]
-        std::thread::spawn(send_caps_up_down);
+        {
+            let counter = self.injected_caps.clone();
+            std::thread::spawn(move || {
+                // Events that never went out must not stay counted, or the user's next real Caps
+                // press/release would be mistaken for ours.
+                let unsent = 2u8.saturating_sub(send_caps_up_down() as u8);
+                if unsent > 0 {
+                    let _ = counter.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| Some(n.saturating_sub(unsent)));
+                }
+            });
+        }
     }
 
     fn on_release(&self, k: Key) -> bool {
@@ -573,9 +594,9 @@ fn live_cursor() -> Option<(i32, i32)> {
     None
 }
 
-/// One synthetic Caps Lock release + press.
+/// One synthetic Caps Lock release + press. Returns how many of the 2 events were sent.
 #[cfg(all(windows, not(test)))]
-fn send_caps_up_down() {
+fn send_caps_up_down() -> u32 {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VK_CAPITAL,
     };
@@ -589,10 +610,26 @@ fn send_caps_up_down() {
     if sent != 2 {
         log::warn!("backup hotkey: couldn't restore Caps Lock state");
     }
+    sent
 }
 
 #[cfg(all(not(windows), not(test)))]
-fn send_caps_up_down() {}
+fn send_caps_up_down() -> u32 {
+    0
+}
+
+/// Whether Caps Lock is physically held right now, per Windows; None when it can't be asked.
+#[cfg(all(windows, not(test)))]
+fn caps_physically_down() -> Option<bool> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CAPITAL};
+    // SAFETY: plain Win32 query, no pointers.
+    Some(unsafe { GetAsyncKeyState(VK_CAPITAL.0 as i32) } as u16 & 0x8000 != 0)
+}
+
+#[cfg(any(not(windows), test))]
+fn caps_physically_down() -> Option<bool> {
+    None
+}
 
 #[cfg(test)]
 mod tests {
