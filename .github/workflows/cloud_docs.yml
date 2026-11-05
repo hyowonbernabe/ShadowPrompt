@@ -1,0 +1,39 @@
+name: Cloud docs
+
+# Bundles cloud_docs/materials/ into bundle.json and publishes it on GitHub Pages
+# (free for public repos). See cloud_docs/README.md.
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "cloud_docs/**"
+      - ".github/workflows/cloud_docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history: build.py reads each file's last commit date
+      - run: python3 build.py
+        working-directory: cloud_docs
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: cloud_docs/public
+      - id: deployment
+        uses: actions/deploy-pages@v4
