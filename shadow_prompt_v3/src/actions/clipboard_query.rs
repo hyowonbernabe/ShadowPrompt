@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use super::{busy, deliver_answer, report_failure, ActionContext};
 use crate::capture::clipboard;
-use crate::knowledge::{ListDocsTool, ReadDocTool};
+use crate::knowledge::{ListDocsTool, ReadDocTool, SearchDocsTool};
 use crate::llm::messages::ContentPart;
 use crate::llm::system_prompts::general_prompt;
 use crate::llm::Tool;
@@ -72,7 +72,7 @@ pub async fn ask_in_conversation(
     let _busy = busy(ctx);
     let answer = ctx
         .llm
-        .run_turn_with_history(&general_prompt(), history, content.clone(), tools, content_has_image || history_has_image, None)
+        .run_turn_with_history(&system_prompt(ctx), history, content.clone(), tools, content_has_image || history_has_image, None)
         .await?;
     // Stored where the snapshot ended, so context added while this was in flight stays after
     // it — the history matches what the model actually saw.
@@ -83,14 +83,25 @@ pub async fn ask_in_conversation(
     Ok(answer)
 }
 
-/// Shared by Clipboard/Screenshot Query — design doc §4: memory tools available to all three
-/// entry points, sandboxed to the configured knowledge/ folder.
+/// General prompt plus the knowledge doc listing, so the model can search without first
+/// spending a round trip on `list_docs`.
+fn system_prompt(ctx: &ActionContext) -> String {
+    if !ctx.config.knowledge.enabled {
+        return general_prompt();
+    }
+    general_prompt() + &ctx.knowledge.prompt_listing()
+}
+
+/// Shared by Clipboard/Screenshot Query — design doc §4: memory tools over the local knowledge/
+/// folder merged with the cloud bundle. Also kicks a background cloud refresh (never blocks).
 pub fn memory_tools(ctx: &ActionContext) -> Vec<Arc<dyn Tool>> {
     if !ctx.config.knowledge.enabled {
         return Vec::new();
     }
+    ctx.knowledge.refresh_in_background();
     vec![
         Arc::new(ListDocsTool(ctx.knowledge.clone())),
+        Arc::new(SearchDocsTool(ctx.knowledge.clone())),
         Arc::new(ReadDocTool(ctx.knowledge.clone())),
     ]
 }
@@ -158,7 +169,7 @@ mod tests {
             },
             http: HttpConfig { connect_timeout_secs: 5, read_timeout_secs: 30 },
             forms: FormsConfig { max_pages: 20, max_images_per_request: 4, max_image_long_edge_px: 1600 },
-            knowledge: KnowledgeConfig { enabled: knowledge_enabled, max_doc_bytes: 100_000 },
+            knowledge: KnowledgeConfig { enabled: knowledge_enabled, max_doc_bytes: 100_000, cloud_url: String::new() },
             screen_answer: Default::default(),
         }
     }
@@ -170,7 +181,7 @@ mod tests {
         ActionContext {
             config: Arc::new(test_config(knowledge_enabled)),
             llm: Arc::new(llm),
-            knowledge: Arc::new(KnowledgeStore::new(knowledge_root, 100_000)),
+            knowledge: Arc::new(KnowledgeStore::new(knowledge_root, 100_000, String::new()).unwrap()),
             ui_tx,
             answer_task: Arc::new(Mutex::new(None)),
             forms_task: Arc::new(Mutex::new(None)),
@@ -240,19 +251,18 @@ mod tests {
 
         let ctx = test_ctx(dir.0.clone(), true);
         let tools = memory_tools(&ctx);
-        assert_eq!(tools.len(), 2, "expect list_docs + read_doc when knowledge is enabled");
+        assert_eq!(tools.len(), 3, "expect list_docs + search_docs + read_doc when knowledge is enabled");
 
         let list_tool = tools.iter().find(|t| t.name() == "list_docs").expect("list_docs tool present");
-        let listed_json = list_tool.execute("{}").await.expect("list_docs should succeed");
-        let listed: Vec<String> = serde_json::from_str(&listed_json).unwrap();
-        assert_eq!(listed, vec!["note.md".to_string()]);
+        let listed = list_tool.execute("{}").await.expect("list_docs should succeed");
+        assert_eq!(listed, "local/note.md (1 lines)");
 
         let read_tool = tools.iter().find(|t| t.name() == "read_doc").expect("read_doc tool present");
         let content = read_tool
-            .execute(r#"{"name":"note.md"}"#)
+            .execute(r#"{"name":"local/note.md"}"#)
             .await
             .expect("read_doc should succeed for a name list_docs just returned");
-        assert_eq!(content, "hello from a real knowledge doc");
+        assert_eq!(content, "     1	hello from a real knowledge doc");
     }
 
     #[tokio::test]

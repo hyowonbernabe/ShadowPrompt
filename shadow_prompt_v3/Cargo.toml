@@ -27,8 +27,8 @@ path = "src/lib.rs"
 # Async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
 
-# HTTP (OpenRouter transport; no native-tls, no gzip — rustls only)
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+# HTTP (OpenRouter + cloud knowledge bundle; rustls only, gzip for the compressed bundle)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "gzip"] }
 
 # Global hotkeys + mouse hook
 # `unstable_grab`: the hook can swallow keys, needed so backup-hotkey keys (Caps Lock + Tab +
@@ -79,6 +79,10 @@ log = "0.4"
 simplelog = "0.12"
 
 anyhow = "1"
+
+# Knowledge search + local/cloud dedup hashing
+regex = "1"
+sha2 = "0.10"
 async-trait = "0.1.92"
 
 [dev-dependencies]
