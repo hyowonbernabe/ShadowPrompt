@@ -345,7 +345,11 @@ impl ListenerState {
         }
         if *self.caps_down.lock().unwrap() {
             if k == Key::Tab {
-                *self.backup_armed.lock().unwrap() = true;
+                if !std::mem::replace(&mut *self.backup_armed.lock().unwrap(), true) {
+                    // Undo the Caps toggle now, not on release: if the chord's action ends the
+                    // process (panic_kill, insta_delete), there is no "later".
+                    self.undo_caps_toggle();
+                }
                 self.swallowed.lock().unwrap().insert(k);
                 return false;
             }
@@ -474,15 +478,16 @@ impl ListenerState {
         self.injected_caps.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok()
     }
 
-    /// The chord's Caps Lock press toggled caps; tap it once more so the user's caps state is
-    /// what it was before. Injected from a short-lived thread, outside the hook callback.
+    /// The chord's Caps Lock press toggled caps; undo it while Caps Lock is still physically
+    /// held by injecting a key-up then key-down (a plain tap while held is ignored by Windows as
+    /// a repeat — verified live). The physical release that follows toggles nothing.
+    /// ponytail: injected events are recognised by a counter, not the LLKHF_INJECTED flag (rdev
+    /// doesn't expose it); a physical Caps release landing in the microseconds before the
+    /// injection could be miscounted. Read the flag via a raw hook if that ever shows up.
     fn undo_caps_toggle(&self) {
         self.injected_caps.fetch_add(2, Ordering::SeqCst);
         #[cfg(not(test))]
-        std::thread::spawn(|| {
-            std::thread::sleep(Duration::from_millis(20));
-            send_caps_tap();
-        });
+        std::thread::spawn(send_caps_up_down);
     }
 
     fn on_release(&self, k: Key) -> bool {
@@ -494,9 +499,7 @@ impl ListenerState {
         let was_swallowed = self.swallowed.lock().unwrap().remove(&k);
         if k == Key::CapsLock {
             *self.caps_down.lock().unwrap() = false;
-            if std::mem::replace(&mut *self.backup_armed.lock().unwrap(), false) {
-                self.undo_caps_toggle();
-            }
+            *self.backup_armed.lock().unwrap() = false;
             return true;
         }
         !was_swallowed
@@ -570,9 +573,9 @@ fn live_cursor() -> Option<(i32, i32)> {
     None
 }
 
-/// One synthetic Caps Lock press + release.
+/// One synthetic Caps Lock release + press.
 #[cfg(all(windows, not(test)))]
-fn send_caps_tap() {
+fn send_caps_up_down() {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VK_CAPITAL,
     };
@@ -580,7 +583,7 @@ fn send_caps_tap() {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VK_CAPITAL, wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 } },
     };
-    let inputs = [key(KEYBD_EVENT_FLAGS(0)), key(KEYEVENTF_KEYUP)];
+    let inputs = [key(KEYEVENTF_KEYUP), key(KEYBD_EVENT_FLAGS(0))];
     // SAFETY: plain Win32 call with a correctly sized, fully initialised INPUT array.
     let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
     if sent != 2 {
@@ -589,7 +592,7 @@ fn send_caps_tap() {
 }
 
 #[cfg(all(not(windows), not(test)))]
-fn send_caps_tap() {}
+fn send_caps_up_down() {}
 
 #[cfg(test)]
 mod tests {
@@ -640,12 +643,14 @@ mod tests {
         let (s, mut rx) = state_with("ctrl+shift+alt+f9");
         assert!(s.on_press(Key::CapsLock), "caps press itself reaches apps");
         assert!(!s.on_press(Key::Tab), "tab is swallowed");
+        assert_eq!(s.injected_caps.load(Ordering::SeqCst), 2, "caps undo injected as soon as the chord arms");
+        // our injected up+down pass through untouched and don't end the chord
+        assert!(s.on_release(Key::CapsLock) && s.on_press(Key::CapsLock));
+        assert!(*s.caps_down.lock().unwrap() && *s.backup_armed.lock().unwrap());
         assert!(!s.on_press(Key::F9), "the action key is swallowed");
         assert!(matches!(rx.try_recv(), Ok(InputEvent::HideToggle)), "fires the action whose key is F9");
         assert!(!s.on_release(Key::F9) && !s.on_release(Key::Tab), "their releases are swallowed too");
         assert!(s.on_release(Key::CapsLock));
-        // our own injected caps tap (2 events) passes through and isn't treated as the user's
-        assert!(s.on_press(Key::CapsLock) && s.on_release(Key::CapsLock));
         assert!(!*s.caps_down.lock().unwrap());
         assert_eq!(s.injected_caps.load(Ordering::SeqCst), 0);
     }
