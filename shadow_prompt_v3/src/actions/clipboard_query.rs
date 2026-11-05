@@ -21,12 +21,8 @@ pub async fn execute(ctx: ActionContext) -> anyhow::Result<()> {
     }
 
     let tools = memory_tools(&ctx);
-    let call = ctx
-        .llm
-        .run_turn(&general_prompt(), vec![ContentPart::text(question)], &tools, false, None)
-        .await;
-
-    let answer = match call {
+    let content = vec![ContentPart::text(question)];
+    let answer = match ask_in_conversation(&ctx, content, false, &tools).await {
         Ok(a) => a,
         Err(e) => {
             let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Error));
@@ -39,6 +35,28 @@ pub async fn execute(ctx: ActionContext) -> anyhow::Result<()> {
     let _ = ctx.ui_tx.send(UICommand::SetOverlayText(answer));
     let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Ready));
     Ok(())
+}
+
+/// Runs one question as the next turn of the running conversation (shared by Clipboard and
+/// Screenshot Query). The turn is stored only once a final answer exists: an error returns
+/// early, and an abort (new press / abort hotkey) drops this future before the push — either
+/// way a failed turn never pollutes the history.
+pub async fn ask_in_conversation(
+    ctx: &ActionContext,
+    content: Vec<ContentPart>,
+    content_has_image: bool,
+    tools: &[Arc<dyn Tool>],
+) -> anyhow::Result<String> {
+    let (history, history_has_image) = {
+        let c = ctx.conversation.lock().unwrap();
+        (c.to_messages(), c.has_image())
+    };
+    let answer = ctx
+        .llm
+        .run_turn_with_history(&general_prompt(), history, content.clone(), tools, content_has_image || history_has_image, None)
+        .await?;
+    ctx.conversation.lock().unwrap().push_question(content, answer.clone());
+    Ok(answer)
 }
 
 /// Shared by Clipboard/Screenshot Query — design doc §4: memory tools available to all three
@@ -75,6 +93,8 @@ mod tests {
                 screenshot_query: "VK_F2".to_string(),
                 test_model: "VK_F3".to_string(),
                 switch_model: "VK_F4".to_string(),
+                add_context: "VK_F16".to_string(),
+                reset_conversation: "VK_F17".to_string(),
                 launch_debugger: "VK_F5".to_string(),
                 forms_answer_page: "VK_F6".to_string(),
                 forms_answer_all: "VK_F7".to_string(),
@@ -125,6 +145,7 @@ mod tests {
             ui_tx,
             answer_task: Arc::new(Mutex::new(None)),
             forms_task: Arc::new(Mutex::new(None)),
+            conversation: Default::default(),
         }
     }
 

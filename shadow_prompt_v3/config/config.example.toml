@@ -24,6 +24,10 @@ clipboard_query = "ctrl+shift+alt+v"
 screenshot_query = "ctrl+shift+alt+s"
 test_model = "ctrl+shift+alt+t"
 switch_model = "ctrl+shift+alt+m"
+# Conversation memory: store a screen region as reference for later questions (no answer), and
+# start a fresh conversation (e.g. switching to a different test).
+add_context = "ctrl+shift+alt+a"
+reset_conversation = "ctrl+shift+alt+n"
 launch_debugger = "ctrl+shift+alt+b"
 forms_answer_page = "ctrl+shift+alt+g"
 forms_answer_all = "ctrl+shift+alt+f"

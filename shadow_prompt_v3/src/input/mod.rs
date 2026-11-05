@@ -9,7 +9,7 @@ pub mod events;
 pub mod parser;
 pub mod state_machine;
 
-pub use events::InputEvent;
+pub use events::{InputEvent, RegionPurpose};
 
 use crate::config::schema::HotkeysConfig;
 use bindings::{build, insta_delete_combo, Binding};
@@ -62,6 +62,8 @@ struct ListenerState {
     last_fire: Mutex<Option<(KeyCombo, Instant)>>,
     cursor: Mutex<(i32, i32)>,
     selecting: Mutex<bool>,
+    /// Which hotkey armed the current selection — carried on the resulting `ScreenshotRegion`.
+    purpose: Mutex<RegionPurpose>,
     p1: Mutex<Option<(i32, i32)>>,
     /// Real bug found in live testing: `rdev` fires `MouseMove` on every raw hardware tick (can
     /// be hundreds/sec), and each one was turned 1:1 into a `ScreenshotDragUpdate` -> a full UI
@@ -97,6 +99,7 @@ impl ListenerState {
             last_fire: Mutex::new(None),
             cursor: Mutex::new((0, 0)),
             selecting: Mutex::new(false),
+            purpose: Mutex::new(RegionPurpose::Query),
             p1: Mutex::new(None),
             last_drag_send: Mutex::new(None),
         }
@@ -165,7 +168,7 @@ impl ListenerState {
                 *self.selecting.lock().unwrap() = false;
                 log::debug!("screenshot region: P2 at {:?}; rect {}x{} @ ({},{})", cur, w, h, x, y);
                 if w >= MIN_REGION_PX && h >= MIN_REGION_PX {
-                    let _ = self.tx.send(InputEvent::ScreenshotRegion { x, y, w, h });
+                    let _ = self.tx.send(InputEvent::ScreenshotRegion { x, y, w, h, purpose: *self.purpose.lock().unwrap() });
                 } else {
                     let _ = self.tx.send(InputEvent::ScreenshotCancel);
                 }
@@ -200,7 +203,7 @@ impl ListenerState {
         *self.selecting.lock().unwrap() = false;
         log::debug!("screenshot region (drag-release): rect {}x{} @ ({},{})", w, h, x, y);
         if w >= MIN_REGION_PX && h >= MIN_REGION_PX {
-            let _ = self.tx.send(InputEvent::ScreenshotRegion { x, y, w, h });
+            let _ = self.tx.send(InputEvent::ScreenshotRegion { x, y, w, h, purpose: *self.purpose.lock().unwrap() });
         } else {
             let _ = self.tx.send(InputEvent::ScreenshotCancel);
         }
@@ -241,7 +244,7 @@ impl ListenerState {
             if self.matches(&b.combo, k, mods) && self.debounce(&b.combo) {
                 let event = (b.make_event)();
                 match &event {
-                    InputEvent::ScreenshotQuery => {
+                    InputEvent::ScreenshotQuery | InputEvent::AddContext => {
                         // Real gap found by thinking through a double-press: re-firing this
                         // hotkey mid-selection used to just reset `p1`/`selecting` here without
                         // telling the UI, so any rectangle already on screen from the abandoned
@@ -252,6 +255,11 @@ impl ListenerState {
                         let was_selecting = *self.selecting.lock().unwrap();
                         *self.p1.lock().unwrap() = None;
                         *self.selecting.lock().unwrap() = true;
+                        *self.purpose.lock().unwrap() = if matches!(event, InputEvent::AddContext) {
+                            RegionPurpose::Context
+                        } else {
+                            RegionPurpose::Query
+                        };
                         if was_selecting {
                             let _ = self.tx.send(InputEvent::ScreenshotCancel);
                         }

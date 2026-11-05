@@ -1,5 +1,15 @@
 /// Events produced by the input layer and consumed by the orchestrator. One variant per hotkey
 /// in the final list — design doc §10.
+/// What a finished region selection is for — one selection mechanism serves both hotkeys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RegionPurpose {
+    /// Screenshot Query: answer what's in the region.
+    #[default]
+    Query,
+    /// Add context: store the region in the conversation as reference material, no answer.
+    Context,
+}
+
 #[derive(Debug, Clone)]
 pub enum InputEvent {
     // Answer
@@ -10,10 +20,14 @@ pub enum InputEvent {
     /// during selection (a real, confirmed gap: nothing ever sent `UICommand::ShowDebugRect`
     /// before this, in any app, ever — not something specific to any one target application).
     ScreenshotDragUpdate { x: i32, y: i32, w: i32, h: i32 },
-    ScreenshotRegion { x: i32, y: i32, w: i32, h: i32 },
+    ScreenshotRegion { x: i32, y: i32, w: i32, h: i32, purpose: RegionPurpose },
     ScreenshotCancel,
     TestModel,
     SwitchModel,
+    // Conversation memory
+    /// Arms a region selection whose result is stored as reference material, not answered.
+    AddContext,
+    ResetConversation,
     // Google Forms
     LaunchDebugger,
     /// v3 legacy (design doc §7.4) — default/primary as of 2026-09-20.

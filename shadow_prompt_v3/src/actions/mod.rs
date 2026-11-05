@@ -4,6 +4,7 @@
 // other (cancel-and-replace, same as v2).
 
 pub mod abort_active;
+pub mod add_context;
 pub mod clipboard_query;
 pub mod debug_open_tab;
 pub mod forms_run;
@@ -11,6 +12,7 @@ pub mod forms_run_legacy;
 pub mod help_toggle;
 pub mod hide_toggle;
 pub mod launch_debugger;
+pub mod reset_conversation;
 pub mod screenshot_query;
 pub mod switch_model;
 pub mod test_model;
@@ -20,8 +22,9 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use crate::config::Config;
-use crate::input::InputEvent;
+use crate::input::{InputEvent, RegionPurpose};
 use crate::knowledge::KnowledgeStore;
+use crate::llm::conversation::Conversation;
 use crate::llm::LlmClient;
 use crate::ui::commands::{IndicatorState, UICommand};
 
@@ -40,6 +43,9 @@ pub struct ActionContext {
     pub answer_task: TaskSlot,
     /// Forms runs get their own independent slot — design doc §7.3.
     pub forms_task: TaskSlot,
+    /// Running conversation shared by Clipboard/Screenshot Query and add-context. Forms doesn't
+    /// use it. std (not tokio) Mutex: only ever held for a quick copy/push, never across an await.
+    pub conversation: Arc<std::sync::Mutex<Conversation>>,
 }
 
 pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
@@ -47,17 +53,26 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
         InputEvent::ClipboardQuery => {
             spawn_exclusive(ctx.answer_task.clone(), ctx.clone(), |c| async move { clipboard_query::execute(c).await }).await;
         }
-        InputEvent::ScreenshotQuery => {
+        InputEvent::ScreenshotQuery | InputEvent::AddContext => {
             let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Processing));
         }
+        InputEvent::ResetConversation => reset_conversation::execute(&ctx),
         // Real, confirmed gap fixed here: this is the only place a selection rectangle has ever
         // been shown, in any app — nothing sent UICommand::ShowDebugRect before this existed.
         InputEvent::ScreenshotDragUpdate { x, y, w, h } => {
             let _ = ctx.ui_tx.send(UICommand::ShowDebugRect { x, y, w, h });
         }
-        InputEvent::ScreenshotRegion { x, y, w, h } => {
+        InputEvent::ScreenshotRegion { x, y, w, h, purpose } => {
             let _ = ctx.ui_tx.send(UICommand::HideDebugRect);
-            spawn_exclusive(ctx.answer_task.clone(), ctx.clone(), move |c| async move { screenshot_query::execute(c, x, y, w, h).await }).await;
+            match purpose {
+                RegionPurpose::Query => {
+                    spawn_exclusive(ctx.answer_task.clone(), ctx.clone(), move |c| async move { screenshot_query::execute(c, x, y, w, h).await }).await;
+                }
+                // Not in `answer_task`: adding context must never abort a question in flight.
+                RegionPurpose::Context => {
+                    tokio::spawn(add_context::execute(ctx.clone(), x, y, w, h));
+                }
+            }
         }
         InputEvent::ScreenshotCancel => {
             let _ = ctx.ui_tx.send(UICommand::HideDebugRect);

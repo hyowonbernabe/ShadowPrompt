@@ -22,9 +22,11 @@ pub async fn execute(ctx: &ActionContext) {
 
 fn build_help_text(ctx: &ActionContext) -> String {
     let h = &ctx.config.hotkeys;
-    let rows: [(&str, &str); 13] = [
+    let rows: [(&str, &str); 15] = [
         (&h.clipboard_query, "Answer (clipboard)"),
         (&h.screenshot_query, "Answer (screen region)"),
+        (&h.add_context, "Add screen region as context (no answer)"),
+        (&h.reset_conversation, "New conversation (forget context)"),
         (&h.test_model, "Test which model is answering"),
         (&h.switch_model, "Switch primary paid model"),
         (&h.launch_debugger, "Launch Chrome on :9222"),

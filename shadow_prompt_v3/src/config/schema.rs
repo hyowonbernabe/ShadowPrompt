@@ -46,6 +46,11 @@ pub struct HotkeysConfig {
     pub screenshot_query: String,
     pub test_model: String,
     pub switch_model: String,
+    // Conversation memory. `#[serde(default)]` so a config written before these existed parses.
+    #[serde(default = "default_add_context")]
+    pub add_context: String,
+    #[serde(default = "default_reset_conversation")]
+    pub reset_conversation: String,
     // Google Forms
     pub launch_debugger: String,
     /// v3 legacy (design doc §7.4) — default/primary as of 2026-09-20.
@@ -111,6 +116,12 @@ fn default_crawl_trigger_lines() -> u32 {
 }
 fn default_crawl_ms_per_line() -> u64 {
     2000
+}
+fn default_add_context() -> String {
+    "ctrl+shift+alt+a".to_string()
+}
+fn default_reset_conversation() -> String {
+    "ctrl+shift+alt+n".to_string()
 }
 fn default_debug_open_tab() -> String {
     "ctrl+shift+alt+z".to_string()
