@@ -3,6 +3,13 @@
 // to search now, it's a tool call, not a separate forced hotkey) and OCR-region-select renamed to
 // screenshot-region-select (OCR itself is gone, design doc §3 — this is now purely "pick a
 // rectangle, send it as an image").
+//
+// Backup hotkeys: every action can also be fired with Caps Lock held, Tab tapped, then the
+// action's own key (the letter of its normal combo, e.g. S for screenshot) — for when Ctrl/Shift/
+// Alt combos are blocked or broken. A second key (Tab) is required on purpose: people tap Caps
+// Lock to capitalise a letter and their fingers overlap, so Caps+letter alone would misfire.
+// Tab and the letters pressed in that mode are swallowed (the focused app never sees them), and
+// the Caps Lock toggle the chord caused is undone afterwards.
 
 pub mod bindings;
 pub mod events;
@@ -14,9 +21,10 @@ pub use events::{InputEvent, RegionPurpose};
 use crate::config::schema::HotkeysConfig;
 use bindings::{build, insta_delete_combo, Binding};
 use parser::KeyCombo;
-use rdev::{listen, Button, Event, EventType, Key};
+use rdev::{grab, Button, Event, EventType, Key};
 use state_machine::{InstaDeleteState, Transition};
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -42,7 +50,7 @@ pub fn start(cfg: HotkeysConfig) -> anyhow::Result<UnboundedReceiver<InputEvent>
             // hotkey would silently die — re-install it, with backoff and a fixed attempt cap.
             for attempt in 1..=LISTEN_MAX_ATTEMPTS {
                 let s = state.clone();
-                let result = listen(move |ev| s.on_event(ev));
+                let result = grab(move |ev| if s.on_event(&ev) { Some(ev) } else { None });
                 log::error!("keyboard hook stopped ({result:?}); reinstalling, attempt {attempt}/{LISTEN_MAX_ATTEMPTS}");
                 std::thread::sleep(Duration::from_millis(250 * (1 << attempt.min(6))));
             }
@@ -89,6 +97,16 @@ struct ListenerState {
     /// press — without this, holding a combo re-fired it every debounce window, and holding the
     /// insta-delete combo for half a second counted as its confirming second tap.
     held: Mutex<HashSet<Key>>,
+    /// Backup-hotkey state (see module comment): Caps Lock currently held, and whether Tab was
+    /// tapped during this hold (the mode is armed until Caps Lock is released).
+    caps_down: Mutex<bool>,
+    backup_armed: Mutex<bool>,
+    /// Keys whose press was swallowed — their release is swallowed too, so the focused app
+    /// never sees a lone key-up.
+    swallowed: Mutex<HashSet<Key>>,
+    /// Caps Lock events we injected ourselves (to undo the chord's toggle) — passed through
+    /// untouched instead of being treated as the user's.
+    injected_caps: AtomicU8,
     /// Which hotkey armed the current selection — carried on the resulting `ScreenshotRegion`.
     purpose: Mutex<RegionPurpose>,
     p1: Mutex<Option<(i32, i32)>>,
@@ -128,16 +146,21 @@ impl ListenerState {
             selecting: Mutex::new(false),
             armed_at: Mutex::new(None),
             held: Mutex::new(HashSet::new()),
+            caps_down: Mutex::new(false),
+            backup_armed: Mutex::new(false),
+            swallowed: Mutex::new(HashSet::new()),
+            injected_caps: AtomicU8::new(0),
             purpose: Mutex::new(RegionPurpose::Query),
             p1: Mutex::new(None),
             last_drag_send: Mutex::new(None),
         }
     }
 
-    fn on_event(&self, ev: Event) {
+    /// Handles one hook event. Returns whether it should reach other apps (false = swallowed).
+    fn on_event(&self, ev: &Event) -> bool {
         match ev.event_type {
-            EventType::KeyPress(k) => self.on_press(k),
-            EventType::KeyRelease(k) => self.on_release(k),
+            EventType::KeyPress(k) => return self.on_press(k),
+            EventType::KeyRelease(k) => return self.on_release(k),
             EventType::MouseMove { x, y } => {
                 let cur = (x as i32, y as i32);
                 *self.cursor.lock().unwrap() = cur;
@@ -151,7 +174,7 @@ impl ListenerState {
                         let mut last_send = self.last_drag_send.lock().unwrap();
                         let now = Instant::now();
                         if last_send.is_some_and(|t| now.duration_since(t) < DRAG_UPDATE_INTERVAL) {
-                            return;
+                            return true;
                         }
                         *last_send = Some(now);
                         drop(last_send);
@@ -176,6 +199,7 @@ impl ListenerState {
             EventType::ButtonPress(Button::Right) => self.cancel_selection(),
             _ => {}
         }
+        true
     }
 
     /// Cancels an armed selection, if any, and tells the UI.
@@ -261,22 +285,41 @@ impl ListenerState {
         }
     }
 
-    fn on_press(&self, k: Key) {
+    fn on_press(&self, k: Key) -> bool {
+        if k == Key::CapsLock && self.take_injected_caps() {
+            return true;
+        }
         if !self.held.lock().unwrap().insert(k) {
-            return; // auto-repeat of a key already down
+            // Auto-repeat of a key already down: same fate as its first press.
+            return !self.swallowed.lock().unwrap().contains(&k);
+        }
+        if k == Key::CapsLock {
+            *self.caps_down.lock().unwrap() = true;
+            *self.backup_armed.lock().unwrap() = false;
+            return true;
+        }
+        if *self.caps_down.lock().unwrap() {
+            if k == Key::Tab {
+                *self.backup_armed.lock().unwrap() = true;
+                self.swallowed.lock().unwrap().insert(k);
+                return false;
+            }
+            if *self.backup_armed.lock().unwrap() {
+                self.swallowed.lock().unwrap().insert(k);
+                self.fire_backup(k);
+                return false;
+            }
         }
         if self.update_modifier(k, true) {
-            return;
+            return true;
         }
 
         // Escape always cancels an in-progress screenshot selection, independent of whatever the
         // configured `abort` hotkey happens to be — the standard, no-modifiers-needed way out of
         // a selection you started by mistake.
         if k == Key::Escape && *self.selecting.lock().unwrap() {
-            *self.selecting.lock().unwrap() = false;
-            *self.p1.lock().unwrap() = None;
-            let _ = self.tx.send(InputEvent::ScreenshotCancel);
-            return;
+            self.cancel_selection();
+            return true;
         }
 
         // Ask Windows for the real modifier state instead of trusting tracked press/release
@@ -287,64 +330,119 @@ impl ListenerState {
         *self.mods.lock().unwrap() = mods;
 
         if self.matches(&self.insta, k, mods) && self.debounce(&self.insta) {
-            let trans = SHARED_INSTA.lock().unwrap().on_press();
-            match trans {
-                Transition::Armed => {
-                    let _ = self.tx.send(InputEvent::InstaDeleteArmed);
-                }
-                Transition::Confirmed => {
-                    let _ = self.tx.send(InputEvent::InstaDeleteConfirmed);
-                }
-                _ => {}
-            }
-            return;
+            self.press_insta();
+            return true;
         }
 
         for b in &self.bindings {
             if self.matches(&b.combo, k, mods) && self.debounce(&b.combo) {
-                let event = (b.make_event)();
-                match &event {
-                    InputEvent::ScreenshotQuery | InputEvent::AddContext => {
-                        // Real gap found by thinking through a double-press: re-firing this
-                        // hotkey mid-selection used to just reset `p1`/`selecting` here without
-                        // telling the UI, so any rectangle already on screen from the abandoned
-                        // attempt stayed stuck there forever (nothing was ever going to hide it —
-                        // the next `MouseMove` had a cleared `p1`, so it never sent another
-                        // update either). Cancel the old attempt first so the UI actually clears
-                        // before the new one starts.
-                        let was_selecting = *self.selecting.lock().unwrap();
-                        *self.p1.lock().unwrap() = None;
-                        *self.selecting.lock().unwrap() = true;
-                        *self.armed_at.lock().unwrap() = Some(Instant::now());
-                        *self.purpose.lock().unwrap() = if matches!(event, InputEvent::AddContext) {
-                            RegionPurpose::Context
-                        } else {
-                            RegionPurpose::Query
-                        };
-                        if was_selecting {
-                            let _ = self.tx.send(InputEvent::ScreenshotCancel);
-                        }
-                    }
-                    InputEvent::Abort => {
-                        let was_selecting = *self.selecting.lock().unwrap();
-                        *self.selecting.lock().unwrap() = false;
-                        *self.p1.lock().unwrap() = None;
-                        if was_selecting {
-                            let _ = self.tx.send(InputEvent::ScreenshotCancel);
-                            return;
-                        }
-                    }
-                    _ => {}
-                }
-                let _ = self.tx.send(event);
-                return;
+                self.fire((b.make_event)());
+                return true;
+            }
+        }
+        true
+    }
+
+    /// Backup mode: `k` fires whichever action's normal combo uses that key, modifiers ignored.
+    fn fire_backup(&self, k: Key) {
+        if k == Key::Escape && *self.selecting.lock().unwrap() {
+            self.cancel_selection();
+            return;
+        }
+        if self.insta.key == k {
+            if self.debounce(&self.insta) {
+                self.press_insta();
+            }
+            return;
+        }
+        if let Some(b) = self.bindings.iter().find(|b| b.combo.key == k) {
+            if self.debounce(&b.combo) {
+                self.fire((b.make_event)());
             }
         }
     }
 
-    fn on_release(&self, k: Key) {
+    /// Insta-delete's double-tap state machine (its guard against accidental triggering).
+    fn press_insta(&self) {
+        match SHARED_INSTA.lock().unwrap().on_press() {
+            Transition::Armed => {
+                let _ = self.tx.send(InputEvent::InstaDeleteArmed);
+            }
+            Transition::Confirmed => {
+                let _ = self.tx.send(InputEvent::InstaDeleteConfirmed);
+            }
+            _ => {}
+        }
+    }
+
+    /// Sends a bound action's event, doing the selection bookkeeping some actions need first.
+    fn fire(&self, event: InputEvent) {
+        match &event {
+            InputEvent::ScreenshotQuery | InputEvent::AddContext => {
+                // Real gap found by thinking through a double-press: re-firing this
+                // hotkey mid-selection used to just reset `p1`/`selecting` here without
+                // telling the UI, so any rectangle already on screen from the abandoned
+                // attempt stayed stuck there forever (nothing was ever going to hide it —
+                // the next `MouseMove` had a cleared `p1`, so it never sent another
+                // update either). Cancel the old attempt first so the UI actually clears
+                // before the new one starts.
+                let was_selecting = *self.selecting.lock().unwrap();
+                *self.p1.lock().unwrap() = None;
+                *self.selecting.lock().unwrap() = true;
+                *self.armed_at.lock().unwrap() = Some(Instant::now());
+                *self.purpose.lock().unwrap() = if matches!(event, InputEvent::AddContext) {
+                    RegionPurpose::Context
+                } else {
+                    RegionPurpose::Query
+                };
+                if was_selecting {
+                    let _ = self.tx.send(InputEvent::ScreenshotCancel);
+                }
+            }
+            InputEvent::Abort => {
+                let was_selecting = *self.selecting.lock().unwrap();
+                *self.selecting.lock().unwrap() = false;
+                *self.p1.lock().unwrap() = None;
+                if was_selecting {
+                    let _ = self.tx.send(InputEvent::ScreenshotCancel);
+                    return;
+                }
+            }
+            _ => {}
+        }
+        let _ = self.tx.send(event);
+    }
+
+    fn take_injected_caps(&self) -> bool {
+        self.injected_caps.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok()
+    }
+
+    /// The chord's Caps Lock press toggled caps; tap it once more so the user's caps state is
+    /// what it was before. Injected from a short-lived thread, outside the hook callback.
+    fn undo_caps_toggle(&self) {
+        self.injected_caps.fetch_add(2, Ordering::SeqCst);
+        #[cfg(not(test))]
+        std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_millis(20));
+            send_caps_tap();
+        });
+    }
+
+    fn on_release(&self, k: Key) -> bool {
+        if k == Key::CapsLock && self.take_injected_caps() {
+            return true;
+        }
         self.held.lock().unwrap().remove(&k);
         self.update_modifier(k, false);
+        let was_swallowed = self.swallowed.lock().unwrap().remove(&k);
+        if k == Key::CapsLock {
+            *self.caps_down.lock().unwrap() = false;
+            if std::mem::replace(&mut *self.backup_armed.lock().unwrap(), false) {
+                self.undo_caps_toggle();
+            }
+            return true;
+        }
+        !was_swallowed
     }
 
     fn update_modifier(&self, k: Key, down: bool) -> bool {
@@ -401,6 +499,27 @@ fn live_mods() -> Option<Mods> {
     None
 }
 
+/// One synthetic Caps Lock press + release.
+#[cfg(all(windows, not(test)))]
+fn send_caps_tap() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VK_CAPITAL,
+    };
+    let key = |flags: KEYBD_EVENT_FLAGS| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VK_CAPITAL, wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 } },
+    };
+    let inputs = [key(KEYBD_EVENT_FLAGS(0)), key(KEYEVENTF_KEYUP)];
+    // SAFETY: plain Win32 call with a correctly sized, fully initialised INPUT array.
+    let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+    if sent != 2 {
+        log::warn!("backup hotkey: couldn't restore Caps Lock state");
+    }
+}
+
+#[cfg(all(not(windows), not(test)))]
+fn send_caps_tap() {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -431,6 +550,31 @@ mod tests {
         std::thread::sleep(Duration::from_millis(210)); // past the per-combo debounce
         s.on_press(Key::F9);
         assert_eq!(drain(&mut rx), 1, "a fresh press after release fires again");
+    }
+
+    #[test]
+    fn backup_chord_fires_and_swallows_and_restores_caps() {
+        let (s, mut rx) = state_with("ctrl+shift+alt+f9");
+        assert!(s.on_press(Key::CapsLock), "caps press itself reaches apps");
+        assert!(!s.on_press(Key::Tab), "tab is swallowed");
+        assert!(!s.on_press(Key::F9), "the action key is swallowed");
+        assert!(matches!(rx.try_recv(), Ok(InputEvent::HideToggle)), "fires the action whose key is F9");
+        assert!(!s.on_release(Key::F9) && !s.on_release(Key::Tab), "their releases are swallowed too");
+        assert!(s.on_release(Key::CapsLock));
+        // our own injected caps tap (2 events) passes through and isn't treated as the user's
+        assert!(s.on_press(Key::CapsLock) && s.on_release(Key::CapsLock));
+        assert!(!*s.caps_down.lock().unwrap());
+        assert_eq!(s.injected_caps.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn caps_then_letter_without_tab_is_normal_typing() {
+        let (s, mut rx) = state_with("ctrl+shift+alt+f9");
+        assert!(s.on_press(Key::CapsLock));
+        assert!(s.on_press(Key::F9), "no Tab: the key reaches the app");
+        assert!(rx.try_recv().is_err(), "and nothing fires");
+        assert!(s.on_release(Key::F9) && s.on_release(Key::CapsLock));
+        assert_eq!(s.injected_caps.load(Ordering::SeqCst), 0, "caps toggle left alone");
     }
 
     #[test]

@@ -31,7 +31,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 
 # Global hotkeys + mouse hook
-rdev = "0.5"
+# `unstable_grab`: the hook can swallow keys, needed so backup-hotkey keys (Caps Lock + Tab +
+# letter) never reach the focused app. Same WH_KEYBOARD_LL hook as `listen` on Windows.
+rdev = { version = "0.5", features = ["unstable_grab"] }
 
 # Clipboard (text only — image-on-clipboard support was proposed and declined, design doc §3)
 arboard = "3"

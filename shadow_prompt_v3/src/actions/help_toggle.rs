@@ -48,6 +48,8 @@ fn build_help_text(ctx: &ActionContext) -> String {
 
     let mut all_rows: Vec<(&str, &str)> = rows.into_iter().collect();
     all_rows.push(FIXED_ESCAPE_ROW);
+    // Not configurable either (input/mod.rs): the modifier-free backup for every hotkey above.
+    all_rows.push(("caps+tab, key", "Backup: hold Caps Lock, tap Tab, press the key's letter"));
     // v3 new (AX-tree engine) is untested/not working as of 2026-09-21 — dead keys outside a
     // debug build (see actions::mod::dispatch), so hidden from the cheat sheet outside one too.
     #[cfg(feature = "debug")]
