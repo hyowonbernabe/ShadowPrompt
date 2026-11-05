@@ -578,7 +578,7 @@ impl ListenerState {
 }
 
 /// The real, current modifier state from Windows, or None if it can't be read.
-#[cfg(windows)]
+#[cfg(all(windows, not(test)))]
 fn live_mods() -> Option<Mods> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT};
     // SAFETY: GetAsyncKeyState is a plain Win32 query with no pointers or preconditions.
@@ -586,7 +586,7 @@ fn live_mods() -> Option<Mods> {
     Some(Mods { ctrl: down(VK_CONTROL), shift: down(VK_SHIFT), alt: down(VK_MENU), win: down(VK_LWIN) || down(VK_RWIN) })
 }
 
-#[cfg(not(windows))]
+#[cfg(any(not(windows), test))]
 fn live_mods() -> Option<Mods> {
     None
 }
