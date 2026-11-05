@@ -37,7 +37,7 @@ pub type TaskSlot = Arc<Mutex<Option<JoinHandle<()>>>>;
 pub struct ActionContext {
     pub config: Arc<Config>,
     pub llm: Arc<LlmClient>,
-    /// Sandboxed `knowledge/` folder access for `list_docs`/`read_doc` — design doc §4.
+    /// Sandboxed `knowledge/` folder access for the Glob/Grep/Read doc tools — design doc §4.
     /// Constructed once at daemon startup (`lib.rs::run_daemon`), shared by every action.
     pub knowledge: Arc<KnowledgeStore>,
     pub ui_tx: tokio::sync::mpsc::UnboundedSender<UICommand>,

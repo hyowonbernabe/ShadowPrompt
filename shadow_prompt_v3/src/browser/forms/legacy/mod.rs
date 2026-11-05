@@ -1,7 +1,7 @@
 // v3 legacy Forms engine — design doc §7.4. Built to replace v3 new (`super`'s AX-tree read +
 // `fill_page` agentic loop) as the default, after extended live testing left that engine unable
 // to reliably type or answer questions at all. Keeps `run_turn`'s real reasoning/search/
-// `list_docs`/`read_doc` capability, but reads/fills the page with `extractor.rs`/`injector.rs`
+// Glob/Grep/Read doc capability, but reads/fills the page with `extractor.rs`/`injector.rs`
 // (v2's proven JS-extraction technique, patched) instead of chromiumoxide's AX-tree read, and
 // answers with one structured JSON map instead of a `fill_page` tool call — the specific design
 // choice that removes the entire class of bug that made v3 new unusable (§7.4's own writeup: no

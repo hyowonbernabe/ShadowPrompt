@@ -114,7 +114,7 @@ pub struct SimpleCallResult {
 
 /// A tool the model can call during a `run_turn`. Deliberately narrow set only — design doc
 /// §5/§7.3: no filesystem/shell access, nothing that makes this look like a general coding
-/// agent. Concrete tools (`list_docs`, `read_doc`, `fill_page`, `screenshot`) live in their own
+/// agent. Concrete tools (`Glob`, `Grep`, `Read`, `fill_page`, `screenshot`) live in their own
 /// modules (`knowledge/`, `browser/forms/`, `capture/`) and implement this trait there.
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {

@@ -39,10 +39,8 @@ const PROMPT_LISTING_CAP: usize = 300;
 /// All always-loaded CLAUDE.md text together (Claude Code's guidance: under ~200 lines each).
 const MEMORY_CHARS: usize = 40_000;
 
-const KNOWLEDGE_INSTRUCTIONS: &str = "
-
-KNOWLEDGE DOCS
-You have read-only study docs: local/... on this computer and cloud/... shared online. They are the course material, so when a question touches one of their subjects, look it up there and prefer the docs' wording and definitions. Find things the way you would in a codebase:
+const KNOWLEDGE_INSTRUCTIONS: &str = "\n\nKNOWLEDGE DOCS
+You have read-only study docs: local/... on this computer and cloud/... shared online. They are the course material. When a question depends on the course's own wording, definitions, lists or details and you aren't certain, look it up and prefer the docs' version; otherwise answer directly. Find things the way you would in a codebase:
 - If the doc index below points to a likely section, Read it directly (offset a little before that heading's line).
 - Otherwise Grep for distinctive keywords (output_mode \"content\" with -C 2 shows each hit in context), then Read around the hits if you need more. Glob finds docs by name.
 - Make independent Grep/Read calls in parallel in one turn, not one after another. Read generous ranges rather than many small ones.
@@ -282,40 +280,32 @@ impl KnowledgeStore {
             }
             let text = cut_chars(&d.text, budget);
             budget = budget.saturating_sub(text.chars().count());
-            s.push_str(&format!("
-MEMORY: {} (always-loaded notes from the docs' owner)
-{text}
-", d.name));
+            s.push_str(&format!("\nMEMORY: {} (always-loaded notes from the docs' owner)\n{text}\n", d.name));
         }
         if docs.is_empty() {
-            s.push_str("
-DOC INDEX: no docs yet.
-");
+            s.push_str("\nDOC INDEX: no docs yet.\n");
         } else {
-            s.push_str("
-DOC INDEX (doc name, line count, then its headings with line numbers):
-");
+            s.push_str("\nDOC INDEX (doc name, line count, then its headings with line numbers):\n");
             let mut used = 0;
             for (i, d) in docs.iter().enumerate() {
                 if i == PROMPT_LISTING_CAP {
-                    s.push_str(&format!("...and {} more docs; use Glob to find them.
-", docs.len() - i));
+                    s.push_str(&format!("...and {} more docs; use Glob to find them.\n", docs.len() - i));
                     break;
                 }
                 let full = index_entry(d);
                 let entry = if used + full.len() <= INDEX_CHARS {
                     full
                 } else {
-                    format!("- {} ({} lines)
-", d.name, d.text.lines().count())
+                    format!("- {} ({} lines)\n", d.name, d.text.lines().count())
                 };
                 used += entry.len();
                 s.push_str(&entry);
             }
         }
-        if let Some(n) = note {
-            s.push_str(&format!("{n}
-"));
+        if note.is_some() {
+            // Fixed wording: the exact error changes between retries and would rewrite the cached
+            // prompt each time. The tools still report the exact reason.
+            s.push_str("[cloud docs unavailable right now; only local docs are listed]\n");
         }
         s
     }
@@ -377,8 +367,7 @@ fn index_entry(d: &Doc) -> String {
         entry.push_str(": ");
         entry.push_str(&headings.join("; "));
     }
-    format!("{}
-", cut_chars(&entry, INDEX_ENTRY_CHARS))
+    format!("{}\n", cut_chars(&entry, INDEX_ENTRY_CHARS))
 }
 
 fn cut_chars(s: &str, max_chars: usize) -> &str {
@@ -437,21 +426,41 @@ fn inner_name(name: &str) -> &str {
 /// matches Glob patterns relative to `path`. None when the doc isn't under `path` at all.
 fn match_forms<'a>(name: &'a str, path: Option<&str>) -> Option<Vec<&'a str>> {
     let mut forms = vec![name, inner_name(name)];
-    let Some(p) = path.map(|p| p.trim_matches('/')).filter(|p| !p.is_empty() && *p != ".") else { return Some(forms) };
+    let p = path.map(|p| p.replace('\\', "/")).unwrap_or_default();
+    let p = p.trim_matches('/').to_lowercase();
+    if p.is_empty() || p == "." {
+        return Some(forms);
+    }
     let mut under = false;
     for n in [name, inner_name(name)] {
-        if n.eq_ignore_ascii_case(p) {
+        let nl = n.to_lowercase();
+        if nl == p {
             under = true;
-        } else if n.len() > p.len() && n.as_bytes()[p.len()] == b'/' && n.is_char_boundary(p.len()) && n[..p.len()].eq_ignore_ascii_case(p) {
+        } else if nl.len() > p.len() && nl.starts_with(&p) && nl.as_bytes()[p.len()] == b'/' {
             under = true;
-            forms.push(&n[p.len() + 1..]);
+            if nl.len() == n.len() {
+                forms.push(&n[p.len() + 1..]); // same byte layout, so the offset is valid in `n`
+            }
         }
     }
     under.then_some(forms)
 }
 
-fn glob_matches(re: &regex::Regex, name: &str, path: Option<&str>) -> bool {
-    match_forms(name, path).is_some_and(|forms| forms.iter().any(|f| re.is_match(f)))
+/// A pattern with no `/` (`*.md`, `cells*`) matches the bare file name at any depth, as in
+/// ripgrep's --glob and Claude Code; one with a `/` matches the forms from `match_forms`.
+fn glob_matches(g: &Glob, name: &str, path: Option<&str>) -> bool {
+    match_forms(name, path).is_some_and(|forms| {
+        forms.iter().any(|f| g.re.is_match(f)) || (g.any_depth && g.re.is_match(name.rsplit('/').next().unwrap_or(name)))
+    })
+}
+
+struct Glob {
+    re: regex::Regex,
+    any_depth: bool,
+}
+
+fn glob(pattern: &str) -> anyhow::Result<Glob> {
+    Ok(Glob { re: glob_regex(pattern)?, any_depth: !pattern.contains('/') && !pattern.contains('\\') })
 }
 
 /// Newest first, like Claude Code's Glob; name breaks ties so output is stable.
@@ -497,6 +506,35 @@ fn with_note(body: String, note: Option<String>) -> String {
     }
 }
 
+/// Models sometimes send `"true"`, `"10"`, `10.0` or `-1`. Accept those rather than costing a
+/// round trip on an "invalid arguments" error: strings are parsed, floats truncated, negatives 0.
+mod lenient {
+    use serde::{Deserialize, Deserializer};
+    use serde_json::Value;
+
+    pub fn count<'de, D: Deserializer<'de>>(d: D) -> Result<Option<usize>, D::Error> {
+        let f = match Option::<Value>::deserialize(d)? {
+            Some(Value::Number(n)) => n.as_f64(),
+            Some(Value::String(s)) => s.trim().parse::<f64>().ok(),
+            _ => None,
+        };
+        Ok(f.filter(|f| !f.is_nan()).map(|f| f.max(0.0) as usize)) // `as` saturates at usize::MAX
+    }
+
+    pub fn flag<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+        Ok(match Option::<Value>::deserialize(d)? {
+            Some(Value::Bool(b)) => Some(b),
+            Some(Value::Number(n)) => n.as_f64().map(|f| f != 0.0),
+            Some(Value::String(s)) => match s.trim().to_ascii_lowercase().as_str() {
+                "true" | "1" | "yes" => Some(true),
+                "false" | "0" | "no" => Some(false),
+                _ => None,
+            },
+            _ => None,
+        })
+    }
+}
+
 fn parse_args<T: serde::de::DeserializeOwned>(args_json: &str) -> anyhow::Result<T> {
     serde_json::from_str(args_json).map_err(|e| anyhow::anyhow!("invalid arguments: {e}"))
 }
@@ -535,7 +573,7 @@ impl Tool for GlobTool {
             path: Option<String>,
         }
         let args: Args = parse_args(args_json)?;
-        let re = glob_regex(&args.pattern)?;
+        let re = glob(&args.pattern)?;
         self.0.wait_for_cloud().await;
         let (docs, note) = self.0.docs();
         let mut hits: Vec<&Doc> =
@@ -597,19 +635,23 @@ impl Tool for GrepTool {
             path: Option<String>,
             glob: Option<String>,
             output_mode: Option<String>,
-            #[serde(rename = "-i")]
+            #[serde(rename = "-i", default, deserialize_with = "lenient::flag")]
             case_insensitive: Option<bool>,
-            #[serde(rename = "-n")]
+            #[serde(rename = "-n", default, deserialize_with = "lenient::flag")]
             line_numbers: Option<bool>,
-            #[serde(rename = "-A")]
+            #[serde(rename = "-A", default, deserialize_with = "lenient::count")]
             after: Option<usize>,
-            #[serde(rename = "-B")]
+            #[serde(rename = "-B", default, deserialize_with = "lenient::count")]
             before: Option<usize>,
-            #[serde(rename = "-C")]
+            #[serde(rename = "-C", default, deserialize_with = "lenient::count")]
             around: Option<usize>,
+            #[serde(default, deserialize_with = "lenient::count")]
             context: Option<usize>,
+            #[serde(default, deserialize_with = "lenient::flag")]
             multiline: Option<bool>,
+            #[serde(default, deserialize_with = "lenient::count")]
             head_limit: Option<usize>,
+            #[serde(default, deserialize_with = "lenient::count")]
             offset: Option<usize>,
         }
         let a: Args = parse_args(args_json)?;
@@ -622,9 +664,19 @@ impl Tool for GrepTool {
                 .dot_matches_new_line(multiline)
                 .build()
         };
-        // A model-written pattern that isn't valid regex (e.g. `C++`) is searched literally.
-        let re = build(&a.pattern).or_else(|_| build(&regex::escape(&a.pattern)))?;
-        let glob = a.glob.as_deref().map(glob_regex).transpose()?;
+        if !multiline && (a.pattern.contains('\n') || a.pattern.contains("\\n")) {
+            anyhow::bail!("the pattern spans lines; pass \"multiline\": true");
+        }
+        // A pattern that isn't valid regex (e.g. `(cell`) is searched literally, and the result
+        // says so, so "no match" isn't mistaken for "not in the docs".
+        let (re, literal_note) = match build(&a.pattern) {
+            Ok(re) => (re, None),
+            Err(e) => (
+                build(&regex::escape(&a.pattern))?,
+                Some(format!("[pattern isn't usable as a regex ({}); searched for it as plain text]", last_line(&e.to_string()))),
+            ),
+        };
+        let glob = a.glob.as_deref().map(glob).transpose()?;
         let mode = a.output_mode.as_deref().unwrap_or("files_with_matches");
         if !matches!(mode, "files_with_matches" | "content" | "count") {
             anyhow::bail!("output_mode must be content, files_with_matches or count");
@@ -674,8 +726,14 @@ impl Tool for GrepTool {
             };
             header + &paginate(entries, a.head_limit, a.offset)
         };
+        let body = with_note(body, literal_note);
         Ok(self.0.cap(with_note(body, note)))
     }
+}
+
+/// regex errors end with the useful part ("error: unclosed group").
+fn last_line(s: &str) -> &str {
+    s.lines().rfind(|l| !l.trim().is_empty()).unwrap_or(s).trim()
 }
 
 /// 0-based indices of lines containing a match (every line a multiline match spans).
@@ -700,7 +758,7 @@ fn matching_lines(re: &regex::Regex, text: &str, lines: &[&str], multiline: bool
 }
 
 /// ripgrep's content layout: `name:N:text` for hits, `name-N-text` for context, `--` between
-/// separate groups.
+/// separate groups (including groups from different docs) when context lines are on.
 fn content_entries(
     out: &mut Vec<String>,
     d: &Doc,
@@ -710,23 +768,28 @@ fn content_entries(
     after: usize,
     numbers: bool,
 ) {
+    // `hits` is ascending; merge overlapping/adjacent context windows as we go, so the work is
+    // bounded by the doc's length however large -A/-B/-C are.
+    let last = lines.len() - 1;
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    for &h in hits {
+        let (s, e) = (h.saturating_sub(before), h.saturating_add(after).min(last));
+        match ranges.last_mut() {
+            Some(r) if s <= r.1 + 1 => r.1 = r.1.max(e),
+            _ => ranges.push((s, e)),
+        }
+    }
     let hit_set: std::collections::HashSet<usize> = hits.iter().copied().collect();
-    let mut shown: Vec<usize> = hits
-        .iter()
-        .flat_map(|&h| h.saturating_sub(before)..=h.saturating_add(after).min(lines.len() - 1))
-        .collect();
-    shown.sort_unstable();
-    shown.dedup();
-    let mut prev: Option<usize> = None;
-    for i in shown {
-        // ripgrep only separates groups when context lines are on.
-        if (before > 0 || after > 0) && prev.is_some_and(|p| i > p + 1) {
+    let context_on = before > 0 || after > 0;
+    for (s, e) in ranges {
+        if context_on && !out.is_empty() {
             out.push("--".to_string());
         }
-        let sep = if hit_set.contains(&i) { ':' } else { '-' };
-        let text = cut_line(lines[i], GREP_LINE_CHARS);
-        out.push(if numbers { format!("{}{sep}{}{sep}{text}", d.name, i + 1) } else { format!("{}{sep}{text}", d.name) });
-        prev = Some(i);
+        for (i, line) in lines.iter().enumerate().take(e + 1).skip(s) {
+            let sep = if hit_set.contains(&i) { ':' } else { '-' };
+            let text = cut_line(line, GREP_LINE_CHARS);
+            out.push(if numbers { format!("{}{sep}{}{sep}{text}", d.name, i + 1) } else { format!("{}{sep}{text}", d.name) });
+        }
     }
 }
 
@@ -758,7 +821,9 @@ impl Tool for ReadTool {
         #[derive(Deserialize)]
         struct Args {
             file_path: String,
+            #[serde(default, deserialize_with = "lenient::count")]
             offset: Option<usize>,
+            #[serde(default, deserialize_with = "lenient::count")]
             limit: Option<usize>,
         }
         let args: Args = parse_args(args_json)?;
@@ -912,7 +977,10 @@ mod tests {
         let s = store(&d, "", 100_000);
         let g = GrepTool(s.clone());
         // default files_with_matches, newest first; invalid regex `C++` searched literally, case-insensitive
-        assert_eq!(run(&g, json!({"pattern": "++ AGAIN"})).await, "Found 1 docs\nlocal/c.md");
+        assert_eq!(
+            run(&g, json!({"pattern": "++ AGAIN"})).await,
+            "Found 1 docs\nlocal/c.md\n[pattern isn't usable as a regex (error: repetition operator missing expression); searched for it as plain text]"
+        );
         assert_eq!(run(&g, json!({"pattern": "c\\+\\+|powerhouse"})).await, "Found 2 docs\nlocal/bio/cells.md\nlocal/c.md");
         assert_eq!(
             run(&g, json!({"pattern": "C\\+\\+", "-i": false, "output_mode": "count"})).await,
@@ -947,6 +1015,37 @@ mod tests {
             "local/bio/cells.md:1:# Cells\nlocal/bio/cells.md:2:The mitochondria is the powerhouse."
         );
         assert!(g.execute(r#"{"pattern":"x","output_mode":"lines"}"#).await.is_err());
+        // a bare-name glob reaches nested docs; also combined with a single-doc path
+        assert_eq!(run(&g, json!({"pattern": "cell", "glob": "*.md"})).await, "Found 1 docs\nlocal/bio/cells.md");
+        assert_eq!(run(&g, json!({"pattern": "cell", "glob": "*.md", "path": "bio/cells.md"})).await, "Found 1 docs\nlocal/bio/cells.md");
+        // invalid regex is searched literally, and says so
+        assert!(run(&g, json!({"pattern": "(cell"})).await.starts_with("No files found\n[pattern isn't usable as a regex"));
+        assert!(g.execute(r#"{"pattern":"a\\nb"}"#).await.is_err(), "newline pattern needs multiline");
+        // loose argument types are accepted
+        assert_eq!(
+            run(&g, json!({"pattern": "AGAIN", "-i": "true", "output_mode": "content", "head_limit": 10.0, "-C": -1})).await,
+            "local/c.md:3:c++ again"
+        );
+        // `--` separates groups from different docs too; huge context stays bounded
+        assert_eq!(
+            run(&g, json!({"pattern": "powerhouse|thrice", "output_mode": "content", "-B": 1})).await,
+            "local/bio/cells.md-1-# Cells\nlocal/bio/cells.md:2:The mitochondria is the powerhouse.\n--\nlocal/c.md-4-nothing\nlocal/c.md:5:C++ thrice"
+        );
+        let big = run(&g, json!({"pattern": "e", "output_mode": "content", "-C": usize::MAX, "head_limit": 0})).await;
+        assert_eq!(big.lines().count(), 2 + 1 + 5, "each doc printed once, not once per hit");
+    }
+
+    #[test]
+    fn huge_context_on_a_long_doc_is_fast() {
+        let text: String = (0..50_000).map(|i| format!("line {i}\n")).collect();
+        let d = Doc { name: "local/x.md".into(), text, modified: 0 };
+        let lines: Vec<&str> = d.text.lines().collect();
+        let hits: Vec<usize> = (0..lines.len()).collect();
+        let mut out = Vec::new();
+        let t = Instant::now();
+        content_entries(&mut out, &d, &lines, &hits, usize::MAX, usize::MAX, true);
+        assert_eq!(out.len(), 50_000);
+        assert!(t.elapsed() < Duration::from_secs(2));
     }
 
     #[tokio::test]
@@ -961,7 +1060,10 @@ mod tests {
         assert_eq!(run(&g, json!({"pattern": "**/*.md"})).await, "cloud/bio/plants.md\nlocal/bio/cells.md\nlocal/top.md");
         assert_eq!(run(&g, json!({"pattern": "bio/*"})).await, "local/bio/dna.txt\ncloud/bio/plants.md\nlocal/bio/cells.md");
         assert_eq!(run(&g, json!({"pattern": "*.{txt,md}", "path": "local/bio"})).await, "local/bio/dna.txt\nlocal/bio/cells.md");
-        assert_eq!(run(&g, json!({"pattern": "CELLS*"})).await, "No files found", "* stays inside one folder");
+        assert_eq!(run(&g, json!({"pattern": "CELLS*"})).await, "local/bio/cells.md", "no '/' = file name at any depth");
+        assert_eq!(run(&g, json!({"pattern": "bio/CELLS*", "path": "local"})).await, "local/bio/cells.md");
+        assert_eq!(run(&g, json!({"pattern": "*", "path": "local\\bio"})).await, "local/bio/dna.txt\nlocal/bio/cells.md");
+        assert_eq!(run(&g, json!({"pattern": "x/*.md"})).await, "No files found");
         assert_eq!(run(&g, json!({"pattern": "**/CELLS*"})).await, "local/bio/cells.md");
         assert!(g.execute(r#"{"pattern":"{a,b"}"#).await.is_err());
     }

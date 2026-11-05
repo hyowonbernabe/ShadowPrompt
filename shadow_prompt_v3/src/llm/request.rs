@@ -43,8 +43,8 @@ pub struct Request<'a> {
     pub cache_control: Option<CacheControl>,
 }
 
-/// A request's `tools` array entries are either our own function-tool defs (`list_docs`,
-/// `read_doc`, `fill_page`, `screenshot`) or OpenRouter's server-executed tools (currently just
+/// A request's `tools` array entries are either our own function-tool defs (`Glob`,
+/// `Grep`, `Read`, `fill_page`, `screenshot`) or OpenRouter's server-executed tools (currently just
 /// `openrouter:web_search`) — same array, same wire shape from the model's point of view.
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]

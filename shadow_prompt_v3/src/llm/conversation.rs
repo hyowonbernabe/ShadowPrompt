@@ -105,7 +105,9 @@ impl Conversation {
     /// screenshots go first; reference (context) screenshots only once no question image is
     /// left, since the reference picture is usually the oldest and the most important.
     fn enforce_image_cap(&mut self) {
-        if self.image_count() <= MAX_IMAGES && self.image_bytes() <= MAX_IMAGE_BYTES {
+        // History stays at MAX_IMAGES - 1 or fewer: the question being asked adds its own
+        // screenshot on top, and the request as a whole must stay within MAX_IMAGES.
+        if self.image_count() < MAX_IMAGES && self.image_bytes() <= MAX_IMAGE_BYTES {
             return;
         }
         while self.image_count() > MAX_IMAGES - IMAGE_DROP_BATCH || self.image_bytes() > MAX_IMAGE_BYTES {
@@ -172,7 +174,8 @@ mod tests {
             c.push_question(vec![img(&format!("q{i}"))], "a".into());
         }
         let urls = image_urls(&c);
-        assert_eq!(urls.len(), MAX_IMAGES - IMAGE_DROP_BATCH, "drops a batch, not one");
+        assert!(urls.len() < MAX_IMAGES, "room left for the next question's screenshot");
+        assert!(urls.len() > MAX_IMAGES - IMAGE_DROP_BATCH, "drops a batch, not everything");
         assert!(urls[0].ends_with("ctx"), "context image must survive");
         assert!(!urls.iter().any(|u| u.ends_with(",q0")), "oldest question image must go first");
         // the removed image's turn keeps its place, with a note instead of the picture
@@ -186,8 +189,8 @@ mod tests {
             c.push_context(vec![img(&format!("c{i}"))]);
         }
         let urls = image_urls(&c);
-        assert_eq!(urls.len(), MAX_IMAGES - IMAGE_DROP_BATCH);
-        assert!(urls[0].ends_with(",c6"));
+        assert_eq!(urls.len(), MAX_IMAGES - IMAGE_DROP_BATCH + 1);
+        assert!(urls[0].ends_with(",c5"));
     }
 
     #[test]
