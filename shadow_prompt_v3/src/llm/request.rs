@@ -125,8 +125,9 @@ pub fn build<'a>(
         //     now for a cited structural reason rather than an open question.
         provider: None,
         session_id,
-        // Only when an Anthropic model leads this request: an unknown field rejected by another
-        // provider would be a hard error that skips the rest of the fallback chain. 1h TTL
+        // Only when an Anthropic model leads (caching is an Anthropic/Vertex/Bedrock feature).
+        // The field still rides along if OpenRouter falls back to a later model in this same
+        // request; OpenRouter documents unsupported parameters as ignored, not rejected. 1h TTL
         // because gaps between questions in one test can exceed the 5-minute default.
         cache_control: models
             .first()
