@@ -31,6 +31,8 @@ pub enum InputEvent {
     /// Screen Answer: all monitors -> Claude -> tracked dots on click targets.
     ScreenAnswer,
     ClearDots,
+    /// Opens the account screen (access-code login).
+    Account,
     // Google Forms
     LaunchDebugger,
     /// v3 legacy (design doc §7.4) — default/primary as of 2026-09-20.

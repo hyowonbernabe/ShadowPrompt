@@ -24,6 +24,8 @@ clipboard_query = "ctrl+shift+alt+v"
 screenshot_query = "ctrl+shift+alt+s"
 screen_answer = "ctrl+shift+alt+w"
 clear_dots = "ctrl+shift+alt+d"
+# Account screen (access-code login): change API key or code, log out, delete account.
+account = "ctrl+shift+alt+k"
 test_model = "ctrl+shift+alt+t"
 switch_model = "ctrl+shift+alt+m"
 # Conversation memory: store a screen region as reference for later questions (no answer), and

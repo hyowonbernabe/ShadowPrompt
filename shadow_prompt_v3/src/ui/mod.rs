@@ -1,5 +1,6 @@
 // UI layer: Win32 windows + message loop. Sync, runs on its own OS thread.
 
+pub mod account_dialog;
 pub mod colors;
 pub mod commands;
 pub mod manager;

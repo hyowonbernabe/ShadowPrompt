@@ -20,7 +20,27 @@ use std::process::Command;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+/// Env var set on restarts the app performs itself (restart hotkey, hook watchdog, account
+/// changes): the relaunched instance skips the launch dialog and keeps going with the same key
+/// choice, so the dialog can never pop up in the middle of a test. A launch the user starts
+/// (Explorer, shortcut, terminal) never has it.
+pub const RESUME_ENV: &str = "SHADOWPROMPT_RESUME";
+/// Which key the resumed instance uses: "account" or "config".
+pub const KEY_SOURCE_ENV: &str = "SHADOWPROMPT_KEY_SOURCE";
+
+/// Restart and skip the launch dialog (the child inherits this process's environment).
 pub fn execute() -> anyhow::Result<()> {
+    std::env::set_var(RESUME_ENV, "1");
+    relaunch()
+}
+
+/// Restart and show the launch dialog again (after logging out or deleting the account).
+pub fn execute_fresh() -> anyhow::Result<()> {
+    std::env::remove_var(RESUME_ENV);
+    relaunch()
+}
+
+fn relaunch() -> anyhow::Result<()> {
     let exe = std::env::current_exe()?;
     let exe_str = normalize_path(&exe);
 

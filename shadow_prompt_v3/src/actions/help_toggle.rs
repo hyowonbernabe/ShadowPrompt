@@ -22,7 +22,7 @@ pub async fn execute(ctx: &ActionContext) {
 
 fn build_help_text(ctx: &ActionContext) -> String {
     let h = &ctx.config.hotkeys;
-    let rows: [(&str, &str); 17] = [
+    let rows: [(&str, &str); 18] = [
         (&h.clipboard_query, "Answer (clipboard)"),
         (&h.screenshot_query, "Answer (screen region)"),
         (&h.add_context, "Add screen region as context (no answer)"),
@@ -38,6 +38,7 @@ fn build_help_text(ctx: &ActionContext) -> String {
         (&h.hide_toggle, "Hide / show UI"),
         (&h.help_toggle, "Toggle this help"),
         (&h.restart_daemon, "Restart daemon"),
+        (&h.account, "Account (code login, change key)"),
         (&h.insta_delete, "Insta-delete (tap twice)"),
         (&h.panic_kill, "Panic: wipe clipboard + exit"),
     ];

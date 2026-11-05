@@ -150,6 +150,7 @@ mod tests {
                 debug_open_tab: "VK_F13".to_string(),
                 screen_answer: "VK_F14".to_string(),
                 clear_dots: "VK_F15".to_string(),
+                account: "VK_F16".to_string(),
             },
             visuals: VisualsConfig {
                 indicator_corner: "top_right".to_string(),
@@ -177,6 +178,7 @@ mod tests {
             forms: FormsConfig { max_pages: 20, max_images_per_request: 4, max_image_long_edge_px: 1600 },
             knowledge: KnowledgeConfig { enabled: knowledge_enabled, max_doc_bytes: 100_000, cloud_url: String::new() },
             screen_answer: Default::default(),
+            account: Default::default(),
         }
     }
 

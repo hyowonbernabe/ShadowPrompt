@@ -16,6 +16,25 @@ pub struct Config {
     pub knowledge: KnowledgeConfig,
     #[serde(default)]
     pub screen_answer: ScreenAnswerConfig,
+    /// Access-code login (docs/superpowers/specs/2026-11-06-access-code-login-design.md). Written
+    /// by the app on log in / sign up, cleared on log out; never touches `openrouter.api_key`.
+    #[serde(default)]
+    pub account: AccountConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct AccountConfig {
+    #[serde(default)]
+    pub code: String,
+    /// The key fetched with `code`, saved so the app works offline.
+    #[serde(default)]
+    pub api_key: String,
+}
+
+impl AccountConfig {
+    pub fn logged_in(&self) -> bool {
+        !self.code.is_empty() && crate::account::is_real_key(&self.api_key)
+    }
 }
 
 /// Screen Answer (all-monitor capture -> Claude -> tracked dots). OpenRouter + Claude only.
@@ -115,6 +134,13 @@ pub struct HotkeysConfig {
     pub screen_answer: String,
     #[serde(default = "default_clear_dots")]
     pub clear_dots: String,
+    /// Account screen: change key / code, log out, delete.
+    #[serde(default = "default_account")]
+    pub account: String,
+}
+
+fn default_account() -> String {
+    "ctrl+shift+alt+k".to_string()
 }
 
 fn default_screen_answer() -> String {

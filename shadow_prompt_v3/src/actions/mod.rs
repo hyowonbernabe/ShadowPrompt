@@ -96,6 +96,8 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
             clear_dots(&ctx).await;
             let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(idle_indicator(&ctx)));
         }
+        // Own thread: the account window runs its own message loop and blocks until closed.
+        InputEvent::Account => crate::ui::account_dialog::open_account_screen(),
         // Design doc §7.4: v3 legacy is the default/primary engine as of 2026-09-20 — it takes
         // over these two main binds. v3 new (AX-tree/fill_page loop, §7.3) moved to the
         // `*Axtree` binds below, parked but reachable, not deleted.

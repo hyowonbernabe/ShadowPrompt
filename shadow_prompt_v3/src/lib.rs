@@ -1,6 +1,7 @@
 // ShadowPrompt v3 — public library surface. Module structure mirrors
 // docs/SHADOWPROMPT_V3_DESIGN.md.
 
+pub mod account;
 pub mod actions;
 pub mod browser;
 pub mod capture;
@@ -41,25 +42,31 @@ pub fn run() -> anyhow::Result<()> {
     lifecycle::startup::install_panic_hook();
     let _lock = lifecycle::startup::acquire_single_instance()?;
 
+    // First run: write the template; the launch dialog then offers log in / sign up, so nobody
+    // has to hand-edit a key in.
     if let Ok(path) = config::paths::config_path() {
         if !path.exists() {
             config::load::init_template()?;
-            anyhow::bail!(
-                "first run: edit {} (set openrouter.api_key) then relaunch",
-                path.display()
-            );
         }
     }
 
-    let cfg = config::load::load()?;
+    let mut cfg = config::load::load()?;
     log::info!("shadowprompt v{} ready", env!("CARGO_PKG_VERSION"));
     // Positions (selection, capture, dots) are only right if this says per-monitor; anything
     // else on a 125%/150% display means regions and dots land in the wrong place.
     log::info!("dpi awareness: {dpi_mode}, system dpi {}", unsafe { windows::Win32::UI::HiDpi::GetDpiForSystem() });
 
     if args.probe {
+        if cfg.account.logged_in() {
+            cfg.openrouter.api_key = cfg.account.api_key.clone();
+        }
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
         return rt.block_on(probe::run(cfg));
+    }
+
+    if !choose_key(&mut cfg)? {
+        log::info!("launch dialog closed; exiting");
+        return Ok(());
     }
 
     run_daemon(cfg)
@@ -111,6 +118,37 @@ fn run_daemon(cfg: config::Config) -> anyhow::Result<()> {
         }
         Ok::<(), anyhow::Error>(())
     })
+}
+
+/// Picks the API key for this run (design: docs/superpowers/specs/2026-11-06-access-code-login-design.md).
+/// A launch the user starts shows the dialog every time; a restart the app performs itself
+/// (`self_restart::RESUME_ENV`) skips it and keeps the earlier choice. Returns false if the user
+/// closed the dialog (exit without starting).
+fn choose_key(cfg: &mut config::Config) -> anyhow::Result<bool> {
+    use lifecycle::self_restart::{KEY_SOURCE_ENV, RESUME_ENV};
+    let from_account = if std::env::var_os(RESUME_ENV).is_some() {
+        let wants_account = std::env::var(KEY_SOURCE_ENV).map(|v| v != "config").unwrap_or(true);
+        let use_account = wants_account && cfg.account.logged_in();
+        if use_account {
+            cfg.openrouter.api_key = cfg.account.api_key.clone();
+        }
+        use_account
+    } else {
+        match ui::account_dialog::run_launch(&cfg.account, &cfg.openrouter.api_key) {
+            ui::account_dialog::LaunchChoice::Quit => return Ok(false),
+            ui::account_dialog::LaunchChoice::Use { key, from_account } => {
+                cfg.openrouter.api_key = key;
+                // A log in / sign up just wrote [account] to the file; pick it up.
+                if let Ok(fresh) = config::load::load() {
+                    cfg.account = fresh.account;
+                }
+                from_account
+            }
+        }
+    };
+    std::env::set_var(KEY_SOURCE_ENV, if from_account { "account" } else { "config" });
+    log::info!("api key: {}", if from_account { "account login" } else { "config.toml" });
+    Ok(true)
 }
 
 /// Makes the process per-monitor DPI aware, falling back to older APIs (Windows 8.1, then
