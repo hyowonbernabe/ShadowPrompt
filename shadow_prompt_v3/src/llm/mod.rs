@@ -233,6 +233,11 @@ impl LlmClient {
         let mut round: u32 = 0;
         loop {
             let resp = self.call(&models, &messages, tool_defs.clone(), on_delta).await?;
+            // Cache hits per round: the only way to see the cached prefix silently breaking.
+            if let Some(u) = &resp.usage {
+                let cached = u.prompt_tokens_details.as_ref().map_or(0, |d| d.cached_tokens);
+                log::debug!("round {round}: {} prompt {} tokens, {cached} from cache", resp.model, u.prompt_tokens);
+            }
             let choice = resp
                 .choices
                 .into_iter()
