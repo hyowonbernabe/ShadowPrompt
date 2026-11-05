@@ -191,7 +191,7 @@ fn run_ui_thread(visuals: VisualsConfig, ready_tx: mpsc::Sender<u32>) -> anyhow:
         let ind_ex = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT;
         let overlay_ex = ind_ex;
 
-        let ind_size = visuals.indicator_size.max(1) as i32;
+        let ind_size = scaled(visuals.indicator_size);
         let (ix, iy) = corner_pos(&visuals.indicator_corner, visuals.indicator_offset, ind_size, ind_size, screen_w, screen_h);
         let hwnd_indicator = create_window(&class_name, ind_ex, WS_POPUP, ix, iy, ind_size, ind_size, hinstance.into());
         let _ = SetLayeredWindowAttributes(hwnd_indicator, COLORREF(0), 255, LWA_ALPHA);
@@ -205,7 +205,7 @@ fn run_ui_thread(visuals: VisualsConfig, ready_tx: mpsc::Sender<u32>) -> anyhow:
         // mechanisms on the same window is redundant at best. Initial size is a placeholder;
         // real position/size come from the first render_overlay call once content exists.
         let (ox, oy) = (visuals.overlay_offset[0], visuals.overlay_offset[1]);
-        let hwnd_overlay = create_window(&class_name, overlay_ex, WS_POPUP, ox, oy, 10, visuals.overlay_font_size.max(1) as i32, hinstance.into());
+        let hwnd_overlay = create_window(&class_name, overlay_ex, WS_POPUP, ox, oy, 10, scaled(visuals.overlay_font_size), hinstance.into());
 
         let hwnd_debug = create_window(&class_name, overlay_ex, WS_POPUP, 0, 0, 1, 1, hinstance.into());
         let _ = SetLayeredWindowAttributes(hwnd_debug, COLORREF(0), 180, LWA_ALPHA);
@@ -218,7 +218,7 @@ fn run_ui_thread(visuals: VisualsConfig, ready_tx: mpsc::Sender<u32>) -> anyhow:
         // different UI, not the same style at a different location, exactly as reported. No
         // SetLayeredWindowAttributes here for the same reason hwnd_overlay has none: real size
         // comes from the first render once content exists.
-        let hwnd_help = create_window(&class_name, overlay_ex, WS_POPUP, HELP_OFFSET[0], HELP_OFFSET[1], 10, visuals.overlay_font_size.max(1) as i32, hinstance.into());
+        let hwnd_help = create_window(&class_name, overlay_ex, WS_POPUP, HELP_OFFSET[0], HELP_OFFSET[1], 10, scaled(visuals.overlay_font_size), hinstance.into());
 
         let dots: Vec<HWND> = (0..MAX_DOTS)
             .map(|_| {
@@ -496,7 +496,7 @@ fn reassert_topmost(ctx: &UiCtx) {
 /// Places/shows the first `dot_pts.len()` pool windows centred on their points, hides the rest,
 /// and runs the pulse timer only while at least one dot is visible. Respects the hide toggle.
 fn layout_dots(ctx: &mut UiCtx) {
-    let size = ctx.visuals.dot_size.max(1) as i32;
+    let size = scaled(ctx.visuals.dot_size);
     let visible = if ctx.hidden { 0 } else { ctx.dot_pts.len().min(MAX_DOTS) };
     unsafe {
         for (i, &d) in ctx.dots.iter().enumerate() {
@@ -586,7 +586,7 @@ fn render_overlay(ctx: &mut UiCtx, advance_crawl: bool) {
         return;
     }
 
-    let font_size = ctx.visuals.overlay_font_size.max(1) as i32;
+    let font_size = scaled(ctx.visuals.overlay_font_size);
     unsafe {
         let mem_dc = CreateCompatibleDC(None);
         let font = make_overlay_font(font_size);
@@ -629,7 +629,7 @@ fn render_help_panel(ctx: &UiCtx) {
         }
         return;
     }
-    let font_size = ctx.visuals.overlay_font_size.max(1) as i32;
+    let font_size = scaled(ctx.visuals.overlay_font_size);
     unsafe {
         let mem_dc = CreateCompatibleDC(None);
         let font = make_overlay_font(font_size);
@@ -642,6 +642,15 @@ fn render_help_panel(ctx: &UiCtx) {
         let _ = DeleteObject(font);
         let _ = DeleteDC(mem_dc);
     }
+}
+
+/// A configured size (font px, dot px, indicator px — all written for a 100% display) scaled
+/// to the display's scaling, so a 150% laptop shows them the same physical size. The process
+/// is per-monitor DPI aware, so without this every size is 1/1.5 as big there.
+fn scaled(px: impl Into<f64>) -> i32 {
+    // SAFETY: plain Win32 query, no arguments.
+    let dpi = unsafe { windows::Win32::UI::HiDpi::GetDpiForSystem() }.max(96);
+    (px.into() * dpi as f64 / 96.0).round().max(1.0) as i32
 }
 
 unsafe fn make_overlay_font(font_size: i32) -> HFONT {

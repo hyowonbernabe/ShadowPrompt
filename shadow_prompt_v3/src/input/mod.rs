@@ -15,6 +15,7 @@ pub mod bindings;
 pub mod events;
 pub mod parser;
 pub mod state_machine;
+pub mod watchdog;
 
 pub use events::{InputEvent, RegionPurpose};
 
@@ -56,6 +57,8 @@ pub fn start(cfg: HotkeysConfig) -> anyhow::Result<UnboundedReceiver<InputEvent>
             }
             log::error!("keyboard hook could not be kept alive; hotkeys are disabled until restart");
         })?;
+
+    watchdog::spawn()?;
 
     std::thread::Builder::new()
         .name("insta-tick".into())
@@ -169,6 +172,7 @@ impl ListenerState {
 
     /// Handles one hook event. Returns whether it should reach other apps (false = swallowed).
     fn on_event(&self, ev: &Event) -> bool {
+        watchdog::note_hook_event();
         match ev.event_type {
             EventType::KeyPress(k) => return self.on_press(k),
             EventType::KeyRelease(k) => return self.on_release(k),
@@ -324,6 +328,10 @@ impl ListenerState {
     }
 
     fn on_press(&self, k: Key) -> bool {
+        if k == watchdog::PROBE_KEY {
+            watchdog::note_probe_seen();
+            return false; // our own liveness probe — no app should ever see it
+        }
         if k == Key::CapsLock && self.take_injected_caps() {
             return true;
         }
@@ -512,6 +520,9 @@ impl ListenerState {
     }
 
     fn on_release(&self, k: Key) -> bool {
+        if k == watchdog::PROBE_KEY {
+            return false;
+        }
         if k == Key::CapsLock && self.take_injected_caps() {
             return true;
         }
@@ -673,6 +684,13 @@ mod tests {
         std::thread::sleep(Duration::from_millis(210)); // past debounce
         s.on_press(Key::F9);
         assert_eq!(drain(&mut rx), 1, "a press after a long silence is a fresh press, not a repeat");
+    }
+
+    #[test]
+    fn watchdog_probe_key_is_swallowed_and_fires_nothing() {
+        let (s, mut rx) = state_with("f9");
+        assert!(!s.on_press(watchdog::PROBE_KEY) && !s.on_release(watchdog::PROBE_KEY));
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]

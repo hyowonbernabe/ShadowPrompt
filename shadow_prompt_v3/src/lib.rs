@@ -22,11 +22,7 @@ pub fn run() -> anyhow::Result<()> {
     // capture on any monitor with scaling != 100%, while rdev's low-level mouse hook still
     // reports real physical pixels — Screenshot Query then grabs the wrong region on scaled
     // displays. Must run before any window or screen-metrics call.
-    unsafe {
-        let _ = windows::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
-            windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
-        );
-    }
+    let dpi_mode = set_dpi_awareness();
 
     let args = Cli::load();
 
@@ -57,6 +53,9 @@ pub fn run() -> anyhow::Result<()> {
 
     let cfg = config::load::load()?;
     log::info!("shadowprompt v{} ready", env!("CARGO_PKG_VERSION"));
+    // Positions (selection, capture, dots) are only right if this says per-monitor; anything
+    // else on a 125%/150% display means regions and dots land in the wrong place.
+    log::info!("dpi awareness: {dpi_mode}, system dpi {}", unsafe { windows::Win32::UI::HiDpi::GetDpiForSystem() });
 
     if args.probe {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
@@ -108,4 +107,26 @@ fn run_daemon(cfg: config::Config) -> anyhow::Result<()> {
         }
         Ok::<(), anyhow::Error>(())
     })
+}
+
+/// Makes the process per-monitor DPI aware, falling back to older APIs (Windows 8.1, then
+/// Vista) if the newest one fails, and reports which mode actually took effect.
+fn set_dpi_awareness() -> &'static str {
+    use windows::Win32::UI::HiDpi::{
+        SetProcessDpiAwareness, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        PROCESS_PER_MONITOR_DPI_AWARE,
+    };
+    // SAFETY: plain Win32 calls with constant arguments, made before any window exists.
+    unsafe {
+        if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).is_ok() {
+            return "per-monitor v2";
+        }
+        if SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE).is_ok() {
+            return "per-monitor v1 (fallback)";
+        }
+        if windows::Win32::UI::WindowsAndMessaging::SetProcessDPIAware().as_bool() {
+            return "system-aware only (fallback; per-monitor unavailable)";
+        }
+    }
+    "UNAWARE (all DPI calls failed; positions will be off on scaled displays)"
 }
