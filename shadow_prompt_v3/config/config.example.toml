@@ -1,9 +1,9 @@
-# ShadowPrompt v3 — config template. Copy to config.toml (or run --init) and fill in your
-# OpenRouter API key. See docs/SHADOWPROMPT_V3_DESIGN.md for the reasoning behind every default
-# here — this file only needs to say *what*, not *why*.
+# ShadowPrompt v3 — config template. Written as config.toml on first launch. No API key ships
+# with the app: on launch, log in with your code or sign up (the key is then saved under
+# [account] below). Or paste your own OpenRouter key here instead.
 
 [openrouter]
-api_key = "sk-or-REPLACE-ME"
+api_key = ""
 # Fallback chain, tried in order. Uncomment to override the built-in default (design doc §8):
 # models = [
 #   "anthropic/claude-sonnet-5.5",

@@ -1,314 +1,125 @@
 <p align="center">
-  <img src="shadow_prompt_v2/assets/logo_512.png" width="140" alt="ShadowPrompt">
+  <img src="shadow_prompt_v3/assets/logo_512.png" width="120" alt="ShadowPrompt">
 </p>
 
 <h1 align="center">ShadowPrompt</h1>
 
 <p align="center">
-  <em>Lightweight, hotkey-driven AI assistant for Windows. Single executable. No taskbar entry. Built for exam workflows.</em>
+  <em>Hotkey-driven AI answers for Windows. One executable, no window, no taskbar entry.</em>
 </p>
 
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
-  <a href="https://github.com/hyowonbernabe/ShadowPrompt/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/hyowonbernabe/ShadowPrompt?include_prereleases&color=success"></a>
-  <a href="https://github.com/hyowonbernabe/ShadowPrompt/actions/workflows/check_v2.yml"><img alt="CI" src="https://github.com/hyowonbernabe/ShadowPrompt/actions/workflows/check_v2.yml/badge.svg?branch=v2"></a>
+  <a href="https://github.com/hyowonbernabe/ShadowPrompt/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/hyowonbernabe/ShadowPrompt?color=success"></a>
+  <a href="https://github.com/hyowonbernabe/ShadowPrompt/actions/workflows/check_v3.yml"><img alt="CI" src="https://github.com/hyowonbernabe/ShadowPrompt/actions/workflows/check_v3.yml/badge.svg"></a>
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-0078D6?logo=windows&logoColor=white">
-  <img alt="Rust" src="https://img.shields.io/badge/built%20with-Rust-orange?logo=rust&logoColor=white">
 </p>
 
 ---
 
-## Install in one line
+## Install
 
-Open **PowerShell** (regular user, no admin needed) and run:
+Paste one line. It downloads the latest release, installs it and starts it. No admin needed.
 
-```powershell
-irm https://raw.githubusercontent.com/hyowonbernabe/ShadowPrompt/main/shadow_prompt_v2/install.ps1 | iex
-```
-
-This will:
-
-1. Download the latest release zip
-2. Extract to `%LOCALAPPDATA%\ShadowPrompt`
-3. Bundle a 7-day OpenRouter trial key so you can run immediately
-4. Add the install directory to your user PATH
-
-The daemon launches automatically in the background. A tiny green pixel appears at the top-right corner of your screen within ~5 seconds. ShadowPrompt is listening for hotkeys.
-
-You can also launch manually from any terminal:
+**PowerShell**
 
 ```powershell
-shadowprompt
+irm https://raw.githubusercontent.com/hyowonbernabe/ShadowPrompt/main/shadow_prompt_v3/install.ps1 | iex
 ```
 
-> **Want to replace the bundled trial key?** Edit `%LOCALAPPDATA%\ShadowPrompt\config\config.toml` and paste your own key from <https://openrouter.ai/keys>.
+**Command Prompt**
 
----
-
-## Portable / USB install
-
-ShadowPrompt is fully portable: all state lives next to the executable. No registry writes, no temp files, no traces on the host machine.
-
-1. Download `shadowprompt-v2.0.0-windows-x64.zip` from the [latest release](https://github.com/hyowonbernabe/ShadowPrompt/releases/latest).
-2. Extract the zip onto a USB drive. You'll see:
-   ```
-   USB:\ShadowPrompt\
-     shadowprompt.exe
-     config\config.example.toml
-     knowledge\           ← your bundled reviewer markdown
-     install.ps1
-     uninstall.ps1
-   ```
-3. On the target machine: double-click `shadowprompt.exe`. First-run writes `config\config.toml` from the example template (already includes the trial key).
-4. The daemon runs from the USB. Eject the drive when done; nothing remains on the host.
-
-To override the trial key with your own:
-
-```toml
-# USB:\ShadowPrompt\config\config.toml
-[openrouter]
-api_key = "sk-or-v1-..."
+```cmd
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/hyowonbernabe/ShadowPrompt/main/shadow_prompt_v3/install.ps1 | iex"
 ```
 
-Tip: drop your own subject `.md` files into `USB:\ShadowPrompt\knowledge\<subject>\` — daemon loads them at every launch.
+Installs to `%LOCALAPPDATA%\AppSupport` with the study docs, adds it to your PATH and starts it. Run `shadowprompt` to start it again later. Running the line again updates to the newest release and keeps your `config.toml`.
 
----
+**Portable:** download the zip from the [latest release](https://github.com/hyowonbernabe/ShadowPrompt/releases/latest), extract it anywhere (a USB stick works), run `shadowprompt.exe`. Everything stays in that folder.
 
-## What it does
+## First launch
 
-| Hotkey | What it does |
+No API key ships with the app. Every time you start it, a small dialog asks how to start:
+
+- **Log in with a code**: loads the OpenRouter key saved under your code.
+- **Sign up**: pick a code and save your OpenRouter key under it.
+- **Continue**: use the login or key you already have (works offline).
+
+The login is saved in `config\config.toml`. Restarts the app does itself (restart hotkey, crash recovery) skip the dialog. Get a key at <https://openrouter.ai/keys>.
+
+## Hotkeys
+
+| Hotkey | Action |
 |---|---|
-| `Ctrl+Shift+V` | Answer the question on your clipboard. Result lands back on the clipboard + on-screen overlay. |
-| `Ctrl+Shift+Alt+V` | Same as above, but with live web search enabled. |
-| `Ctrl+Shift+Space` | Draw a rectangle on screen with two clicks. Sent to a vision model. |
-| `Ctrl+Shift+Alt+Space` | Same as above, with live web search. |
-| `Ctrl+Shift+9` | **Google Forms auto-paginate.** Fills every unanswered question across all pages. Never clicks Submit. |
-| `Ctrl+Shift+7` | Google Forms single page. Fills only the current page. |
-| `Ctrl+Shift+I` | Open a debug Chrome window so the Forms hotkeys can attach. |
-| `Ctrl+Shift+0` | Abort the current task. |
-| `Ctrl+Shift+H` | Hide / show all UI. |
-| `Ctrl+Shift+?` | Toggle on-screen cheat sheet of every hotkey. |
-| `Ctrl+Shift+R` | Restart the daemon. |
-| `Ctrl+Shift+Delete` | Insta-delete. Tap twice within 2 sec to wipe install dir + PATH entry. |
-| `Ctrl+Shift+F12` | Panic. Wipe clipboard, exit immediately. |
+| `Ctrl+Shift+Alt+V` | Answer the question on the clipboard |
+| `Ctrl+Shift+Alt+S` | Answer a screen region (click two corners) |
+| `Ctrl+Shift+Alt+W` | Answer everything on all monitors and put a dot on each answer |
+| `Ctrl+Shift+Alt+D` | Clear the dots |
+| `Ctrl+Shift+Alt+A` | Save a screen region as context (no answer) |
+| `Ctrl+Shift+Alt+N` | New conversation (forget context) |
+| `Ctrl+Shift+Alt+G` | Google Forms: fill this page |
+| `Ctrl+Shift+Alt+F` | Google Forms: fill every page |
+| `Ctrl+Shift+Alt+B` | Open the Chrome window the Forms hotkeys attach to |
+| `Ctrl+Shift+Alt+M` | Switch between Claude and Gemini |
+| `Ctrl+Shift+Alt+T` | Show which model is answering |
+| `Ctrl+Shift+Alt+K` | Account: change key or code, log out, delete |
+| `Ctrl+Shift+Alt+C` | Abort |
+| `Ctrl+Shift+Alt+H` | Hide / show everything |
+| `Ctrl+Shift+Alt+/` | Hotkey cheat sheet |
+| `Ctrl+Shift+Alt+R` | Restart |
+| `Ctrl+Shift+Alt+X` | Self-delete (press twice) |
+| `Ctrl+Alt+End` | Panic: wipe the clipboard and exit |
 
-All hotkeys are configurable in `config.toml`.
+**Backup keys**, for when Ctrl/Shift/Alt are blocked: hold **Caps Lock**, tap **Tab**, press the hotkey's letter. Caps Lock state is left as it was.
 
----
+All hotkeys can be changed in `config.toml`.
 
-## Why it exists
+## How it works
 
-Standard AI tools demand visible windows, browser tabs, and constant focus switching. ShadowPrompt was built for moments where that's not an option:
+- **Conversation memory.** Every question, screenshot and form page is sent with the conversation so far, so context from earlier in a test carries over. Save a reading passage or the top of a long question with `A` before asking. Up to 20 screenshots are kept.
+- **Screen answer.** `W` reads every monitor, answers, and marks where to click or type. Dots follow the page as you scroll, for 10 minutes.
+- **Study docs.** Markdown in the `knowledge\` folder, plus the shared online docs, searchable by the model. A `CLAUDE.md` in that folder is always read. The release ships with the four midterm reviewers.
+- **Models.** Claude Sonnet 5.5 first, Gemini 3.8 Flash as backup, then free models if both are down. Web search when needed.
+- **Hidden.** No taskbar entry; the answer text, dots and dialogs don't show up in screenshots or screen sharing.
+- **Bad internet.** Small screenshots, automatic retries, and frozen connections are dropped and retried after 25 s instead of hanging.
+- **Never submits.** Forms are filled, never submitted, and answers you already gave are left alone.
 
-- **One process, no window** — runs invisibly. Only a single-pixel state indicator on screen.
-- **Clipboard in, clipboard out** — copy a question, hit a hotkey, paste the answer.
-- **Vision when text isn't enough** — pick a region of your screen, send to a multimodal model.
-- **Forms automation** — fill an entire multi-page Google Form (radio, checkbox, dropdown, grid, text, date, time, scale, with image questions) while you watch. Never clicks Submit, never touches questions you've already answered.
-- **Subject knowledge** — drop markdown notes into a folder, daemon caches them, every query gets that context for the cost of one cached lookup.
-- **Panic button** — two-tap hotkey deletes the install dir, strips PATH, kills the process. No trace.
+## Command line
 
----
-
-## Architecture at a glance
-
-```
-hotkey  ───►  input thread (rdev)
-                    │
-                    ▼
-              tokio runtime
-              ├─► clipboard / screen capture
-              ├─► OpenRouter (Anthropic-pinned)
-              │     └─► prompt cache (5min ephemeral)
-              ├─► headless_chrome (Forms automation)
-              └─► UI thread (Win32 layered windows)
-                    └─► pixel indicator + overlay + help + form indicator
-```
-
-- **Language**: Rust 2021, single executable
-- **HTTP**: reqwest + rustls (no native-tls)
-- **LLM transport**: OpenRouter, pinned to Anthropic provider for Claude models
-- **Default model**: `anthropic/claude-sonnet-4.6`
-- **Caching**: Anthropic prompt caching, 5-minute ephemeral, refreshed on each hit
-- **Browser automation**: headless_chrome attached to a user-launched Chrome on `:9222`
-- **Stealth**: `windows_subsystem = "windows"` (no console), layered + topmost windows, chroma-keyed transparent overlay
-
-Full details: [`shadow_prompt_v2/docs/architecture.md`](shadow_prompt_v2/docs/architecture.md).
-
----
-
-## Subject knowledge (the killer feature for exams)
-
-ShadowPrompt loads markdown files at startup and injects them as a cached system prompt block on every query. The first call pays a small write fee; every subsequent call within 5 minutes pays one-tenth of the input cost. Two reviewers are bundled out of the box.
-
-Drop your own notes into:
-
-```
-%LOCALAPPDATA%\ShadowPrompt\knowledge\<subject>\*.md
-```
-
-Then enable in `config.toml`:
-
-```toml
-[knowledge]
-enabled = true
-active_subjects = ["methods_of_research", "structure_of_programming_language"]
-cache_ttl = "5m"
-max_chars = 800000
-```
-
-Restart the daemon. Every query now gets your full subject reference for ~$0.03 instead of ~$0.30.
-
-See [`shadow_prompt_v2/docs/plans/2026-05-17-subject-context-injection.md`](shadow_prompt_v2/docs/plans/2026-05-17-subject-context-injection.md) for the full design.
-
----
-
-## Configuration
-
-Config lives at `%LOCALAPPDATA%\ShadowPrompt\config\config.toml`. Generated automatically on first run.
-
-```toml
-[openrouter]
-api_key = "sk-or-v1-..."
-model_id = "anthropic/claude-sonnet-4.6"
-
-[hotkeys]
-clipboard_query        = "ctrl+shift+v"
-clipboard_query_search = "ctrl+shift+alt+v"
-ocr_query              = "ctrl+shift+space"
-ocr_query_search       = "ctrl+shift+alt+space"
-forms_auto             = "ctrl+shift+9"
-forms_single           = "ctrl+shift+7"
-abort                  = "ctrl+shift+0"
-launch_debugger        = "ctrl+shift+i"
-hide_toggle            = "ctrl+shift+h"
-help_toggle            = "ctrl+shift+slash"
-restart_daemon         = "ctrl+shift+r"
-insta_delete           = "ctrl+shift+delete"
-panic_kill             = "ctrl+shift+f12"
-
-[visuals]
-indicator_corner = "top_right"
-indicator_size   = 4
-indicator_offset = [0, 0]
-overlay_corner   = "top_left"
-overlay_offset   = [0, 0]
-overlay_font_size = 11
-
-[knowledge]
-enabled = true
-active_subjects = ["methods_of_research", "structure_of_programming_language"]
-cache_ttl = "5m"
-max_chars = 800000
-```
-
-Full schema in [`shadow_prompt_v2/config/config.example.toml`](shadow_prompt_v2/config/config.example.toml).
-
----
-
-## Verify everything is working
-
-The daemon ships with a self-check probe:
-
-```powershell
-shadowprompt --probe
-```
-
-Runs five round-trips against the configured model and prints pass/fail for: text answering, vision, knowledge recency, multi-step reasoning, and whether web search is enabled.
-
-For Google Forms specifically, run the 15-scenario verification plan documented in [`shadow_prompt_v2/docs/forms-testing.md`](shadow_prompt_v2/docs/forms-testing.md).
-
----
-
-## Build from source
-
-Requires Rust 2021 (stable) and Windows 10/11.
-
-```powershell
-git clone https://github.com/hyowonbernabe/ShadowPrompt.git
-cd ShadowPrompt\shadow_prompt_v2
-cargo build --release
-```
-
-Binary at `target\release\shadowprompt.exe`. ~5.5 MB stripped.
-
-For development builds with verbose logging:
-
-```powershell
-cargo build --features debug
-.\target\debug\shadowprompt.exe --debug
-```
-
----
-
-## CLI flags
-
-| Flag | What it does |
+| Flag | Action |
 |---|---|
-| `--debug` | Run with stdout logging + console window |
-| `--init` | Write a fresh `config.toml` from the embedded template, then exit |
-| `--probe` | Run the capability self-check, then exit |
-| `--uninstall` | Spawn detached cleanup script, remove install dir, exit |
-| `--config <path>` | Override the config file path |
-| `--version` | Print version |
-
----
+| `--debug` | Write a log to `data\logs\` |
+| `--init` | Write a fresh `config.toml`, then exit |
+| `--probe` | Check the model chain, then exit |
+| `--uninstall` | Remove the install, then exit |
 
 ## Uninstall
 
+`Ctrl+Shift+Alt+X` twice, or:
+
 ```powershell
-irm https://raw.githubusercontent.com/hyowonbernabe/ShadowPrompt/main/shadow_prompt_v2/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/hyowonbernabe/ShadowPrompt/main/shadow_prompt_v3/uninstall.ps1 | iex
 ```
 
-Or from inside the daemon: tap `Ctrl+Shift+Delete` twice within 2 seconds.
+## Build from source
 
-Both methods:
-- Remove `%LOCALAPPDATA%\ShadowPrompt`
-- Remove the install dir from your user PATH
-- Wipe the temp Chrome debug profile
+Rust stable, Windows 10/11:
 
----
-
-## Project layout
-
-```
-ShadowPrompt/
-├── README.md                          ← you are here
-├── LICENSE                            ← Apache 2.0
-├── shadow_prompt_v2/                  ← active codebase
-│   ├── Cargo.toml
-│   ├── src/
-│   ├── config/config.example.toml
-│   ├── knowledge/                     ← bundled reviewer markdown
-│   ├── install.ps1
-│   ├── uninstall.ps1
-│   └── docs/                          ← architecture, agents, roadmap, testing
-└── shadow_prompt/                     ← legacy v1 (archived, do not modify)
+```powershell
+git clone https://github.com/hyowonbernabe/ShadowPrompt.git
+cd ShadowPrompt\shadow_prompt_v3
+cargo build --release
 ```
 
----
+`--features admin` builds the elevated variant.
 
-## Documentation
+## Limitations
 
-- [Roadmap](shadow_prompt_v2/docs/roadmap.md) — feature-by-feature build plan, M0–M8
-- [Architecture](shadow_prompt_v2/docs/architecture.md) — runtime topology, module boundaries, concurrency
-- [Agents](shadow_prompt_v2/docs/agents.md) — LLM transport, system prompts, conversation model
-- [Features](shadow_prompt_v2/docs/features.md) — full feature spec
-- [Forms testing plan](shadow_prompt_v2/docs/forms-testing.md) — 15 verification scenarios
-- [Context injection design](shadow_prompt_v2/docs/plans/2026-05-17-subject-context-injection.md) — knowledge caching plan
-
----
-
-## Known limitations
-
-- Windows only. Linux/macOS are out of scope; the Win32 layered-window pixel indicator is core to the discretion story.
-- Forms automation needs a Chrome window launched via `Ctrl+Shift+I`. Cannot attach to your everyday Chrome session.
-- Custom JS date pickers in Google Forms are not yet supported (standard `<input type="date">` works).
-- File-upload questions in Google Forms are skipped.
-- The daemon never clicks Submit. You must click manually on the final Forms page.
-- Anti-cheat / DRM-protected screens may capture as black via GDI.
-
----
+- Windows only.
+- Forms need the Chrome window from `Ctrl+Shift+Alt+B`; it can't attach to your everyday Chrome.
+- Hotkeys don't reach windows running as administrator unless you use the admin build.
+- The model only knows what it can see. Save cut-off context with `A`.
 
 ## License
 
-[Apache 2.0](LICENSE). Use at your own risk; this is research / personal-productivity tooling, not a sanctioned tool for any institution's evaluation.
+[Apache 2.0](LICENSE). Use at your own risk.
