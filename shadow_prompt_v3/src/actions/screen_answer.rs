@@ -34,7 +34,7 @@ const TRACK_LIFETIME: Duration = Duration::from_secs(600);
 const OVERLAY_HIDE_SETTLE: Duration = Duration::from_millis(60);
 
 const DELIVERY: &str = "DELIVERY (screen answer mode)
-You are shown one screenshot per monitor of the user's screen, labelled with its monitor number and image size. Find the question(s) visible on screen and answer them.
+You are shown one screenshot per monitor of the user's screen, labelled with its monitor number and image size. Find the question(s) visible on screen and answer them. Check every monitor: questions can be on any of them, and answer the ones on every monitor, not just the first.
 
 For every control the user should click or fill, call the `mark` tool once: the monitor number and the x,y pixel position (in that monitor's image) of the exact spot to click — the centre of the radio button, checkbox, grid cell, or the input box. Also give anchor_x, anchor_y: a point on nearby text that will NOT change when the user clicks or types (the option's label text for a choice; the question text just above an input box). Multiple correct options, checkbox sets, and grid/matrix rows each get their own mark. Be precise; a wrong mark is worse than none.
 
