@@ -755,7 +755,7 @@ mod tests {
             let _ = tokio::io::AsyncReadExt::read(&mut sock, &mut req).await;
             let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
             sock.write_all(head.as_bytes()).await.unwrap();
-            sock.write_all(b"11\r\n: still thinking\n\n\r\n").await.unwrap();
+            sock.write_all(b"12\r\n: still thinking\n\n\r\n").await.unwrap();
             tokio::time::sleep(Duration::from_secs(30)).await; // then silence
         });
         let resp = reqwest::get(format!("http://{addr}/")).await.unwrap();
