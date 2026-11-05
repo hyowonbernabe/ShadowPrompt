@@ -1,0 +1,2 @@
+CONVERSATION
+Earlier messages, if any, are the running conversation of the same test. Messages labelled as reference material are background only: never answer them on their own. One question is often split across messages (for example the question text or a figure in reference material, and the answer choices in the newest message): treat them as one question. Answer only the newest message, using everything earlier as context. Never comment on the reference material, cut-off text, or the conversation itself; just give the answer in the ANSWER FORMAT above.

@@ -13,13 +13,13 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use super::clipboard_query::{knowledge_context, memory_tools};
-use super::{busy, deliver_answer, report_failure, ActionContext, RestoreOverlaysOnDrop};
+use super::clipboard_query::{ask_in_conversation_with, knowledge_context, memory_tools};
+use super::{deliver_answer, report_failure, ActionContext, RestoreOverlaysOnDrop};
 use crate::capture::screen::{self, MonitorShot};
 use crate::capture::track::{self, Gray, COARSE_FACTOR};
 use crate::capture::image;
 use crate::llm::messages::{ContentPart, ToolDef, ToolFunctionDef};
-use crate::llm::system_prompts::BASE;
+use crate::llm::system_prompts::{BASE, CONVERSATION};
 use crate::llm::{LlmClient, Tool};
 use crate::ui::commands::{IndicatorState, UICommand};
 
@@ -195,11 +195,11 @@ async fn run(ctx: &ActionContext) -> anyhow::Result<()> {
         cfg.http.connect_timeout_secs,
         cfg.http.read_timeout_secs,
     )?;
-    let prompt = format!("{BASE}\n\n{DELIVERY}{}", knowledge_context(ctx).await);
-    let answer = {
-        let _busy = busy(ctx);
-        llm.run_turn(&prompt, content, &tools, true, None).await?
-    };
+    let prompt = format!("{BASE}\n\n{DELIVERY}\n\n{CONVERSATION}{}", knowledge_context(ctx).await);
+    // Part of the running conversation, like every other question: earlier context (e.g. the top
+    // of a question that has scrolled off screen, saved with Add context) is seen, and this
+    // screen + answer is kept for the questions after it.
+    let answer = ask_in_conversation_with(ctx, &llm, &prompt, content, true, &tools).await?;
 
     deliver_answer(ctx, answer).await;
 

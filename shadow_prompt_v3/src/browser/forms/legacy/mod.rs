@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use chromiumoxide::Page;
 
-use crate::llm::messages::{ContentPart, ImageUrl};
+use crate::llm::messages::{ContentPart, ImageUrl, Message};
 use crate::llm::system_prompts::forms_legacy_prompt;
 use crate::llm::{LlmClient, Tool};
 
@@ -36,6 +36,9 @@ pub async fn execute_legacy_form_flow(
     llm: Arc<LlmClient>,
     tools: Vec<Arc<dyn Tool>>,
     knowledge_context: String,
+    // The running conversation (read-only: pages aren't added to it — one long form would push
+    // everything else out). Whatever was saved with Add context reaches every page.
+    conversation: (Vec<Message>, bool),
     mode: FormsMode,
 ) -> anyhow::Result<()> {
     let browser = crate::browser::debugger::connect().await?;
@@ -93,7 +96,16 @@ pub async fn execute_legacy_form_flow(
                 user_content.insert(0, ContentPart::text(prior_pages_context.clone()));
             }
 
-            let answer = llm.run_turn(&(forms_legacy_prompt() + &knowledge_context), user_content, &tools, has_image, None).await?;
+            let answer = llm
+                .run_turn_with_history(
+                    &(forms_legacy_prompt() + &knowledge_context),
+                    conversation.0.clone(),
+                    user_content,
+                    &tools,
+                    has_image || conversation.1,
+                    None,
+                )
+                .await?;
             let answers = parse_answers(&answer);
             let inject_js = injector::build_injector_js(&answers);
             page.evaluate(inject_js).await.map_err(|e| anyhow::anyhow!("injecting Forms answers: {e}"))?;

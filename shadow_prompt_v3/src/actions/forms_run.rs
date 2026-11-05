@@ -22,7 +22,7 @@ pub async fn execute(ctx: ActionContext, mode: Mode) -> anyhow::Result<()> {
     // Wired here: on while the flow is actively running; `Done` (green) on success, briefly, then
     // ui/manager.rs auto-hides it; `Failed` (red) on error, same as `forms_run_legacy.rs`.
     let _ = ctx.ui_tx.send(UICommand::SetFormIndicator(FormIndicatorState::Running));
-    let result = execute_form_flow(ctx.llm.clone(), forms_mode, ctx.config.forms.max_pages).await;
+    let result = execute_form_flow(ctx.llm.clone(), forms_mode, ctx.config.forms.max_pages, super::conversation_context(&ctx)).await;
     let end_state = if result.is_ok() { FormIndicatorState::Done } else { FormIndicatorState::Failed };
     let _ = ctx.ui_tx.send(UICommand::SetFormIndicator(end_state));
     result

@@ -32,7 +32,13 @@ pub enum FormsMode {
     AnswerAll,
 }
 
-pub async fn execute_form_flow(llm: Arc<LlmClient>, mode: FormsMode, max_pages: u32) -> anyhow::Result<()> {
+pub async fn execute_form_flow(
+    llm: Arc<LlmClient>,
+    mode: FormsMode,
+    max_pages: u32,
+    // The running conversation, read-only (see the legacy engine).
+    conversation: (Vec<Message>, bool),
+) -> anyhow::Result<()> {
     let browser = crate::browser::debugger::connect().await?;
     let (form_url, source_page) = find_active_forms_url(&browser).await?;
     let page = tab_lifecycle::open_forms_tab(&browser, &source_page, &form_url).await?;
@@ -82,7 +88,14 @@ pub async fn execute_form_flow(llm: Arc<LlmClient>, mode: FormsMode, max_pages: 
                 history.push(Message::User { content: user_content.clone() });
 
                 let answer = llm
-                    .run_turn(&forms_prompt(), user_content, &tools, !content_images(&content).is_empty(), None)
+                    .run_turn_with_history(
+                        &forms_prompt(),
+                        conversation.0.clone(),
+                        user_content,
+                        &tools,
+                        !content_images(&content).is_empty() || conversation.1,
+                        None,
+                    )
                     .await?;
                 history.push(Message::assistant_text(answer));
             }
@@ -128,7 +141,7 @@ pub async fn execute_form_flow(llm: Arc<LlmClient>, mode: FormsMode, max_pages: 
                     // carry no image of their own (design doc §7.3/§8's vision-capability
                     // filter) — not just `!content_images(&content).is_empty()`, which only
                     // reflects the page's own extracted images.
-                    let answer = llm.run_turn(&forms_prompt(), user_content, &tools, true, None).await?;
+                    let answer = llm.run_turn_with_history(&forms_prompt(), conversation.0.clone(), user_content, &tools, true, None).await?;
                     history.push(Message::assistant_text(answer.clone()));
 
                     prior_pages_context.push_str(&format!(

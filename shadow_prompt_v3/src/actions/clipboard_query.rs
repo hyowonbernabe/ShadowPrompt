@@ -65,14 +65,27 @@ pub async fn ask_in_conversation(
     content_has_image: bool,
     tools: &[Arc<dyn Tool>],
 ) -> anyhow::Result<String> {
+    let system = system_prompt(ctx).await;
+    ask_in_conversation_with(ctx, &ctx.llm, &system, content, content_has_image, tools).await
+}
+
+/// `ask_in_conversation` with a given client and system prompt (Screen Answer has its own
+/// Claude-only chain and delivery prompt, but the same conversation).
+pub async fn ask_in_conversation_with(
+    ctx: &ActionContext,
+    llm: &crate::llm::LlmClient,
+    system: &str,
+    content: Vec<ContentPart>,
+    content_has_image: bool,
+    tools: &[Arc<dyn Tool>],
+) -> anyhow::Result<String> {
     let (history, history_has_image, position) = {
         let c = ctx.conversation.lock().unwrap();
         (c.to_messages(), c.has_image(), c.len())
     };
     let _busy = busy(ctx);
-    let answer = ctx
-        .llm
-        .run_turn_with_history(&system_prompt(ctx).await, history, content.clone(), tools, content_has_image || history_has_image, None)
+    let answer = llm
+        .run_turn_with_history(system, history, content.clone(), tools, content_has_image || history_has_image, None)
         .await?;
     // Stored where the snapshot ended, so context added while this was in flight stays after
     // it — the history matches what the model actually saw.

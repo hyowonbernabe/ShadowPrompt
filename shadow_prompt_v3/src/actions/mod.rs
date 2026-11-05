@@ -3,6 +3,13 @@
 // family doesn't cancel the other. Clipboard and Screenshot Query still share one slot with each
 // other (cancel-and-replace, same as v2).
 
+/// The running conversation as model messages, plus whether it holds any screenshot (so the
+/// model chain is kept vision-capable). Rule: everything sent to the model carries this.
+pub fn conversation_context(ctx: &ActionContext) -> (Vec<crate::llm::messages::Message>, bool) {
+    let c = ctx.conversation.lock().unwrap();
+    (c.to_messages(), c.has_image())
+}
+
 pub mod abort_active;
 pub mod add_context;
 pub mod clipboard_query;
