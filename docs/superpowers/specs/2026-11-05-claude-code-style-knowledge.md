@@ -36,7 +36,10 @@ reachable (unchanged). Every result stays capped at `max_doc_bytes` (100 KB ≈ 
 Deliberate deviations (builder's calls):
 - Doc names carry a `local/` or `cloud/` root. Glob/Grep patterns and paths match either from the
   top or from inside either root (`biology/*.md` finds both copies), so the roots never get in
-  the way. Read also accepts a name without its root when that's unambiguous.
+  the way. A pattern with no `/` (`*.md`) matches the bare file name at any depth, as ripgrep's
+  globs do. Read also accepts a name without its root when that's unambiguous.
+- Loosely typed tool arguments (`"true"`, `"10"`, `10.0`, `-1`) are accepted rather than
+  rejected, and a pattern that isn't valid regex is searched as plain text with a note saying so.
 - Grep is case-insensitive by default (`-i: false` makes it exact). Claude Code's isn't, but
   study notes are prose, where a missed capital silently loses the answer.
 - Grep output lines are cut at 500 chars, Read lines at 2000, so one giant line can't flood
@@ -66,3 +69,11 @@ prefix only changes when a doc actually changes.
 
 ## Not changed
 Fetching, background refresh, dedup and hosting (`2026-11-05-cloud-knowledge-design.md`).
+
+## Measured (2026-11-05, owner's 4 course docs + test cloud docs, live via the hotkey)
+- Sonnet 5.5: 1.6–4.4 s per answer, all correct. The heading index sent the model straight to a
+  single `Read` at the right offset (one tool round). Cache read ~8.2k tokens from the second
+  request on. Before this change: ~9 s with 2–3 search rounds.
+- Gemini 3.8 Flash backup: 4.5–8.2 s, all correct (was ~14 s reading whole docs). Its ~3.5k-token
+  prompt is below Gemini's caching minimum, so no cache hits there.
+- Free fallback models accept the system-part `cache_control` (tested each one).
