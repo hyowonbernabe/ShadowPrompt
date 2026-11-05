@@ -1,11 +1,51 @@
 // GDI bitmap capture of a screen region, for Screenshot Query. `unsafe` confined to this file's
 // Win32/GDI calls only, per project convention.
 
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject,
-    GetDC, ReleaseDC, SelectObject, SRCCOPY, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+    EnumDisplayMonitors, GetDC, GetMonitorInfoW, ReleaseDC, SelectObject, BITMAPINFO,
+    BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HDC, HMONITOR, MONITORINFO, SRCCOPY,
 };
+
+/// One monitor's capture. `left`/`top` are virtual-screen coordinates (can be negative for a
+/// monitor left of / above the primary); physical pixels, since the process is per-monitor-DPI
+/// aware (lib.rs).
+pub struct MonitorShot {
+    pub left: i32,
+    pub top: i32,
+    pub width: i32,
+    pub height: i32,
+    pub rgba: Vec<u8>,
+}
+
+/// Captures every attached monitor separately, in `EnumDisplayMonitors` order.
+pub fn capture_monitors() -> anyhow::Result<Vec<MonitorShot>> {
+    monitor_rects()
+        .into_iter()
+        .map(|r| {
+            let (w, h) = (r.right - r.left, r.bottom - r.top);
+            let rgba = unsafe { capture_region_raw(r.left, r.top, w, h)? };
+            Ok(MonitorShot { left: r.left, top: r.top, width: w, height: h, rgba })
+        })
+        .collect()
+}
+
+fn monitor_rects() -> Vec<RECT> {
+    unsafe extern "system" fn cb(hmon: HMONITOR, _: HDC, _: *mut RECT, data: LPARAM) -> BOOL {
+        let out = &mut *(data.0 as *mut Vec<RECT>);
+        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if GetMonitorInfoW(hmon, &mut mi).as_bool() {
+            out.push(mi.rcMonitor);
+        }
+        BOOL(1)
+    }
+    let mut rects: Vec<RECT> = Vec::new();
+    unsafe {
+        let _ = EnumDisplayMonitors(HDC::default(), None, Some(cb), LPARAM(&mut rects as *mut _ as isize));
+    }
+    rects
+}
 
 /// Captures the given screen-space rectangle to a raw BGRA buffer, then encodes it to PNG bytes.
 pub fn capture_region(x: i32, y: i32, w: i32, h: i32) -> anyhow::Result<Vec<u8>> {

@@ -14,6 +14,37 @@ pub struct Config {
     pub forms: FormsConfig,
     #[serde(default)]
     pub knowledge: KnowledgeConfig,
+    #[serde(default)]
+    pub screen_answer: ScreenAnswerConfig,
+}
+
+/// Screen Answer (all-monitor capture -> Claude -> tracked dots). OpenRouter + Claude only.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ScreenAnswerConfig {
+    /// Own fallback chain, separate from `openrouter.models`; `switch_model` doesn't touch it.
+    #[serde(default = "default_screen_answer_models")]
+    pub models: Vec<String>,
+    /// Patch-match similarity (0..1) a dot needs to stay visible. Lower = follows more loosely,
+    /// higher = hides sooner.
+    #[serde(default = "default_match_threshold")]
+    pub match_threshold: f32,
+}
+
+impl Default for ScreenAnswerConfig {
+    fn default() -> Self {
+        Self { models: default_screen_answer_models(), match_threshold: default_match_threshold() }
+    }
+}
+
+fn default_screen_answer_models() -> Vec<String> {
+    vec![
+        "anthropic/claude-sonnet-5.5".to_string(),
+        "anthropic/claude-opus-5.5".to_string(),
+        "anthropic/claude-sonnet-5".to_string(),
+    ]
+}
+fn default_match_threshold() -> f32 {
+    0.9
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -79,6 +110,18 @@ pub struct HotkeysConfig {
     /// field existed.
     #[serde(default = "default_debug_open_tab")]
     pub debug_open_tab: String,
+    /// Screen Answer: capture all monitors, answer, draw dots. Clear-dots removes only the dots.
+    #[serde(default = "default_screen_answer")]
+    pub screen_answer: String,
+    #[serde(default = "default_clear_dots")]
+    pub clear_dots: String,
+}
+
+fn default_screen_answer() -> String {
+    "ctrl+shift+alt+w".to_string()
+}
+fn default_clear_dots() -> String {
+    "ctrl+shift+alt+d".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -110,6 +153,19 @@ pub struct VisualsConfig {
     /// Milliseconds per line advance in the crawl.
     #[serde(default = "default_crawl_ms_per_line")]
     pub crawl_ms_per_line: u64,
+
+    /// Screen Answer dots: colour and edge length in px. Pulses in alpha, never fully solid.
+    #[serde(default = "default_dot_color")]
+    pub dot_color: String,
+    #[serde(default = "default_dot_size")]
+    pub dot_size: u32,
+}
+
+fn default_dot_color() -> String {
+    "#FF0000".to_string()
+}
+fn default_dot_size() -> u32 {
+    3
 }
 
 fn default_crawl_trigger_lines() -> u32 {

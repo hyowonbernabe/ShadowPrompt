@@ -22,6 +22,8 @@ api_key = "sk-or-REPLACE-ME"
 [hotkeys]
 clipboard_query = "ctrl+shift+alt+v"
 screenshot_query = "ctrl+shift+alt+s"
+screen_answer = "ctrl+shift+alt+w"
+clear_dots = "ctrl+shift+alt+d"
 test_model = "ctrl+shift+alt+t"
 switch_model = "ctrl+shift+alt+m"
 # Conversation memory: store a screen region as reference for later questions (no answer), and
@@ -69,6 +71,8 @@ overlay_offset = [8, 8]
 overlay_font_size = 14
 crawl_trigger_lines = 2
 crawl_ms_per_line = 2000
+dot_color = "#FF0000"
+dot_size = 3
 
 [http]
 connect_timeout_secs = 10
@@ -78,6 +82,13 @@ read_timeout_secs = 60
 max_pages = 20
 max_images_per_request = 6
 max_image_long_edge_px = 1200
+
+# Screen Answer (screen_answer hotkey): OpenRouter + Claude models only. Own list, separate
+# from [openrouter].models. match_threshold = how similar (0..1) the page must still look for a
+# dot to keep following it while you scroll.
+[screen_answer]
+models = ["anthropic/claude-sonnet-5.5", "anthropic/claude-opus-5.5", "anthropic/claude-sonnet-5"]
+match_threshold = 0.9
 
 [knowledge]
 enabled = true

@@ -24,6 +24,9 @@ pub enum UICommand {
     /// `FLASH_NOTICE_MS`/`FLASH_TIMER_ID`), reverting the overlay to whatever it was showing
     /// before (the standing answer text, or empty) rather than sticking around indefinitely.
     FlashNotice(String),
+    /// Screen Answer dots: full set of dot centres in virtual-screen physical pixels. Replaces
+    /// whatever was shown; an empty vec hides them all. Sent repeatedly by the tracking loop.
+    SetDots(Vec<(i32, i32)>),
     Shutdown,
 }
 
