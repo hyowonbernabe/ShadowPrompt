@@ -11,7 +11,7 @@
 // app performs itself skip it (lifecycle::self_restart::RESUME_ENV).
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, Once};
+use std::sync::Once;
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
@@ -343,8 +343,6 @@ enum Done {
     /// Message, and the field it's about (shown under that field), if any.
     Fail(String, Option<i32>),
 }
-
-static DONE: Mutex<Option<Done>> = Mutex::new(None);
 
 // ---- window ---------------------------------------------------------------------------------------
 
@@ -987,6 +985,12 @@ fn on_action(d: &mut Dlg, id: i32) {
 }
 
 fn close(d: &mut Dlg) {
+    // Account screen: closing mid-request (Esc, Alt+F4, ×) could leave the server and
+    // config.toml disagreeing (e.g. deleted on the server, still saved locally). Wait it out.
+    // The launch dialog may still quit: the app exits and nothing half-done is kept.
+    if d.mode == Mode::Account && d.busy.is_some() {
+        return;
+    }
     match (d.mode, d.page) {
         (Mode::Launch, _) => finish(d, Some(LaunchChoice::Quit)),
         (Mode::Account, _) => finish(d, None),
@@ -999,11 +1003,15 @@ fn start(d: &mut Dlg, button: i32, job: Job, working: &'static str) {
     set_busy(d, Some((button, working)));
     let hwnd = d.hwnd.0 as isize;
     std::thread::spawn(move || {
-        let done = run_job(job);
-        *DONE.lock().unwrap() = Some(done);
-        // SAFETY: posting to a window owned by another thread is what PostMessage is for.
+        // The result travels inside the message itself, so it can only ever reach the window that
+        // started the job (a shared slot could hand a closed window's result to a new one).
+        let done = Box::into_raw(Box::new(run_job(job)));
+        // SAFETY: posting to a window owned by another thread is what PostMessage is for. If the
+        // window is already gone the message isn't queued, so the result is freed here instead.
         unsafe {
-            let _ = PostMessageW(HWND(hwnd as *mut _), WM_APP_DONE, WPARAM(0), LPARAM(0));
+            if PostMessageW(HWND(hwnd as *mut _), WM_APP_DONE, WPARAM(0), LPARAM(done as isize)).is_err() {
+                drop(Box::from_raw(done));
+            }
         }
     });
 }
@@ -1053,8 +1061,7 @@ fn run_job(job: Job) -> Done {
     r.unwrap_or_else(|e| Done::Fail(format!("{e}"), None))
 }
 
-fn on_done(d: &mut Dlg) {
-    let Some(done) = DONE.lock().unwrap().take() else { return };
+fn on_done(d: &mut Dlg, done: Done) {
     match done {
         Done::Fail(msg, field) => {
             set_busy(d, None);
@@ -1064,12 +1071,24 @@ fn on_done(d: &mut Dlg) {
             }
         }
         Done::Saved { code, key } => {
-            if let Err(e) = crate::config::load::save_account(&code, &key) {
-                log::warn!("account: couldn't save login to config.toml: {e}");
-            }
+            let saved = crate::config::load::save_account(&code, &key);
             let label = if d.page == Page::Signup { "Created" } else { "Logged in" };
             match d.mode {
-                Mode::Launch => succeed(d, label, After::Finish(LaunchChoice::Use { key, from_account: true })),
+                // Launch: the key is used straight from memory, so this run works either way;
+                // a failed save only means the next launch won't offer "Continue as".
+                Mode::Launch => {
+                    if let Err(e) = saved {
+                        log::warn!("account: couldn't save login to config.toml: {e}");
+                    }
+                    succeed(d, label, After::Finish(LaunchChoice::Use { key, from_account: true }))
+                }
+                // Account screen: the restart reads the key back from config.toml, so if saving
+                // failed, restarting would silently fall back to the old key. Say so and stay.
+                Mode::Account if saved.is_err() => {
+                    set_busy(d, None);
+                    let e = saved.unwrap_err();
+                    set_status(d, format!("Logged in, but config.toml couldn't be updated ({e}). Close it if it's open elsewhere and try again."), Tone::Error);
+                }
                 Mode::Account => {
                     set_status(d, "Restarting with your account's key…", Tone::Ok);
                     succeed(d, label, After::Restart(true));
@@ -1356,6 +1375,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
         if msg == WM_DESTROY {
             PostQuitMessage(0);
         }
+        if msg == WM_APP_DONE && lp.0 != 0 {
+            // A result for a window that's already closed: just free it.
+            drop(Box::from_raw(lp.0 as *mut Done));
+            return LRESULT(0);
+        }
         return DefWindowProcW(hwnd, msg, wp, lp);
     };
     match msg {
@@ -1448,7 +1472,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             LRESULT(0)
         }
         WM_APP_DONE => {
-            on_done(d);
+            // SAFETY: lp is the Box::into_raw from `start`'s worker, posted once to this window.
+            let done = *Box::from_raw(lp.0 as *mut Done);
+            on_done(d, done);
             LRESULT(0)
         }
         WM_CLOSE => {
