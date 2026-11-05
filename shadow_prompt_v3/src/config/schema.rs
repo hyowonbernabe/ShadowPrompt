@@ -22,20 +22,21 @@ pub struct OpenRouterConfig {
 
     /// Fallback chain, tried in order by OpenRouter's own `models` array — design doc §8.
     /// Default order: claude-sonnet-5.5 -> gemini-3.8-flash -> the three free models
-    /// ranked by actual uptime (nex last). `switch_model` (design doc §8/§10) swaps which of
+    /// (picked and live-tested 2026-11-05: two vision-capable, then the strongest text-only one;
+    /// free models get pulled from OpenRouter often, so re-check these when backups fail). `switch_model` (design doc §8/§10) swaps which of
     /// the first two entries is tried first at runtime; it does not remove either from the
     /// chain, both stay present, only their order changes.
     #[serde(default = "default_model_chain")]
     pub models: Vec<String>,
 }
 
-fn default_model_chain() -> Vec<String> {
+pub(crate) fn default_model_chain() -> Vec<String> {
     vec![
         "anthropic/claude-sonnet-5.5".to_string(),
         "google/gemini-3.8-flash".to_string(),
-        "inclusionai/ling-3.0-flash-sante:free".to_string(),
-        "inclusionai/ling-3.0-flash-fin:free".to_string(),
-        "nex-agi/nex-n2.5-mini:free".to_string(),
+        "nvidia/nemotron-3.5-super-vl:free".to_string(),
+        "dots-studio/dots-3-note-preview:free".to_string(),
+        "nvidia/nemotron-3-ultra-550b-a55b:free".to_string(),
     ]
 }
 

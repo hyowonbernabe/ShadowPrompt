@@ -190,7 +190,8 @@ impl LlmClient {
                 .ok_or_else(|| anyhow::anyhow!("no choices in response"))?;
 
             if choice.message.tool_calls.is_empty() {
-                let answer = choice.message.content.unwrap_or_default();
+                // Trimmed: some models (e.g. dots-3-note) pad replies with leading blank lines.
+                let answer = choice.message.content.unwrap_or_default().trim().to_string();
                 log::debug!("round {round}: final answer: {}", truncate_for_log(&answer));
                 return Ok(answer);
             }

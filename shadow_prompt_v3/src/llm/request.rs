@@ -141,7 +141,7 @@ mod tests {
     use super::*;
 
     fn body_for(first: &str) -> serde_json::Value {
-        let models = vec![first.to_string(), "nex-agi/nex-n2.5-mini:free".to_string()];
+        let models = vec![first.to_string(), "dots-studio/dots-3-note-preview:free".to_string()];
         serde_json::to_value(build(&models, &[], Vec::new(), "s")).unwrap()
     }
 

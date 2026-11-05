@@ -8,9 +8,9 @@ api_key = "sk-or-REPLACE-ME"
 # models = [
 #   "anthropic/claude-sonnet-5.5",
 #   "google/gemini-3.8-flash",
-#   "inclusionai/ling-3.0-flash-sante:free",
-#   "inclusionai/ling-3.0-flash-fin:free",
-#   "nex-agi/nex-n2.5-mini:free",
+#   "nvidia/nemotron-3.5-super-vl:free",
+#   "dots-studio/dots-3-note-preview:free",
+#   "nvidia/nemotron-3-ultra-550b-a55b:free",
 # ]
 
 # All combos include alt — plain ctrl+shift+<letter> collides with real shortcuts other apps

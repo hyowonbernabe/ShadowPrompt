@@ -4,25 +4,21 @@
 // model capabilities from a live catalog. A small hand-maintained struct is the right size.
 //
 // The one thing this table exists to prevent: silently sending an image to a model that can't
-// read one. Confirmed via live OpenRouter research (docs/OPENROUTER.md):
-//   - google/gemini-3.8-flash: text+image+video+file+audio input. Vision: yes.
+// read one. Checked against OpenRouter's live model list (input_modalities) on 2026-11-05:
 //   - anthropic/claude-sonnet-5.5: text+image+file input. Vision: yes.
-//   - nex-agi/nex-n2.5-mini:free: text+image input. Vision: yes.
-//   - inclusionai/ling-3.0-flash-fin:free: text-only. Vision: NO.
-//   - inclusionai/ling-3.0-flash-sante:free: text-only. Vision: NO.
+//   - google/gemini-3.8-flash: text+image+video+file+audio input. Vision: yes.
+//   - nvidia/nemotron-3.5-super-vl:free: Vision: yes.
+//   - dots-studio/dots-3-note-preview:free: Vision: yes.
+//   - nvidia/nemotron-3-ultra-550b-a55b:free: text-only. Vision: NO.
 
 pub fn supports_vision(model_id: &str) -> bool {
-    !matches!(
-        model_id,
-        "inclusionai/ling-3.0-flash-fin:free" | "inclusionai/ling-3.0-flash-sante:free"
-    )
+    !matches!(model_id, "nvidia/nemotron-3-ultra-550b-a55b:free")
 }
 
 /// Filters a model fallback chain down to vision-capable entries only. Call this before
-/// building any request whose initial content includes an image (Screenshot Query, or a Forms
-/// page with image questions) — never send the unfiltered chain when there's an image in the
-/// request, or a fallback landing on a text-only model either errors or silently drops the
-/// picture.
+/// building any request whose content (new message or history) includes an image — never send
+/// the unfiltered chain when there's an image in the request, or a fallback landing on a
+/// text-only model either errors or silently drops the picture.
 pub fn filter_for_vision(models: &[String]) -> Vec<String> {
     models.iter().filter(|m| supports_vision(m)).cloned().collect()
 }
@@ -32,34 +28,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ling_models_are_not_vision_capable() {
-        assert!(!supports_vision("inclusionai/ling-3.0-flash-fin:free"));
-        assert!(!supports_vision("inclusionai/ling-3.0-flash-sante:free"));
-    }
-
-    #[test]
-    fn the_other_three_are_vision_capable() {
-        assert!(supports_vision("google/gemini-3.8-flash"));
-        assert!(supports_vision("anthropic/claude-sonnet-5.5"));
-        assert!(supports_vision("nex-agi/nex-n2.5-mini:free"));
-    }
-
-    #[test]
     fn filtering_preserves_order_and_drops_text_only() {
-        let chain = vec![
-            "google/gemini-3.8-flash".to_string(),
-            "anthropic/claude-sonnet-5.5".to_string(),
-            "inclusionai/ling-3.0-flash-sante:free".to_string(),
-            "inclusionai/ling-3.0-flash-fin:free".to_string(),
-            "nex-agi/nex-n2.5-mini:free".to_string(),
-        ];
-        let filtered = filter_for_vision(&chain);
+        let chain: Vec<String> = crate::config::schema::default_model_chain();
         assert_eq!(
-            filtered,
+            filter_for_vision(&chain),
             vec![
-                "google/gemini-3.8-flash".to_string(),
                 "anthropic/claude-sonnet-5.5".to_string(),
-                "nex-agi/nex-n2.5-mini:free".to_string(),
+                "google/gemini-3.8-flash".to_string(),
+                "nvidia/nemotron-3.5-super-vl:free".to_string(),
+                "dots-studio/dots-3-note-preview:free".to_string(),
             ]
         );
     }
