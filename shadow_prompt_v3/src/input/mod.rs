@@ -16,7 +16,8 @@ use bindings::{build, insta_delete_combo, Binding};
 use parser::KeyCombo;
 use rdev::{listen, Button, Event, EventType, Key};
 use state_machine::{InstaDeleteState, Transition};
-use std::sync::Mutex;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
@@ -31,17 +32,28 @@ pub fn start(cfg: HotkeysConfig) -> anyhow::Result<UnboundedReceiver<InputEvent>
     let tx_listener = tx.clone();
     let tx_tick = tx.clone();
 
+    let state = Arc::new(ListenerState::new(bindings, insta, tx_listener));
+    let state_for_tick = state.clone();
+
     std::thread::Builder::new()
         .name("rdev-listener".into())
         .spawn(move || {
-            let state = ListenerState::new(bindings, insta, tx_listener);
-            let _ = listen(move |ev| state.on_event(ev));
+            // `listen` should block forever. If it ever returns (hook torn down, error), every
+            // hotkey would silently die — re-install it, with backoff and a fixed attempt cap.
+            for attempt in 1..=LISTEN_MAX_ATTEMPTS {
+                let s = state.clone();
+                let result = listen(move |ev| s.on_event(ev));
+                log::error!("keyboard hook stopped ({result:?}); reinstalling, attempt {attempt}/{LISTEN_MAX_ATTEMPTS}");
+                std::thread::sleep(Duration::from_millis(250 * (1 << attempt.min(6))));
+            }
+            log::error!("keyboard hook could not be kept alive; hotkeys are disabled until restart");
         })?;
 
     std::thread::Builder::new()
         .name("insta-tick".into())
         .spawn(move || loop {
             std::thread::sleep(Duration::from_millis(250));
+            state_for_tick.expire_stale_selection();
             if SHARED_INSTA
                 .lock()
                 .map(|mut s| s.tick())
@@ -57,6 +69,12 @@ pub fn start(cfg: HotkeysConfig) -> anyhow::Result<UnboundedReceiver<InputEvent>
 
 static SHARED_INSTA: Mutex<InstaDeleteState> = Mutex::new(InstaDeleteState::Idle);
 
+const LISTEN_MAX_ATTEMPTS: u32 = 10;
+
+/// An armed region selection nobody finishes is cancelled after this — otherwise an unrelated
+/// click-drag much later would silently capture and send a region.
+const SELECTION_TIMEOUT: Duration = Duration::from_secs(30);
+
 struct ListenerState {
     bindings: Vec<Binding>,
     insta: KeyCombo,
@@ -65,6 +83,12 @@ struct ListenerState {
     last_fire: Mutex<Option<(KeyCombo, Instant)>>,
     cursor: Mutex<(i32, i32)>,
     selecting: Mutex<bool>,
+    /// When the current selection was armed — see `SELECTION_TIMEOUT`.
+    armed_at: Mutex<Option<Instant>>,
+    /// Keys currently held. A press for a key already held is OS auto-repeat, never a new
+    /// press — without this, holding a combo re-fired it every debounce window, and holding the
+    /// insta-delete combo for half a second counted as its confirming second tap.
+    held: Mutex<HashSet<Key>>,
     /// Which hotkey armed the current selection — carried on the resulting `ScreenshotRegion`.
     purpose: Mutex<RegionPurpose>,
     p1: Mutex<Option<(i32, i32)>>,
@@ -102,6 +126,8 @@ impl ListenerState {
             last_fire: Mutex::new(None),
             cursor: Mutex::new((0, 0)),
             selecting: Mutex::new(false),
+            armed_at: Mutex::new(None),
+            held: Mutex::new(HashSet::new()),
             purpose: Mutex::new(RegionPurpose::Query),
             p1: Mutex::new(None),
             last_drag_send: Mutex::new(None),
@@ -146,7 +172,28 @@ impl ListenerState {
             // forever — the next unrelated click anywhere (a desktop icon, a link) would silently
             // become P2 and fire a capture nobody asked for. See `on_left_release`.
             EventType::ButtonRelease(Button::Left) => self.on_left_release(),
+            // Right-click is the natural "never mind" during a selection.
+            EventType::ButtonPress(Button::Right) => self.cancel_selection(),
             _ => {}
+        }
+    }
+
+    /// Cancels an armed selection, if any, and tells the UI.
+    fn cancel_selection(&self) {
+        let was_selecting = std::mem::replace(&mut *self.selecting.lock().unwrap(), false);
+        *self.p1.lock().unwrap() = None;
+        *self.armed_at.lock().unwrap() = None;
+        if was_selecting {
+            let _ = self.tx.send(InputEvent::ScreenshotCancel);
+        }
+    }
+
+    /// Called from the tick thread.
+    fn expire_stale_selection(&self) {
+        let stale = self.armed_at.lock().unwrap().is_some_and(|t| t.elapsed() > SELECTION_TIMEOUT);
+        if stale {
+            log::debug!("screenshot region: selection timed out");
+            self.cancel_selection();
         }
     }
 
@@ -169,6 +216,7 @@ impl ListenerState {
                 let h = (y1 - y2).abs();
                 *p1 = None;
                 *self.selecting.lock().unwrap() = false;
+                *self.armed_at.lock().unwrap() = None;
                 log::debug!("screenshot region: P2 at {:?}; rect {}x{} @ ({},{})", cur, w, h, x, y);
                 if w >= MIN_REGION_PX && h >= MIN_REGION_PX {
                     let _ = self.tx.send(InputEvent::ScreenshotRegion { x, y, w, h, purpose: *self.purpose.lock().unwrap() });
@@ -204,6 +252,7 @@ impl ListenerState {
         let y = y1.min(y2);
         *p1 = None;
         *self.selecting.lock().unwrap() = false;
+        *self.armed_at.lock().unwrap() = None;
         log::debug!("screenshot region (drag-release): rect {}x{} @ ({},{})", w, h, x, y);
         if w >= MIN_REGION_PX && h >= MIN_REGION_PX {
             let _ = self.tx.send(InputEvent::ScreenshotRegion { x, y, w, h, purpose: *self.purpose.lock().unwrap() });
@@ -213,6 +262,9 @@ impl ListenerState {
     }
 
     fn on_press(&self, k: Key) {
+        if !self.held.lock().unwrap().insert(k) {
+            return; // auto-repeat of a key already down
+        }
         if self.update_modifier(k, true) {
             return;
         }
@@ -227,7 +279,12 @@ impl ListenerState {
             return;
         }
 
-        let mods = *self.mods.lock().unwrap();
+        // Ask Windows for the real modifier state instead of trusting tracked press/release
+        // events: releases that happen on the secure desktop (Ctrl+Alt+Del, UAC, Win+L) or in
+        // an elevated window are never seen by the hook, which left a modifier "stuck" so plain
+        // keys matched hotkeys (or real hotkeys stopped matching). Re-syncing here heals it.
+        let mods = live_mods().unwrap_or(*self.mods.lock().unwrap());
+        *self.mods.lock().unwrap() = mods;
 
         if self.matches(&self.insta, k, mods) && self.debounce(&self.insta) {
             let trans = SHARED_INSTA.lock().unwrap().on_press();
@@ -258,6 +315,7 @@ impl ListenerState {
                         let was_selecting = *self.selecting.lock().unwrap();
                         *self.p1.lock().unwrap() = None;
                         *self.selecting.lock().unwrap() = true;
+                        *self.armed_at.lock().unwrap() = Some(Instant::now());
                         *self.purpose.lock().unwrap() = if matches!(event, InputEvent::AddContext) {
                             RegionPurpose::Context
                         } else {
@@ -285,6 +343,7 @@ impl ListenerState {
     }
 
     fn on_release(&self, k: Key) {
+        self.held.lock().unwrap().remove(&k);
         self.update_modifier(k, false);
     }
 
@@ -325,5 +384,69 @@ impl ListenerState {
         }
         *last = Some((c.clone(), now));
         true
+    }
+}
+
+/// The real, current modifier state from Windows, or None if it can't be read.
+#[cfg(windows)]
+fn live_mods() -> Option<Mods> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT};
+    // SAFETY: GetAsyncKeyState is a plain Win32 query with no pointers or preconditions.
+    let down = |vk: VIRTUAL_KEY| unsafe { GetAsyncKeyState(vk.0 as i32) } as u16 & 0x8000 != 0;
+    Some(Mods { ctrl: down(VK_CONTROL), shift: down(VK_SHIFT), alt: down(VK_MENU), win: down(VK_LWIN) || down(VK_RWIN) })
+}
+
+#[cfg(not(windows))]
+fn live_mods() -> Option<Mods> {
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state_with(combo: &str) -> (Arc<ListenerState>, UnboundedReceiver<InputEvent>) {
+        let (tx, rx) = unbounded_channel();
+        let bindings = vec![Binding { combo: parser::parse(combo).unwrap(), make_event: || InputEvent::HideToggle }];
+        let insta = parser::parse("f12").unwrap();
+        (Arc::new(ListenerState::new(bindings, insta, tx)), rx)
+    }
+
+    fn drain(rx: &mut UnboundedReceiver<InputEvent>) -> usize {
+        let mut n = 0;
+        while rx.try_recv().is_ok() {
+            n += 1;
+        }
+        n
+    }
+
+    #[test]
+    fn holding_a_key_fires_once_not_on_every_auto_repeat() {
+        let (s, mut rx) = state_with("f9");
+        for _ in 0..5 {
+            s.on_press(Key::F9); // first is real, rest are auto-repeat
+        }
+        assert_eq!(drain(&mut rx), 1);
+        s.on_release(Key::F9);
+        std::thread::sleep(Duration::from_millis(210)); // past the per-combo debounce
+        s.on_press(Key::F9);
+        assert_eq!(drain(&mut rx), 1, "a fresh press after release fires again");
+    }
+
+    #[test]
+    fn stale_selection_is_cancelled_and_right_click_cancels() {
+        let (s, mut rx) = state_with("f9");
+        *s.selecting.lock().unwrap() = true;
+        *s.armed_at.lock().unwrap() = Some(Instant::now() - SELECTION_TIMEOUT - Duration::from_secs(1));
+        s.expire_stale_selection();
+        assert!(!*s.selecting.lock().unwrap());
+        assert!(matches!(rx.try_recv(), Ok(InputEvent::ScreenshotCancel)));
+
+        *s.selecting.lock().unwrap() = true;
+        *s.armed_at.lock().unwrap() = Some(Instant::now());
+        s.expire_stale_selection();
+        assert!(*s.selecting.lock().unwrap(), "a fresh selection is left alone");
+        s.cancel_selection();
+        assert!(matches!(rx.try_recv(), Ok(InputEvent::ScreenshotCancel)));
     }
 }
