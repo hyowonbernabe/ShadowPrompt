@@ -1023,6 +1023,29 @@ fn start(d: &mut Dlg, button: i32, job: Job, working: &'static str) {
 }
 
 fn run_job(job: Job) -> Done {
+    let kind = match &job {
+        Job::Login(..) => "login",
+        Job::Signup(..) => "signup",
+        Job::ChangeKey(..) => "change_key",
+        Job::ChangeCode(..) => "change_code",
+        Job::Delete(..) => "delete",
+    };
+    let start = std::time::Instant::now();
+    let done = run_job_inner(job);
+    let result = match &done {
+        Done::Fail(msg, _) => msg.chars().take(200).collect::<String>(),
+        _ => "ok".to_string(),
+    };
+    match &done {
+        Done::Saved { code, .. } | Done::CodeChanged { code } => crate::analytics::set_account(code),
+        Done::Deleted => crate::analytics::set_account(""),
+        Done::KeyChanged { .. } | Done::Fail(..) => {}
+    }
+    crate::analytics::track("account", serde_json::json!({ "action": kind, "result": result, "ms": start.elapsed().as_millis() as u64 }));
+    done
+}
+
+fn run_job_inner(job: Job) -> Done {
     let bad_key = || Done::Fail("OpenRouter doesn't accept this key.".into(), Some(F_KEY));
     let taken = || Done::Fail("That code is taken. Pick another one.".into(), Some(F_CODE));
     let gone = || Done::Fail("This code no longer exists on the server. Log out and sign up again.".into(), None);

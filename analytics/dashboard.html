@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShadowPrompt Stats</title>
+<!-- Usage stats for ShadowPrompt. Design: docs/2026-11-06-analytics-design.md.
+     Open this file in a browser and enter the dashboard password (analytics/admin.secret). -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1115; --card: #171a21; --line: #262b36; --text: #e6e8ee; --muted: #8a92a6;
+    --accent: #6ea8fe; --good: #4cc38a; --bad: #f2555a; --warn: #f5a524;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 16px 24px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 2; }
+  header h1 { font-size: 18px; margin: 0 auto 0 0; }
+  input, select, button { background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font: inherit; }
+  button { cursor: pointer; background: var(--accent); color: #0b1020; border: 0; font-weight: 600; }
+  main { padding: 20px 24px 60px; max-width: 1400px; margin: 0 auto; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .tile .v { font-size: 26px; font-weight: 700; }
+  .tile .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0; }
+  .card h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .wide { grid-column: 1 / -1; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .scroll { max-height: 420px; overflow: auto; }
+  .ok { color: var(--good); } .bad { color: var(--bad); } .muted { color: var(--muted); }
+  #msg { padding: 40px; text-align: center; color: var(--muted); }
+  code { font-size: 12px; color: var(--muted); word-break: break-all; }
+  @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } header, main { padding-left: 16px; padding-right: 16px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>ShadowPrompt Stats</h1>
+  <input id="pw" type="password" placeholder="Dashboard password" autocomplete="current-password">
+  <select id="days">
+    <option value="1">Last 24 hours</option>
+    <option value="7">Last 7 days</option>
+    <option value="30" selected>Last 30 days</option>
+    <option value="90">Last 90 days</option>
+    <option value="3650">All time</option>
+  </select>
+  <label class="muted"><input id="dev" type="checkbox"> include dev builds</label>
+  <button id="go">Load</button>
+</header>
+<main>
+  <div id="msg">Enter the password and press Load.</div>
+  <div id="out" hidden>
+    <div class="tiles" id="tiles"></div>
+    <div class="grid">
+      <div class="card wide"><h2>Daily active installs</h2><canvas id="cDaily" height="90"></canvas></div>
+      <div class="card"><h2>Most used hotkeys</h2><canvas id="cHotkeys"></canvas></div>
+      <div class="card"><h2>GitHub downloads by release</h2><canvas id="cDownloads"></canvas></div>
+      <div class="card wide"><h2>Features: runs, success, speed</h2><div class="scroll"><table id="tFeatures"></table></div></div>
+      <div class="card wide"><h2>AI models</h2><div class="scroll"><table id="tModels"></table></div></div>
+      <div class="card wide"><h2>Top errors (fix these first)</h2><div class="scroll"><table id="tErrors"></table></div></div>
+      <div class="card"><h2>Login</h2><div class="scroll"><table id="tAccounts"></table></div></div>
+      <div class="card"><h2>New installs per day</h2><canvas id="cNew"></canvas></div>
+      <div class="card"><h2>Versions</h2><table id="tVersions"></table></div>
+      <div class="card"><h2>Countries</h2><table id="tCountries"></table></div>
+      <div class="card"><h2>Windows versions</h2><table id="tOs"></table></div>
+      <div class="card"><h2>Build</h2><table id="tBuilds"></table></div>
+      <div class="card wide"><h2>Most active installs</h2><div class="scroll"><table id="tInstalls"></table></div></div>
+      <div class="card wide"><h2>Release downloads</h2><div class="scroll"><table id="tReleases"></table></div></div>
+      <div class="card wide"><h2>Latest 100 events</h2><div class="scroll"><table id="tRecent"></table></div></div>
+    </div>
+  </div>
+</main>
+<script>
+const SUPABASE_URL = "https://ihvnbvxzuroogbcrzort.supabase.co";
+const SUPABASE_KEY = "sb_publishable_ULGuLKiHYumaEKGm6tY2Qw_DvYEBDIZ";
+const REPO = "hyowonbernabe/ShadowPrompt";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const num = (n) => (n == null ? "–" : Number(n).toLocaleString());
+const ms = (n) => (n == null ? "–" : n >= 1000 ? (n / 1000).toFixed(1) + " s" : Math.round(n) + " ms");
+const pct = (a, b) => (b ? Math.round((100 * a) / b) + "%" : "–");
+const when = (t) => (t ? new Date(t).toLocaleString() : "–");
+
+try { $("pw").value = localStorage.getItem("sp_pw") || ""; } catch {}
+$("go").onclick = load;
+$("pw").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
+
+Chart.defaults.color = "#8a92a6";
+Chart.defaults.borderColor = "#262b36";
+const charts = {};
+function chart(id, cfg) {
+  charts[id]?.destroy();
+  charts[id] = new Chart($(id), cfg);
+}
+
+function table(id, cols, rows) {
+  const head = "<tr>" + cols.map((c) => `<th class="${c.n ? "n" : ""}">${esc(c.h)}</th>`).join("") + "</tr>";
+  const body = rows.length
+    ? rows.map((r) => "<tr>" + cols.map((c) => `<td class="${c.n ? "n" : ""}">${c.html ? c.f(r) : esc(c.f(r))}</td>`).join("") + "</tr>").join("")
+    : `<tr><td class="muted" colspan="${cols.length}">Nothing yet</td></tr>`;
+  $(id).innerHTML = head + body;
+}
+
+function mapTable(id, obj, label) {
+  const rows = Object.entries(obj || {}).sort((a, b) => b[1] - a[1]);
+  table(id, [{ h: label, f: (r) => r[0] }, { h: "Installs", n: 1, f: (r) => num(r[1]) }], rows);
+}
+
+async function downloads() {
+  const res = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=100`);
+  if (!res.ok) throw new Error("GitHub API " + res.status);
+  return (await res.json()).map((r) => ({
+    tag: r.tag_name,
+    date: r.published_at,
+    total: r.assets.reduce((s, a) => s + a.download_count, 0),
+    assets: r.assets.map((a) => `${a.name}: ${a.download_count}`).join(", "),
+  }));
+}
+
+async function load() {
+  const pw = $("pw").value.trim();
+  if (!pw) return;
+  try { localStorage.setItem("sp_pw", pw); } catch {}
+  $("msg").hidden = false;
+  $("msg").textContent = "Loading…";
+  try {
+    const [statsRes, rel] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/rpc/sp_stats`, {
+        method: "POST",
+        headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ p_secret: pw, p_days: Number($("days").value), p_include_dev: $("dev").checked }),
+      }),
+      downloads().catch((e) => ({ error: e.message })),
+    ]);
+    if (!statsRes.ok) throw new Error("Stats server error " + statsRes.status + ": " + (await statsRes.text()));
+    const s = await statsRes.json();
+    if (!s) throw new Error("Wrong password.");
+    $("msg").hidden = true;
+    $("out").hidden = false;
+    render(s, rel);
+  } catch (e) {
+    $("out").hidden = true;
+    $("msg").hidden = false;
+    $("msg").textContent = e.message;
+  }
+}
+
+function render(s, rel) {
+  const t = s.totals;
+  const dl = Array.isArray(rel) ? rel.reduce((a, r) => a + r.total, 0) : null;
+  const tiles = [
+    ["GitHub downloads (all time)", num(dl)],
+    ["Installs (all time)", num(s.all_time_installs)],
+    ["Active installs", num(t.installs)],
+    ["Accounts used", num(t.accounts)],
+    ["Launches", num(t.launches)],
+    ["Closed at login", num(t.quit_at_login)],
+    ["Sessions", num(t.sessions)],
+    ["AI calls", num(t.model_calls)],
+    ["Tokens", num(t.tokens)],
+    ["Crashes", num(t.crashes)],
+  ];
+  $("tiles").innerHTML = tiles.map(([k, v]) => `<div class="tile"><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`).join("");
+
+  chart("cDaily", {
+    type: "line",
+    data: {
+      labels: s.daily.map((d) => d.day),
+      datasets: [
+        { label: "Installs", data: s.daily.map((d) => d.installs), borderColor: "#6ea8fe", tension: 0.3 },
+        { label: "Sessions", data: s.daily.map((d) => d.sessions), borderColor: "#4cc38a", tension: 0.3 },
+        { label: "AI calls", data: s.daily.map((d) => d.model_calls), borderColor: "#f5a524", tension: 0.3, yAxisID: "y2" },
+      ],
+    },
+    options: { scales: { y: { beginAtZero: true }, y2: { beginAtZero: true, position: "right", grid: { display: false } } } },
+  });
+  chart("cHotkeys", {
+    type: "bar",
+    data: { labels: s.hotkeys.map((h) => h.action), datasets: [{ label: "Uses", data: s.hotkeys.map((h) => h.uses), backgroundColor: "#6ea8fe" }] },
+    options: { indexAxis: "y", plugins: { legend: { display: false } } },
+  });
+  chart("cNew", {
+    type: "bar",
+    data: { labels: s.new_installs.map((d) => d.day), datasets: [{ label: "New installs", data: s.new_installs.map((d) => d.installs), backgroundColor: "#4cc38a" }] },
+    options: { plugins: { legend: { display: false } } },
+  });
+
+  if (Array.isArray(rel)) {
+    const r = [...rel].reverse();
+    chart("cDownloads", {
+      type: "bar",
+      data: { labels: r.map((x) => x.tag), datasets: [{ label: "Downloads", data: r.map((x) => x.total), backgroundColor: "#f5a524" }] },
+      options: { plugins: { legend: { display: false } } },
+    });
+    table("tReleases", [
+      { h: "Release", f: (x) => x.tag },
+      { h: "Published", f: (x) => when(x.date) },
+      { h: "Downloads", n: 1, f: (x) => num(x.total) },
+      { h: "Files", html: 1, f: (x) => `<code>${esc(x.assets)}</code>` },
+    ], rel);
+  } else {
+    $("tReleases").innerHTML = `<tr><td class="bad">${esc(rel.error)}</td></tr>`;
+  }
+
+  table("tFeatures", [
+    { h: "Feature", f: (r) => r.feature },
+    { h: "Runs", n: 1, f: (r) => num(r.runs) },
+    { h: "Worked", n: 1, html: 1, f: (r) => `<span class="ok">${num(r.ok)}</span> (${pct(r.ok, r.ok + r.failed)})` },
+    { h: "Failed", n: 1, html: 1, f: (r) => `<span class="${r.failed ? "bad" : ""}">${num(r.failed)}</span>` },
+    { h: "Cancelled", n: 1, f: (r) => num(r.cancelled) },
+    { h: "Avg time", n: 1, f: (r) => ms(r.avg_ms) },
+    { h: "Typical time", n: 1, f: (r) => ms(r.median_ms) },
+  ], s.features);
+  table("tModels", [
+    { h: "Model", f: (r) => r.model },
+    { h: "Calls", n: 1, f: (r) => num(r.calls) },
+    { h: "Worked", n: 1, f: (r) => pct(r.ok, r.calls) },
+    { h: "Avg time", n: 1, f: (r) => ms(r.avg_ms) },
+    { h: "Prompt tokens", n: 1, f: (r) => num(r.prompt_tokens) },
+    { h: "From cache", n: 1, f: (r) => num(r.cached_tokens) },
+    { h: "Answer tokens", n: 1, f: (r) => num(r.completion_tokens) },
+  ], s.models);
+  table("tErrors", [
+    { h: "Where", f: (r) => r.feature ? `${r.kind} · ${r.feature}` : r.kind },
+    { h: "Error", html: 1, f: (r) => `<code>${esc(r.error)}</code>` },
+    { h: "Times", n: 1, f: (r) => num(r.count) },
+    { h: "Installs hit", n: 1, f: (r) => num(r.installs) },
+    { h: "Last seen", f: (r) => when(r.last_seen) },
+  ], s.errors);
+  table("tAccounts", [
+    { h: "Action", f: (r) => r.action },
+    { h: "Result", html: 1, f: (r) => (r.ok ? '<span class="ok">worked</span>' : '<span class="bad">failed</span>') },
+    { h: "Times", n: 1, f: (r) => num(r.count) },
+  ], s.accounts.concat(Object.entries(s.key_source).map(([k, v]) => ({ action: "started with " + k + " key", ok: true, count: v }))));
+  mapTable("tVersions", s.versions, "Version");
+  mapTable("tCountries", s.countries, "Country");
+  mapTable("tOs", s.os, "Windows");
+  mapTable("tBuilds", s.builds, "Build");
+  table("tInstalls", [
+    { h: "Install", html: 1, f: (r) => `<code>${esc(r.install_id)}</code>` },
+    { h: "Country", f: (r) => r.country ?? "?" },
+    { h: "Version", f: (r) => r.version ?? "?" },
+    { h: "Days active", n: 1, f: (r) => num(r.active_days) },
+    { h: "Hotkeys", n: 1, f: (r) => num(r.hotkeys) },
+    { h: "Events", n: 1, f: (r) => num(r.events) },
+    { h: "Last seen", f: (r) => when(r.last_seen) },
+  ], s.top_installs);
+  table("tRecent", [
+    { h: "When", f: (r) => when(r.received_at) },
+    { h: "Event", f: (r) => r.name },
+    { h: "Install", html: 1, f: (r) => `<code>${esc(r.install_id)}</code>` },
+    { h: "Country", f: (r) => r.country ?? "?" },
+    { h: "Details", html: 1, f: (r) => `<code>${esc(JSON.stringify(r.props))}</code>` },
+  ], s.recent);
+}
+</script>
+</body>
+</html>

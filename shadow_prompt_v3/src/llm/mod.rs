@@ -377,6 +377,38 @@ impl LlmClient {
         tools: Vec<ServerOrFunctionTool>,
         on_delta: Option<DeltaSink<'_>>,
     ) -> anyhow::Result<Response> {
+        let start = std::time::Instant::now();
+        let has_tools = !tools.is_empty();
+        let r = self.call_chain(models, messages, tools, on_delta).await;
+        let mut props = serde_json::json!({
+            "ms": start.elapsed().as_millis() as u64,
+            "ok": r.is_ok(),
+            "lead_model": models.first(),
+            "messages": messages.len(),
+            "tools": has_tools,
+        });
+        match &r {
+            Ok(resp) => {
+                props["model"] = serde_json::json!(resp.model);
+                if let Some(u) = &resp.usage {
+                    props["prompt_tokens"] = serde_json::json!(u.prompt_tokens);
+                    props["completion_tokens"] = serde_json::json!(u.completion_tokens);
+                    props["cached_tokens"] = serde_json::json!(u.prompt_tokens_details.as_ref().map_or(0, |d| d.cached_tokens));
+                }
+            }
+            Err(e) => props["error"] = serde_json::json!(crate::analytics::error_kind(e)),
+        }
+        crate::analytics::track("llm_call", props);
+        r
+    }
+
+    async fn call_chain(
+        &self,
+        models: &[String],
+        messages: &[Message],
+        tools: Vec<ServerOrFunctionTool>,
+        on_delta: Option<DeltaSink<'_>>,
+    ) -> anyhow::Result<Response> {
         let chunks: Vec<&[String]> = models.chunks(Self::MAX_MODELS_PER_REQUEST).collect();
         let mut last_err: Option<anyhow::Error> = None;
         for (i, chunk) in chunks.iter().enumerate() {

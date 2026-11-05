@@ -79,5 +79,7 @@ pub fn install_panic_hook() {
         if let Some(loc) = info.location() {
             log::error!("  at {}:{}", loc.file(), loc.line());
         }
+        // Crash report: location only, bounded 1s wait, never on the input hook thread.
+        crate::analytics::report_crash(info.location().map(|l| format!("{}:{}", l.file(), l.line())));
     }));
 }

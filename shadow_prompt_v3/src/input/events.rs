@@ -57,3 +57,38 @@ pub enum InputEvent {
     /// Cargo feature (see `actions::debug_open_tab`).
     DebugOpenTab,
 }
+
+impl InputEvent {
+    /// Stable name for analytics. Exhaustive on purpose: a new hotkey won't compile until it's named.
+    pub fn name(&self) -> &'static str {
+        match self {
+            InputEvent::ClipboardQuery => "clipboard_query",
+            InputEvent::ScreenshotQuery => "screenshot_query_armed",
+            InputEvent::ScreenshotDragUpdate { .. } => "screenshot_drag",
+            InputEvent::ScreenshotRegion { purpose: RegionPurpose::Query, .. } => "screenshot_query",
+            InputEvent::ScreenshotRegion { purpose: RegionPurpose::Context, .. } => "add_context",
+            InputEvent::ScreenshotCancel => "screenshot_cancel",
+            InputEvent::TestModel => "test_model",
+            InputEvent::SwitchModel => "switch_model",
+            InputEvent::AddContext => "add_context_armed",
+            InputEvent::ResetConversation => "reset_conversation",
+            InputEvent::ScreenAnswer => "screen_answer",
+            InputEvent::ClearDots => "clear_dots",
+            InputEvent::Account => "account_screen",
+            InputEvent::LaunchDebugger => "launch_debugger",
+            InputEvent::FormsAnswerPage => "forms_answer_page",
+            InputEvent::FormsAnswerAll => "forms_answer_all",
+            InputEvent::FormsAnswerPageAxtree => "forms_answer_page_axtree",
+            InputEvent::FormsAnswerAllAxtree => "forms_answer_all_axtree",
+            InputEvent::Abort => "abort",
+            InputEvent::HideToggle => "hide_toggle",
+            InputEvent::HelpToggle => "help_toggle",
+            InputEvent::RestartDaemon => "restart",
+            InputEvent::InstaDeleteArmed => "insta_delete_armed",
+            InputEvent::InstaDeleteConfirmed => "insta_delete_confirmed",
+            InputEvent::InstaDeleteDisarmed => "insta_delete_disarmed",
+            InputEvent::PanicKill => "panic_kill",
+            InputEvent::DebugOpenTab => "debug_open_tab",
+        }
+    }
+}

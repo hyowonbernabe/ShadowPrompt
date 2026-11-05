@@ -63,9 +63,14 @@ pub struct ActionContext {
 }
 
 pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
+    // Drag updates fire on every mouse move; the finished region is tracked instead.
+    if !matches!(event, InputEvent::ScreenshotDragUpdate { .. }) {
+        crate::analytics::track("hotkey", serde_json::json!({ "action": event.name() }));
+    }
+    let name = event.name();
     match event {
         InputEvent::ClipboardQuery => {
-            spawn_exclusive(ctx.answer_task.clone(), ctx.clone(), |c| async move { clipboard_query::execute(c).await }).await;
+            spawn_exclusive(name, ctx.answer_task.clone(), ctx.clone(), |c| async move { clipboard_query::execute(c).await }).await;
         }
         InputEvent::ScreenshotQuery | InputEvent::AddContext => {
             let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Processing));
@@ -80,11 +85,16 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
             let _ = ctx.ui_tx.send(UICommand::HideDebugRect);
             match purpose {
                 RegionPurpose::Query => {
-                    spawn_exclusive(ctx.answer_task.clone(), ctx.clone(), move |c| async move { screenshot_query::execute(c, x, y, w, h).await }).await;
+                    spawn_exclusive(name, ctx.answer_task.clone(), ctx.clone(), move |c| async move { screenshot_query::execute(c, x, y, w, h).await }).await;
                 }
                 // Not in `answer_task`: adding context must never abort a question in flight.
                 RegionPurpose::Context => {
-                    tokio::spawn(add_context::execute(ctx.clone(), x, y, w, h));
+                    let c = ctx.clone();
+                    tokio::spawn(async move {
+                        let run = crate::analytics::run(name);
+                        add_context::execute(c, x, y, w, h).await;
+                        run.finish(&Ok::<(), anyhow::Error>(()));
+                    });
                 }
             }
         }
@@ -93,11 +103,11 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
             let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(idle_indicator(&ctx)));
         }
         InputEvent::TestModel => {
-            spawn_exclusive(ctx.answer_task.clone(), ctx.clone(), |c| async move { test_model::execute(c).await }).await;
+            spawn_exclusive(name, ctx.answer_task.clone(), ctx.clone(), |c| async move { test_model::execute(c).await }).await;
         }
         InputEvent::SwitchModel => switch_model::execute(&ctx),
         InputEvent::ScreenAnswer => {
-            spawn_exclusive(ctx.screen_task.clone(), ctx.clone(), |c| async move { screen_answer::execute(c).await }).await;
+            spawn_exclusive(name, ctx.screen_task.clone(), ctx.clone(), |c| async move { screen_answer::execute(c).await }).await;
         }
         InputEvent::ClearDots => {
             clear_dots(&ctx).await;
@@ -109,10 +119,10 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
         // over these two main binds. v3 new (AX-tree/fill_page loop, §7.3) moved to the
         // `*Axtree` binds below, parked but reachable, not deleted.
         InputEvent::FormsAnswerPage => {
-            spawn_exclusive(ctx.forms_task.clone(), ctx.clone(), |c| async move { forms_run_legacy::execute(c, forms_run_legacy::Mode::AnswerPage).await }).await;
+            spawn_exclusive(name, ctx.forms_task.clone(), ctx.clone(), |c| async move { forms_run_legacy::execute(c, forms_run_legacy::Mode::AnswerPage).await }).await;
         }
         InputEvent::FormsAnswerAll => {
-            spawn_exclusive(ctx.forms_task.clone(), ctx.clone(), |c| async move { forms_run_legacy::execute(c, forms_run_legacy::Mode::AnswerAll).await }).await;
+            spawn_exclusive(name, ctx.forms_task.clone(), ctx.clone(), |c| async move { forms_run_legacy::execute(c, forms_run_legacy::Mode::AnswerAll).await }).await;
         }
         // v3 new (AX-tree engine) is untested/not working as of 2026-09-21 — hidden from real
         // usage by gating it behind the `debug` feature, same convention as `debug_open_tab`.
@@ -120,11 +130,11 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
         // until v3 new is actually finished and re-enabled.
         InputEvent::FormsAnswerPageAxtree => {
             #[cfg(feature = "debug")]
-            spawn_exclusive(ctx.forms_task.clone(), ctx.clone(), |c| async move { forms_run::execute(c, forms_run::Mode::AnswerPage).await }).await;
+            spawn_exclusive(name, ctx.forms_task.clone(), ctx.clone(), |c| async move { forms_run::execute(c, forms_run::Mode::AnswerPage).await }).await;
         }
         InputEvent::FormsAnswerAllAxtree => {
             #[cfg(feature = "debug")]
-            spawn_exclusive(ctx.forms_task.clone(), ctx.clone(), |c| async move { forms_run::execute(c, forms_run::Mode::AnswerAll).await }).await;
+            spawn_exclusive(name, ctx.forms_task.clone(), ctx.clone(), |c| async move { forms_run::execute(c, forms_run::Mode::AnswerAll).await }).await;
         }
         InputEvent::LaunchDebugger => {
             if let Err(e) = launch_debugger::execute(&ctx) {
@@ -173,8 +183,10 @@ pub fn idle_indicator(ctx: &ActionContext) -> IndicatorState {
 /// Shows a failed job to the user: Error light plus a short reason on the overlay. The full
 /// error is logged by the caller (`spawn_exclusive`).
 pub fn report_failure(ctx: &ActionContext, e: &anyhow::Error) {
+    let reason = crate::llm::user_facing_error(e);
+    crate::analytics::track("error_shown", serde_json::json!({ "reason": reason }));
     let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Error));
-    let _ = ctx.ui_tx.send(UICommand::FlashNotice(crate::llm::user_facing_error(e).to_string()));
+    let _ = ctx.ui_tx.send(UICommand::FlashNotice(reason.to_string()));
 }
 
 /// Shows a finished answer: overlay first, then the clipboard copy. A clipboard locked by
@@ -230,7 +242,7 @@ pub async fn clear_dots(ctx: &ActionContext) {
     let _ = ctx.ui_tx.send(UICommand::SetDots(Vec::new()));
 }
 
-async fn spawn_exclusive<F, Fut>(slot: TaskSlot, ctx: ActionContext, action: F)
+async fn spawn_exclusive<F, Fut>(name: &'static str, slot: TaskSlot, ctx: ActionContext, action: F)
 where
     F: FnOnce(ActionContext) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
@@ -240,7 +252,11 @@ where
         h.abort();
     }
     let handle = tokio::spawn(async move {
-        if let Err(e) = action(ctx).await {
+        // Dropped unfinished (aborted / replaced) = reported as cancelled.
+        let run = crate::analytics::run(name);
+        let r = action(ctx).await;
+        run.finish(&r);
+        if let Err(e) = r {
             log::error!("action error: {e}");
         }
     });

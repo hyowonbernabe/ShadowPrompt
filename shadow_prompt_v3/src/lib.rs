@@ -3,6 +3,7 @@
 
 pub mod account;
 pub mod actions;
+pub mod analytics;
 pub mod browser;
 pub mod capture;
 pub mod cli;
@@ -64,8 +65,14 @@ pub fn run() -> anyhow::Result<()> {
         return rt.block_on(probe::run(cfg));
     }
 
+    let resumed = std::env::var_os(lifecycle::self_restart::RESUME_ENV).is_some();
+    analytics::track("app_start", serde_json::json!({ "resumed": resumed, "dpi": dpi_mode, "models": cfg.openrouter.models }));
+
     if !choose_key(&mut cfg)? {
         log::info!("launch dialog closed; exiting");
+        analytics::track("launch_quit", serde_json::json!({}));
+        // Quiet exit only (nothing is waiting on us): a short, bounded send of what's queued.
+        analytics::flush_before_exit(std::time::Duration::from_secs(3));
         return Ok(());
     }
 
@@ -151,6 +158,10 @@ fn choose_key(cfg: &mut config::Config) -> anyhow::Result<bool> {
         }
     };
     std::env::set_var(KEY_SOURCE_ENV, if from_account { "account" } else { "config" });
+    if from_account {
+        analytics::set_account(&cfg.account.code);
+    }
+    analytics::track("launch_choice", serde_json::json!({ "key_source": if from_account { "account" } else { "config" }, "resumed": resumed }));
     log::info!("api key: {}", if from_account { "account login" } else { "config.toml" });
     Ok(true)
 }
