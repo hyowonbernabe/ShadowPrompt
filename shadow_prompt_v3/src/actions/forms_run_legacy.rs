@@ -24,7 +24,8 @@ pub async fn execute(ctx: ActionContext, mode: Mode) -> anyhow::Result<()> {
     let tools = super::clipboard_query::memory_tools(&ctx);
 
     let _ = ctx.ui_tx.send(UICommand::SetFormIndicator(FormIndicatorState::Running));
-    let result = execute_legacy_form_flow(ctx.llm.clone(), tools, forms_mode).await;
+    let knowledge = super::clipboard_query::knowledge_context(&ctx).await;
+    let result = execute_legacy_form_flow(ctx.llm.clone(), tools, knowledge, forms_mode).await;
     // `Failed` was defined and rendered (ui/manager.rs) but never actually sent — a failed run
     // used to clear to `Hidden` exactly like a successful one, giving no visible way to tell them
     // apart. Same convention as `clipboard_query.rs`'s `IndicatorState::Error`. `Done` (green,

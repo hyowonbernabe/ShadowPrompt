@@ -13,7 +13,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use super::clipboard_query::memory_tools;
+use super::clipboard_query::{knowledge_context, memory_tools};
 use super::{busy, deliver_answer, report_failure, ActionContext, RestoreOverlaysOnDrop};
 use crate::capture::screen::{self, MonitorShot};
 use crate::capture::track::{self, Gray, COARSE_FACTOR};
@@ -181,7 +181,7 @@ async fn run(ctx: &ActionContext) -> anyhow::Result<()> {
         cfg.http.connect_timeout_secs,
         cfg.http.read_timeout_secs,
     )?;
-    let prompt = format!("{BASE}\n\n{DELIVERY}");
+    let prompt = format!("{BASE}\n\n{DELIVERY}{}", knowledge_context(ctx).await);
     let answer = {
         let _busy = busy(ctx);
         llm.run_turn(&prompt, content, &tools, true, None).await?

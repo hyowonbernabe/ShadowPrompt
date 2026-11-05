@@ -207,7 +207,11 @@ impl LlmClient {
         on_delta: Option<DeltaSink<'_>>,
     ) -> anyhow::Result<String> {
         let mut messages = Vec::with_capacity(history.len() + 2);
-        messages.push(Message::system_text(system_prompt));
+        // Explicit 1h breakpoint on the system prompt (instructions + doc index + CLAUDE.md), so
+        // that stable prefix is a cache read on every question, not only within one conversation.
+        // Verified live 2026-11-05: without it Sonnet re-paid ~80k tokens per fresh question;
+        // Sonnet and Gemini both honour it. Prompts below a provider's minimum size just don't cache.
+        messages.push(Message::System { content: vec![ContentPart::text_cached(system_prompt, "1h")] });
         messages.extend(history);
         messages.push(Message::User { content: initial_content });
 

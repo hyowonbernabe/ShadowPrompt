@@ -13,6 +13,11 @@ use super::messages::{ContentPart, Message};
 
 /// Past this many images Anthropic applies a stricter per-image size limit to every image.
 pub const MAX_IMAGES: usize = 20;
+/// Once over the cap, drop down to `MAX_IMAGES - IMAGE_DROP_BATCH`, not just to the cap: every
+/// removal edits an early message, which breaks the cached prefix from there on. Dropping several
+/// at once means one cache rewrite per few screenshots instead of one per screenshot (Claude Code
+/// clears old context in batches for the same reason).
+pub const IMAGE_DROP_BATCH: usize = 5;
 pub const REMOVED_IMAGE_TEXT: &str = "(earlier screenshot removed)";
 /// Total base64 image bytes kept, well under OpenRouter/Anthropic request-size limits.
 pub const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
@@ -100,7 +105,10 @@ impl Conversation {
     /// screenshots go first; reference (context) screenshots only once no question image is
     /// left, since the reference picture is usually the oldest and the most important.
     fn enforce_image_cap(&mut self) {
-        while self.image_count() > MAX_IMAGES || self.image_bytes() > MAX_IMAGE_BYTES {
+        if self.image_count() <= MAX_IMAGES && self.image_bytes() <= MAX_IMAGE_BYTES {
+            return;
+        }
+        while self.image_count() > MAX_IMAGES - IMAGE_DROP_BATCH || self.image_bytes() > MAX_IMAGE_BYTES {
             let victim = [TurnKind::Question, TurnKind::Context].into_iter().find_map(|kind| {
                 self.turns.iter().enumerate().filter(|(_, t)| t.kind == kind).find_map(|(ti, t)| {
                     t.user.iter().position(|p| matches!(p, ContentPart::Image { .. })).map(|pi| (ti, pi))
@@ -164,7 +172,7 @@ mod tests {
             c.push_question(vec![img(&format!("q{i}"))], "a".into());
         }
         let urls = image_urls(&c);
-        assert_eq!(urls.len(), MAX_IMAGES);
+        assert_eq!(urls.len(), MAX_IMAGES - IMAGE_DROP_BATCH, "drops a batch, not one");
         assert!(urls[0].ends_with("ctx"), "context image must survive");
         assert!(!urls.iter().any(|u| u.ends_with(",q0")), "oldest question image must go first");
         // the removed image's turn keeps its place, with a note instead of the picture
@@ -178,8 +186,8 @@ mod tests {
             c.push_context(vec![img(&format!("c{i}"))]);
         }
         let urls = image_urls(&c);
-        assert_eq!(urls.len(), MAX_IMAGES);
-        assert!(urls[0].ends_with(",c1"));
+        assert_eq!(urls.len(), MAX_IMAGES - IMAGE_DROP_BATCH);
+        assert!(urls[0].ends_with(",c6"));
     }
 
     #[test]

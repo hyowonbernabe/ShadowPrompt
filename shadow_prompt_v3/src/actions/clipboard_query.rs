@@ -1,11 +1,11 @@
-// Clipboard Query — design doc §3. Text only. Tools: list_docs, read_doc (web_search is
+// Clipboard Query — design doc §3. Text only. Tools: Glob, Grep, Read over the docs (web_search is
 // attached inside LlmClient::run_turn as the server tool, not passed in here).
 
 use std::sync::Arc;
 
 use super::{busy, deliver_answer, report_failure, ActionContext};
 use crate::capture::clipboard;
-use crate::knowledge::{ListDocsTool, ReadDocTool, SearchDocsTool};
+use crate::knowledge::{GlobTool, GrepTool, ReadTool};
 use crate::llm::messages::ContentPart;
 use crate::llm::system_prompts::general_prompt;
 use crate::llm::Tool;
@@ -83,15 +83,19 @@ pub async fn ask_in_conversation(
     Ok(answer)
 }
 
-/// General prompt plus the knowledge doc listing, so the model can search without first
-/// spending a round trip on `list_docs`.
-/// Waits (≤2s, once) for a first cloud copy so the very first query after launch lists cloud docs too.
 async fn system_prompt(ctx: &ActionContext) -> String {
+    general_prompt() + &knowledge_context(ctx).await
+}
+
+/// The always-loaded knowledge block (instructions, CLAUDE.md, doc index) to append to any system
+/// prompt that comes with `memory_tools`. Waits (≤2s, once) for a first cloud copy so the very
+/// first query after launch indexes cloud docs too.
+pub async fn knowledge_context(ctx: &ActionContext) -> String {
     if !ctx.config.knowledge.enabled {
-        return general_prompt();
+        return String::new();
     }
     ctx.knowledge.wait_for_cloud().await;
-    general_prompt() + &ctx.knowledge.prompt_listing()
+    ctx.knowledge.prompt_context()
 }
 
 /// Shared by Clipboard/Screenshot Query — design doc §4: memory tools over the local knowledge/
@@ -102,9 +106,9 @@ pub fn memory_tools(ctx: &ActionContext) -> Vec<Arc<dyn Tool>> {
     }
     ctx.knowledge.refresh_in_background();
     vec![
-        Arc::new(ListDocsTool(ctx.knowledge.clone())),
-        Arc::new(SearchDocsTool(ctx.knowledge.clone())),
-        Arc::new(ReadDocTool(ctx.knowledge.clone())),
+        Arc::new(GlobTool(ctx.knowledge.clone())),
+        Arc::new(GrepTool(ctx.knowledge.clone())),
+        Arc::new(ReadTool(ctx.knowledge.clone())),
     ]
 }
 
@@ -247,36 +251,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn memory_tools_round_trips_list_then_read() {
+    async fn memory_tools_round_trips_glob_then_read() {
         let dir = TempKnowledgeDir::new("roundtrip");
         std::fs::write(dir.0.join("note.md"), "hello from a real knowledge doc").unwrap();
 
         let ctx = test_ctx(dir.0.clone(), true);
         let tools = memory_tools(&ctx);
-        assert_eq!(tools.len(), 3, "expect list_docs + search_docs + read_doc when knowledge is enabled");
+        assert_eq!(tools.len(), 3, "expect Glob + Grep + Read when knowledge is enabled");
 
-        let list_tool = tools.iter().find(|t| t.name() == "list_docs").expect("list_docs tool present");
-        let listed = list_tool.execute("{}").await.expect("list_docs should succeed");
-        assert_eq!(listed, "local/note.md (1 lines)");
+        let glob_tool = tools.iter().find(|t| t.name() == "Glob").expect("Glob tool present");
+        let listed = glob_tool.execute(r#"{"pattern":"**/*.md"}"#).await.expect("Glob should succeed");
+        assert_eq!(listed, "local/note.md");
 
-        let read_tool = tools.iter().find(|t| t.name() == "read_doc").expect("read_doc tool present");
+        let read_tool = tools.iter().find(|t| t.name() == "Read").expect("Read tool present");
         let content = read_tool
-            .execute(r#"{"name":"local/note.md"}"#)
+            .execute(r#"{"file_path":"local/note.md"}"#)
             .await
-            .expect("read_doc should succeed for a name list_docs just returned");
+            .expect("Read should succeed for a name Glob just returned");
         assert_eq!(content, "     1	hello from a real knowledge doc");
     }
 
     #[tokio::test]
-    async fn memory_tools_read_doc_rejects_sandbox_escape() {
+    async fn memory_tools_read_rejects_sandbox_escape() {
         let dir = TempKnowledgeDir::new("escape");
         std::fs::write(dir.0.join("note.md"), "in sandbox").unwrap();
 
         let ctx = test_ctx(dir.0.clone(), true);
         let tools = memory_tools(&ctx);
-        let read_tool = tools.iter().find(|t| t.name() == "read_doc").unwrap();
+        let read_tool = tools.iter().find(|t| t.name() == "Read").unwrap();
 
-        let escape_attempt = read_tool.execute(r#"{"name":"../outside.txt"}"#).await;
+        let escape_attempt = read_tool.execute(r#"{"file_path":"../outside.txt"}"#).await;
         assert!(escape_attempt.is_err(), "escaping the knowledge/ sandbox must be rejected");
     }
 

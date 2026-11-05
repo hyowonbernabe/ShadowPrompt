@@ -35,6 +35,7 @@ pub enum FormsMode {
 pub async fn execute_legacy_form_flow(
     llm: Arc<LlmClient>,
     tools: Vec<Arc<dyn Tool>>,
+    knowledge_context: String,
     mode: FormsMode,
 ) -> anyhow::Result<()> {
     let browser = crate::browser::debugger::connect().await?;
@@ -92,7 +93,7 @@ pub async fn execute_legacy_form_flow(
                 user_content.insert(0, ContentPart::text(prior_pages_context.clone()));
             }
 
-            let answer = llm.run_turn(&forms_legacy_prompt(), user_content, &tools, has_image, None).await?;
+            let answer = llm.run_turn(&(forms_legacy_prompt() + &knowledge_context), user_content, &tools, has_image, None).await?;
             let answers = parse_answers(&answer);
             let inject_js = injector::build_injector_js(&answers);
             page.evaluate(inject_js).await.map_err(|e| anyhow::anyhow!("injecting Forms answers: {e}"))?;
