@@ -42,7 +42,13 @@ impl Conversation {
     }
 
     pub fn push_question(&mut self, question: Vec<ContentPart>, answer: String) {
-        self.turns.push(Turn { kind: TurnKind::Question, user: question, answer: Some(answer) });
+        self.insert_question(self.turns.len(), question, answer);
+    }
+
+    /// Inserts a finished question turn at `position` (clamped to the end).
+    pub fn insert_question(&mut self, position: usize, question: Vec<ContentPart>, answer: String) {
+        let at = position.min(self.turns.len());
+        self.turns.insert(at, Turn { kind: TurnKind::Question, user: question, answer: Some(answer) });
         self.enforce_image_cap();
     }
 
@@ -161,6 +167,17 @@ mod tests {
         let urls = image_urls(&c);
         assert_eq!(urls.len(), MAX_IMAGES);
         assert!(urls[0].ends_with(",c1"));
+    }
+
+    #[test]
+    fn question_inserted_before_context_added_mid_flight() {
+        let mut c = Conversation::default();
+        let position = c.len();
+        c.push_context(vec![ContentPart::text("ctx")]);
+        c.insert_question(position, vec![ContentPart::text("q")], "a".into());
+        let json = serde_json::to_value(c.to_messages()).unwrap();
+        assert_eq!(json[0]["content"][0]["text"], "q");
+        assert_eq!(json[2]["content"][0]["text"], "ctx");
     }
 
     #[test]

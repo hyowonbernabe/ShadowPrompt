@@ -56,7 +56,7 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
         InputEvent::ScreenshotQuery | InputEvent::AddContext => {
             let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Processing));
         }
-        InputEvent::ResetConversation => reset_conversation::execute(&ctx),
+        InputEvent::ResetConversation => reset_conversation::execute(&ctx).await,
         // Real, confirmed gap fixed here: this is the only place a selection rectangle has ever
         // been shown, in any app — nothing sent UICommand::ShowDebugRect before this existed.
         InputEvent::ScreenshotDragUpdate { x, y, w, h } => {
@@ -76,7 +76,7 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
         }
         InputEvent::ScreenshotCancel => {
             let _ = ctx.ui_tx.send(UICommand::HideDebugRect);
-            let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(IndicatorState::Ready));
+            let _ = ctx.ui_tx.send(UICommand::SetIndicatorState(idle_indicator(&ctx)));
         }
         InputEvent::TestModel => {
             spawn_exclusive(ctx.answer_task.clone(), ctx.clone(), |c| async move { test_model::execute(c).await }).await;
@@ -139,6 +139,17 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
             }
         }
     }
+}
+
+/// The indicator state to fall back to when a side action (add context, a cancelled
+/// selection) finishes: still `Processing` if a question is being answered, else `Ready`.
+pub fn idle_indicator(ctx: &ActionContext) -> IndicatorState {
+    let running = ctx
+        .answer_task
+        .try_lock()
+        .map(|g| g.as_ref().is_some_and(|h| !h.is_finished()))
+        .unwrap_or(true); // slot busy being swapped = a query is starting
+    if running { IndicatorState::Processing } else { IndicatorState::Ready }
 }
 
 async fn spawn_exclusive<F, Fut>(slot: TaskSlot, ctx: ActionContext, action: F)

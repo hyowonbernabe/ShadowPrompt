@@ -47,15 +47,17 @@ pub async fn ask_in_conversation(
     content_has_image: bool,
     tools: &[Arc<dyn Tool>],
 ) -> anyhow::Result<String> {
-    let (history, history_has_image) = {
+    let (history, history_has_image, position) = {
         let c = ctx.conversation.lock().unwrap();
-        (c.to_messages(), c.has_image())
+        (c.to_messages(), c.has_image(), c.len())
     };
     let answer = ctx
         .llm
         .run_turn_with_history(&general_prompt(), history, content.clone(), tools, content_has_image || history_has_image, None)
         .await?;
-    ctx.conversation.lock().unwrap().push_question(content, answer.clone());
+    // Stored where the snapshot ended, so context added while this was in flight stays after
+    // it — the history matches what the model actually saw.
+    ctx.conversation.lock().unwrap().insert_question(position, content, answer.clone());
     Ok(answer)
 }
 
