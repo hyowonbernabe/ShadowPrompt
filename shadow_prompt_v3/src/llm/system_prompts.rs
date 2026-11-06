@@ -7,17 +7,20 @@ pub const DELIVERY_GENERAL: &str = include_str!("system_prompts/delivery_general
 /// conversation (screen answer and forms included), so they all need the same rule for it.
 pub const CONVERSATION: &str = include_str!("system_prompts/conversation.txt");
 pub const DELIVERY_FORMS: &str = include_str!("system_prompts/delivery_forms.txt");
+/// Directness reminder. Must be the very last thing in every prompt (after the knowledge block
+/// and MEMORY notes too), so nothing appended later can talk the model back into explaining.
+pub const FINAL_CHECK: &str = include_str!("system_prompts/final_check.txt");
 /// v3 legacy Forms (design doc §7.4) — same base, different delivery contract: one structured
 /// JSON answer map as plain text, not a `fill_page` tool call.
 pub const DELIVERY_FORMS_LEGACY: &str = include_str!("system_prompts/delivery_forms_legacy.txt");
 
 pub fn general_prompt() -> String {
-    format!("{BASE}\n\n{DELIVERY_GENERAL}\n{CONVERSATION}")
+    format!("{BASE}\n\n{DELIVERY_GENERAL}\n\n{CONVERSATION}")
 }
 
 /// v3 new (§7.3, parked/secondary) — delivers via the `fill_page` tool.
 pub fn forms_prompt() -> String {
-    format!("{BASE}\n\n{DELIVERY_FORMS}\n\n{CONVERSATION}")
+    format!("{BASE}\n\n{DELIVERY_FORMS}\n\n{CONVERSATION}{FINAL_CHECK}")
 }
 
 /// v3 legacy (§7.4, default/primary) — delivers as one structured JSON text answer.

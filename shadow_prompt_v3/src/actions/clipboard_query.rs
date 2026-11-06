@@ -7,7 +7,7 @@ use super::{busy, deliver_answer, report_failure, ActionContext};
 use crate::capture::clipboard;
 use crate::knowledge::{GlobTool, GrepTool, ReadTool};
 use crate::llm::messages::ContentPart;
-use crate::llm::system_prompts::general_prompt;
+use crate::llm::system_prompts::{general_prompt, FINAL_CHECK};
 use crate::llm::Tool;
 use crate::ui::commands::{IndicatorState, UICommand};
 
@@ -97,7 +97,7 @@ pub async fn ask_in_conversation_with(
 }
 
 async fn system_prompt(ctx: &ActionContext) -> String {
-    general_prompt() + &knowledge_context(ctx).await
+    general_prompt() + &knowledge_context(ctx).await + FINAL_CHECK
 }
 
 /// The always-loaded knowledge block (instructions, CLAUDE.md, doc index) to append to any system

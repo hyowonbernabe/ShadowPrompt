@@ -19,7 +19,7 @@ use crate::capture::screen::{self, MonitorShot};
 use crate::capture::track::{self, Gray, COARSE_FACTOR};
 use crate::capture::image;
 use crate::llm::messages::{ContentPart, ToolDef, ToolFunctionDef};
-use crate::llm::system_prompts::{BASE, CONVERSATION};
+use crate::llm::system_prompts::{BASE, CONVERSATION, FINAL_CHECK};
 use crate::llm::{LlmClient, Tool};
 use crate::ui::commands::{IndicatorState, UICommand};
 
@@ -50,7 +50,7 @@ For every control the user should click or fill, call the `mark` tool once: the 
 
 After marking, reply with the short answer text per the ANSWER FORMAT rules (for typed answers, the text to type). Do not mark anything for a question you are not answering.
 
-If you answered at least one question, silently skip any you can't read; say nothing about them. If you cannot answer any — the screen is black or blank (some apps block screenshots), no question is visible, or the question is cut off — do not call `mark`. Instead reply in one short plain sentence saying what you see and why you can't answer, e.g. \"I can't see a question, the screen is black (this app likely blocks screenshots).\" This overrides the never-abstain rule above.";
+For any question whose answer choices are visible, pick the most likely one even if part of it is cut off. Skip, without a word, any question you can't answer (cut off with no visible choices, missing figure). If you answered nothing — the screen is black or blank (some apps block screenshots) or no answerable question is visible — do not call `mark`. Instead reply in one short plain sentence saying what you see and why you can't answer, e.g. \"I can't see a question, the screen is black (this app likely blocks screenshots).\" This overrides the never-abstain rule and the no-side-notes rules above and below: when you answer nothing, this one sentence is the whole reply.";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Mark {
@@ -195,7 +195,7 @@ async fn run(ctx: &ActionContext) -> anyhow::Result<()> {
         cfg.http.connect_timeout_secs,
         cfg.http.read_timeout_secs,
     )?;
-    let prompt = format!("{BASE}\n\n{DELIVERY}\n\n{CONVERSATION}{}", knowledge_context(ctx).await);
+    let prompt = format!("{BASE}\n\n{DELIVERY}\n\n{CONVERSATION}{}{FINAL_CHECK}", knowledge_context(ctx).await);
     // Part of the running conversation, like every other question: earlier context (e.g. the top
     // of a question that has scrolled off screen, saved with Add context) is seen, and this
     // screen + answer is kept for the questions after it.

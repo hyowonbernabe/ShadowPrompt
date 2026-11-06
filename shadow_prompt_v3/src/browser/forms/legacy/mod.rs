@@ -22,7 +22,7 @@ use std::sync::Arc;
 use chromiumoxide::Page;
 
 use crate::llm::messages::{ContentPart, ImageUrl, Message};
-use crate::llm::system_prompts::forms_legacy_prompt;
+use crate::llm::system_prompts::{forms_legacy_prompt, FINAL_CHECK};
 use crate::llm::{LlmClient, Tool};
 
 use extractor::{ExtractedPage, Question, QuestionKind};
@@ -98,7 +98,7 @@ pub async fn execute_legacy_form_flow(
 
             let answer = llm
                 .run_turn_with_history(
-                    &(forms_legacy_prompt() + &knowledge_context),
+                    &(forms_legacy_prompt() + &knowledge_context + FINAL_CHECK),
                     conversation.0.clone(),
                     user_content,
                     &tools,
