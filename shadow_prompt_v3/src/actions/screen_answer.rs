@@ -50,7 +50,7 @@ For every control the user should click or fill, call the `mark` tool once: the 
 
 After marking, reply with the short answer text per the ANSWER FORMAT rules (for typed answers, the text to type). Do not mark anything for a question you are not answering.
 
-If you cannot answer — the screen is black or blank (some apps block screenshots), no question is visible, or the question is cut off — do not call `mark`. Instead reply in one short plain sentence saying what you see and why you can't answer, e.g. \"I can't see a question, the screen is black (this app likely blocks screenshots).\" This overrides the never-abstain rule above.";
+If you answered at least one question, silently skip any you can't read; say nothing about them. If you cannot answer any — the screen is black or blank (some apps block screenshots), no question is visible, or the question is cut off — do not call `mark`. Instead reply in one short plain sentence saying what you see and why you can't answer, e.g. \"I can't see a question, the screen is black (this app likely blocks screenshots).\" This overrides the never-abstain rule above.";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Mark {
