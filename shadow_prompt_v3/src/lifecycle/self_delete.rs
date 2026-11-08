@@ -29,6 +29,7 @@ use super::path_cleanup;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 pub fn execute() -> anyhow::Result<()> {
+    #[cfg(feature = "seb")]
     crate::seb::cleanup();
     let _ = clipboard::clear();
     // Chrome cleanup is a deliberate soft no-op, same reasoning v2 documented: we spawn Chrome

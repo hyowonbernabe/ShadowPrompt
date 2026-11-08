@@ -140,7 +140,9 @@ const I_CLOSE: char = '\u{E711}';
 /// Skull and crossbones (Segoe UI Symbol), shown in place of the app name.
 const SKULL: char = '\u{2620}';
 const I_ERROR: char = '\u{E783}';
+#[cfg(feature = "seb")]
 const I_SHIELD: char = '\u{E83D}';
+#[cfg(feature = "seb")]
 const I_UNDO: char = '\u{E7A7}';
 const I_SETTINGS: char = '\u{E713}';
 const NO_ICON: char = '\0';
@@ -260,7 +262,9 @@ const B_CLOSE: i32 = 112;
 const B_SAVE_KEY: i32 = 113;
 const B_SAVE_CODE: i32 = 114;
 const B_X: i32 = 115;
+#[cfg(feature = "seb")]
 const B_SEB_PATCH: i32 = 116;
+#[cfg(feature = "seb")]
 const B_SEB_RESET: i32 = 117;
 const B_SETTINGS: i32 = 118;
 // Field ids
@@ -497,9 +501,12 @@ fn page_spec(d: &Dlg) -> PageSpec {
             b.push((B_GO_LOGIN, "Log in with a code".to_string(), style, I_LOCK, false));
             b.push((B_GO_SIGNUP, "Sign up".to_string(), Style::Row, I_ADD_PERSON, false));
             b.push((B_SETTINGS, "Settings".into(), Style::Row, I_SETTINGS, false));
-            b.push((B_SEB_PATCH, "Patch SEB".to_string(), Style::Row, I_SHIELD, false));
-            if crate::seb::is_patched() {
-                b.push((B_SEB_RESET, "Reset SEB".to_string(), Style::Danger, I_UNDO, false));
+            #[cfg(feature = "seb")]
+            {
+                b.push((B_SEB_PATCH, "Patch SEB".to_string(), Style::Row, I_SHIELD, false));
+                if crate::seb::is_patched() {
+                    b.push((B_SEB_RESET, "Reset SEB".to_string(), Style::Danger, I_UNDO, false));
+                }
             }
             (SKULL.to_string(), String::new(), vec![], b)
         }
@@ -509,24 +516,31 @@ fn page_spec(d: &Dlg) -> PageSpec {
                 (B_GO_CHKEY, "Change API key".into(), Style::Row, I_KEY, false),
                 (B_GO_CHCODE, "Change code".into(), Style::Row, I_RENAME, false),
                 (B_LOGOUT, "Log out".into(), Style::Row, I_SIGN_OUT, false),
-                (B_SEB_PATCH, "Patch SEB".to_string(), Style::Row, I_SHIELD, false),
             ];
-            if crate::seb::is_patched() {
-                b.push((B_SEB_RESET, "Reset SEB".to_string(), Style::Danger, I_UNDO, false));
+            #[cfg(feature = "seb")]
+            {
+                b.push(( B_SEB_PATCH, "Patch SEB".to_string(), Style::Row, I_SHIELD, false));
+                if crate::seb::is_patched() {
+                    b.push((B_SEB_RESET, "Reset SEB".to_string(), Style::Danger, I_UNDO, false));
+                }
             }
             b.push((B_DELETE, "Delete account".into(), Style::Danger, I_DELETE, false));
             b.push((B_CLOSE, "Done".into(), Style::Primary, NO_ICON, true));
             ("Account".into(), format!("Logged in as {who}"), vec![], b)
         }
         (Mode::Account, Page::Home) => {
+            #[allow(unused_mut)]
             let mut b = vec![
                 (B_GO_LOGIN, "Log in with a code".into(), Style::Primary, I_LOCK, false),
                 (B_GO_SIGNUP, "Sign up".into(), Style::Row, I_ADD_PERSON, false),
                 (B_SETTINGS, "Settings".into(), Style::Row, I_SETTINGS, false),
-                (B_SEB_PATCH, "Patch SEB".to_string(), Style::Row, I_SHIELD, false),
             ];
-            if crate::seb::is_patched() {
-                b.push((B_SEB_RESET, "Reset SEB".to_string(), Style::Danger, I_UNDO, false));
+            #[cfg(feature = "seb")]
+            {
+                b.push((B_SEB_PATCH, "Patch SEB".to_string(), Style::Row, I_SHIELD, false));
+                if crate::seb::is_patched() {
+                    b.push((B_SEB_RESET, "Reset SEB".to_string(), Style::Danger, I_UNDO, false));
+                }
             }
             ("Account".into(), "Not logged in. Using the key in config.toml.".into(), vec![], b)
         }
@@ -946,6 +960,7 @@ fn on_action(d: &mut Dlg, id: i32) {
         B_GO_SIGNUP => go(d, Page::Signup),
         B_GO_CHKEY => go(d, Page::ChangeKey),
         B_GO_CHCODE => go(d, Page::ChangeCode),
+        #[cfg(feature = "seb")]
         B_SEB_PATCH => {
             match crate::seb::patch() {
                 Ok(msg) => {
@@ -955,6 +970,7 @@ fn on_action(d: &mut Dlg, id: i32) {
                 Err(e) => set_status(d, format!("Patch failed: {e}"), Tone::Error),
             }
         }
+        #[cfg(feature = "seb")]
         B_SEB_RESET => {
             match crate::seb::reset() {
                 Ok(msg) => {
@@ -1633,17 +1649,33 @@ mod tests {
 
     #[test]
     fn launch_home_offers_the_right_choices() {
+        #[cfg(feature = "seb")]
         let patched = crate::seb::is_patched();
-        let mut expect = vec![B_CONT_ACCOUNT, B_CONT_CONFIG, B_GO_LOGIN, B_GO_SIGNUP, B_SETTINGS, B_SEB_PATCH];
-        if patched { expect.push(B_SEB_RESET); }
+        #[allow(unused_mut)]
+        let mut expect = vec![B_CONT_ACCOUNT, B_CONT_CONFIG, B_GO_LOGIN, B_GO_SIGNUP, B_SETTINGS];
+        #[cfg(feature = "seb")]
+        {
+            expect.push(B_SEB_PATCH);
+            if patched { expect.push(B_SEB_RESET); }
+        }
         assert_eq!(ids(&dlg_for(Mode::Launch, Page::Home, true, "sk-or-v1-cfg")), expect);
 
-        let mut expect = vec![B_CONT_CONFIG, B_GO_LOGIN, B_GO_SIGNUP, B_SETTINGS, B_SEB_PATCH];
-        if patched { expect.push(B_SEB_RESET); }
+        #[allow(unused_mut)]
+        let mut expect = vec![B_CONT_CONFIG, B_GO_LOGIN, B_GO_SIGNUP, B_SETTINGS];
+        #[cfg(feature = "seb")]
+        {
+            expect.push(B_SEB_PATCH);
+            if patched { expect.push(B_SEB_RESET); }
+        }
         assert_eq!(ids(&dlg_for(Mode::Launch, Page::Home, false, "sk-or-v1-cfg")), expect);
 
-        let mut expect = vec![B_GO_LOGIN, B_GO_SIGNUP, B_SETTINGS, B_SEB_PATCH];
-        if patched { expect.push(B_SEB_RESET); }
+        #[allow(unused_mut)]
+        let mut expect = vec![B_GO_LOGIN, B_GO_SIGNUP, B_SETTINGS];
+        #[cfg(feature = "seb")]
+        {
+            expect.push(B_SEB_PATCH);
+            if patched { expect.push(B_SEB_RESET); }
+        }
         assert_eq!(ids(&dlg_for(Mode::Launch, Page::Home, false, "")), expect);
 
         let spec = page_spec(&dlg_for(Mode::Launch, Page::Home, true, ""));

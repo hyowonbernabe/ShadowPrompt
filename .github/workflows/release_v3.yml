@@ -27,13 +27,13 @@ jobs:
 
       - name: Build release (standard, no elevation)
         run: |
-          cargo build --release
+          cargo build --release --features seb
           Copy-Item target/release/shadowprompt.exe -Destination shadowprompt.exe
         shell: pwsh
 
       - name: Build release (admin)
         run: |
-          cargo build --release --features admin
+          cargo build --release --features seb,admin
           Copy-Item target/release/shadowprompt.exe -Destination shadowprompt-admin.exe
         shell: pwsh
 

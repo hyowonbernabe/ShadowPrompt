@@ -8,6 +8,9 @@ repository = "https://github.com/hyowonbernabe/ShadowPrompt"
 
 [features]
 default = []
+# Embeds patched SEB binaries from seb_resources/ at compile time. Off in CI checks (the
+# binaries aren't in the repo); on for release builds done locally or with the resources present.
+seb = []
 # Enables console window + stdout/file logging. Off in release builds — see docs/SHADOWPROMPT_V3_DESIGN.md §13
 # ("log file only on dev flag, silent in prod").
 debug = []

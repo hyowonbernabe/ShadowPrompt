@@ -172,6 +172,7 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
             }
         }
         InputEvent::SebUnpatch => {
+            #[cfg(feature = "seb")]
             match crate::seb::reset() {
                 Ok(msg) => {
                     log::info!("seb_unpatch: {msg}");
@@ -181,6 +182,11 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
                     log::error!("seb_unpatch: {e}");
                     let _ = ctx.ui_tx.send(UICommand::FlashNotice(format!("SEB reset failed: {e}")));
                 }
+            }
+            #[cfg(not(feature = "seb"))]
+            {
+                log::warn!("seb_unpatch: SEB support not compiled in");
+                let _ = ctx.ui_tx.send(UICommand::FlashNotice("SEB support not available in this build".into()));
             }
         }
         InputEvent::Quit => std::process::exit(0),

@@ -14,6 +14,7 @@ pub mod lifecycle;
 pub mod llm;
 pub mod logger;
 pub mod probe;
+#[cfg(feature = "seb")]
 pub mod seb;
 pub mod ui;
 
