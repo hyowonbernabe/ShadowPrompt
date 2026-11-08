@@ -119,6 +119,17 @@ pub async fn delete(code: &str) -> anyhow::Result<String> {
     Ok(if retried && status == "not_found" { "ok".into() } else { status })
 }
 
+/// Save config TOML to the cloud for this account. "ok" | "not_found"
+pub async fn save_config(code: &str, config_toml: &str) -> anyhow::Result<String> {
+    let (v, _) = rpc("sp_save_config", json!({ "p_code": code, "p_config": config_toml })).await?;
+    Ok(as_status(v))
+}
+
+/// Load config TOML from the cloud. Returns None if no config stored or account not found.
+pub async fn load_config(code: &str) -> anyhow::Result<Option<String>> {
+    Ok(rpc("sp_load_config", json!({ "p_code": code })).await?.0.as_str().map(str::to_string))
+}
+
 /// Asks OpenRouter whether `key` is a working key (GET /api/v1/key: 200 = valid, 401 = not).
 pub async fn openrouter_key_works(key: &str) -> anyhow::Result<bool> {
     let http = client()?;

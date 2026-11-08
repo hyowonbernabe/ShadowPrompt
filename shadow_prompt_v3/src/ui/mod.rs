@@ -4,6 +4,9 @@ pub mod account_dialog;
 pub mod colors;
 pub mod commands;
 pub mod manager;
+pub mod settings_controls;
+pub mod settings_dialog;
+pub mod settings_models;
 
 pub use commands::UICommand;
 

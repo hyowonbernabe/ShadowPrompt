@@ -32,7 +32,7 @@ pub fn clear_account() -> anyhow::Result<()> {
 
 /// Write to a temp file next to it, then swap it in: a USB stick pulled mid-write leaves the old
 /// config intact instead of an empty or half-written one (which would stop the app starting).
-fn write_atomic(path: &std::path::Path, text: &str) -> anyhow::Result<()> {
+pub(crate) fn write_atomic(path: &std::path::Path, text: &str) -> anyhow::Result<()> {
     let tmp = path.with_extension("toml.tmp");
     std::fs::write(&tmp, text)?;
     std::fs::rename(&tmp, path)?; // replaces the existing file on Windows
@@ -80,6 +80,48 @@ fn with_account_section(text: &str, account: Option<(&str, &str)>) -> String {
         s.push_str(&block.join(nl));
     }
     s
+}
+
+/// Applies a cloud config TOML over the local config.toml. Keeps the local `[account]` section
+/// intact. Returns a list of human-readable changes (e.g. "3 hotkeys changed").
+pub fn apply_cloud_config(cloud_toml: &str) -> anyhow::Result<Vec<String>> {
+    use super::schema::Config;
+
+    let cloud: Config = toml::from_str(cloud_toml)
+        .map_err(|e| anyhow::anyhow!("cloud config parse error: {e}"))?;
+    let local = load()?;
+    let mut changes = Vec::new();
+
+    // Count hotkey differences.
+    let hotkey_diffs = count_hotkey_diffs(&local.hotkeys, &cloud.hotkeys);
+    if hotkey_diffs > 0 {
+        changes.push(format!("{hotkey_diffs} hotkey{}", if hotkey_diffs == 1 { "" } else { "s" }));
+    }
+
+    // Build the merged config: cloud values for everything, except what belongs to this PC:
+    // the login ([account]) and this install's own OpenRouter key (never uploaded).
+    let mut merged = cloud;
+    merged.account = local.account.clone();
+    merged.openrouter.api_key = local.openrouter.api_key.clone();
+
+    let header = "# ShadowPrompt config — synced from cloud.\n\
+                  # See config.example.toml for documentation on each field.\n\n";
+    let body = toml::to_string_pretty(&merged)?;
+    let path = config_path()?;
+    write_atomic(&path, &format!("{header}{body}"))
+        .map_err(|e| anyhow::anyhow!("writing config: {e}"))?;
+    Ok(changes)
+}
+
+fn count_hotkey_diffs(a: &super::schema::HotkeysConfig, b: &super::schema::HotkeysConfig) -> usize {
+    let mut n = 0;
+    macro_rules! cmp { ($($f:ident),*) => { $( if a.$f != b.$f { n += 1; } )* } }
+    cmp!(clipboard_query, screenshot_query, test_model, switch_model, add_context,
+         reset_conversation, launch_debugger, forms_answer_page, forms_answer_all,
+         forms_answer_page_axtree, forms_answer_all_axtree, abort, hide_toggle,
+         help_toggle, restart_daemon, insta_delete, panic_kill, debug_open_tab,
+         screen_answer, clear_dots, account, seb_unpatch, quit);
+    n
 }
 
 /// Writes the embedded template to the exe-relative config/config.toml if it doesn't exist yet

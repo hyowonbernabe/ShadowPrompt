@@ -149,11 +149,12 @@ fn choose_key(cfg: &mut config::Config) -> anyhow::Result<bool> {
         match ui::account_dialog::run_launch(&cfg.account, &cfg.openrouter.api_key) {
             ui::account_dialog::LaunchChoice::Quit => return Ok(false),
             ui::account_dialog::LaunchChoice::Use { key, from_account } => {
-                cfg.openrouter.api_key = key;
-                // A log in / sign up just wrote [account] to the file; pick it up.
+                // A log in / sign up just wrote [account] to the file, and a log in may have pulled
+                // synced settings into it too; reload all of it so this run uses them.
                 if let Ok(fresh) = config::load::load() {
-                    cfg.account = fresh.account;
+                    *cfg = fresh;
                 }
+                cfg.openrouter.api_key = key;
                 from_account
             }
         }

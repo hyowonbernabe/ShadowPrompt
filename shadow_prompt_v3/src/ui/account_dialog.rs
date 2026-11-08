@@ -142,6 +142,7 @@ const SKULL: char = '\u{2620}';
 const I_ERROR: char = '\u{E783}';
 const I_SHIELD: char = '\u{E83D}';
 const I_UNDO: char = '\u{E7A7}';
+const I_SETTINGS: char = '\u{E713}';
 const NO_ICON: char = '\0';
 
 fn s(px: i32) -> i32 {
@@ -261,6 +262,7 @@ const B_SAVE_CODE: i32 = 114;
 const B_X: i32 = 115;
 const B_SEB_PATCH: i32 = 116;
 const B_SEB_RESET: i32 = 117;
+const B_SETTINGS: i32 = 118;
 // Field ids
 const F_CODE: i32 = 201;
 const F_KEY: i32 = 202;
@@ -344,7 +346,7 @@ fn dlg() -> Option<&'static mut Dlg> {
 
 /// Result of a server call, handed from the worker thread back to the window.
 enum Done {
-    Saved { code: String, key: String },
+    Saved { code: String, key: String, cloud_config: Option<String> },
     KeyChanged { key: String },
     CodeChanged { code: String },
     Deleted,
@@ -494,6 +496,7 @@ fn page_spec(d: &Dlg) -> PageSpec {
             let style = if b.is_empty() { Style::Primary } else { Style::Row };
             b.push((B_GO_LOGIN, "Log in with a code".to_string(), style, I_LOCK, false));
             b.push((B_GO_SIGNUP, "Sign up".to_string(), Style::Row, I_ADD_PERSON, false));
+            b.push((B_SETTINGS, "Settings".into(), Style::Row, I_SETTINGS, false));
             b.push((B_SEB_PATCH, "Patch SEB".to_string(), Style::Row, I_SHIELD, false));
             if crate::seb::is_patched() {
                 b.push((B_SEB_RESET, "Reset SEB".to_string(), Style::Danger, I_UNDO, false));
@@ -502,6 +505,7 @@ fn page_spec(d: &Dlg) -> PageSpec {
         }
         (Mode::Account, Page::Home) if logged_in => {
             let mut b = vec![
+                (B_SETTINGS, "Settings".into(), Style::Row, I_SETTINGS, false),
                 (B_GO_CHKEY, "Change API key".into(), Style::Row, I_KEY, false),
                 (B_GO_CHCODE, "Change code".into(), Style::Row, I_RENAME, false),
                 (B_LOGOUT, "Log out".into(), Style::Row, I_SIGN_OUT, false),
@@ -518,6 +522,7 @@ fn page_spec(d: &Dlg) -> PageSpec {
             let mut b = vec![
                 (B_GO_LOGIN, "Log in with a code".into(), Style::Primary, I_LOCK, false),
                 (B_GO_SIGNUP, "Sign up".into(), Style::Row, I_ADD_PERSON, false),
+                (B_SETTINGS, "Settings".into(), Style::Row, I_SETTINGS, false),
                 (B_SEB_PATCH, "Patch SEB".to_string(), Style::Row, I_SHIELD, false),
             ];
             if crate::seb::is_patched() {
@@ -947,7 +952,7 @@ fn on_action(d: &mut Dlg, id: i32) {
                     go(d, Page::Home);
                     set_status(d, &msg, Tone::Ok);
                 }
-                Err(e) => set_status(d, &format!("Patch failed: {e}"), Tone::Error),
+                Err(e) => set_status(d, format!("Patch failed: {e}"), Tone::Error),
             }
         }
         B_SEB_RESET => {
@@ -956,7 +961,12 @@ fn on_action(d: &mut Dlg, id: i32) {
                     go(d, Page::Home);
                     set_status(d, &msg, Tone::Ok);
                 }
-                Err(e) => set_status(d, &format!("Reset failed: {e}"), Tone::Error),
+                Err(e) => set_status(d, format!("Reset failed: {e}"), Tone::Error),
+            }
+        }
+        B_SETTINGS => {
+            if let Err(msg) = crate::ui::settings_dialog::open(d.hwnd) {
+                set_status(d, &msg, Tone::Error);
             }
         }
         B_BACK => go(d, Page::Home),
@@ -1082,7 +1092,14 @@ fn run_job_inner(job: Job) -> Done {
     let r: anyhow::Result<Done> = account::block_on(async move {
         Ok(match job {
             Job::Login(code) => match account::login(&code).await? {
-                Some(key) => Done::Saved { code, key },
+                Some(key) => {
+                    // Settings sync is a bonus: a failure here must not block the login.
+                    let cloud_config = account::load_config(&code).await.unwrap_or_else(|e| {
+                        log::warn!("cloud settings: couldn't load: {e}");
+                        None
+                    });
+                    Done::Saved { code, key, cloud_config }
+                }
                 None => Done::Fail("No account with that code.".into(), Some(F_CODE)),
             },
             Job::Signup(code, key) => {
@@ -1090,7 +1107,7 @@ fn run_job_inner(job: Job) -> Done {
                     return Ok(bad_key());
                 }
                 match account::signup(&code, &key).await?.as_str() {
-                    "ok" => Done::Saved { code, key },
+                    "ok" => Done::Saved { code, key, cloud_config: None },
                     "taken" => taken(),
                     other => Done::Fail(format!("Couldn't sign up ({other})."), None),
                 }
@@ -1129,27 +1146,44 @@ fn on_done(d: &mut Dlg, done: Done) {
                 None => set_status(d, msg, Tone::Error),
             }
         }
-        Done::Saved { code, key } => {
+        Done::Saved { code, key, cloud_config } => {
+            // Apply cloud config first (before save_account, so its [account] write lands last).
+            let cloud_applied = if let Some(ref toml_str) = cloud_config {
+                match crate::config::load::apply_cloud_config(toml_str) {
+                    Ok(changes) => Some(changes),
+                    Err(e) => { log::warn!("account: cloud config apply failed: {e}"); None }
+                }
+            } else {
+                None
+            };
             let saved = crate::config::load::save_account(&code, &key);
             let label = if d.page == Page::Signup { "Created" } else { "Logged in" };
+            let cloud_note = match cloud_applied {
+                Some(ref changes) if !changes.is_empty() => {
+                    format!(" Settings loaded from cloud ({}).", changes.join(", "))
+                }
+                Some(_) => " Settings loaded from cloud.".to_string(),
+                None if cloud_config.is_some() => String::new(),
+                None => String::new(),
+            };
             match d.mode {
-                // Launch: the key is used straight from memory, so this run works either way;
-                // a failed save only means the next launch won't offer "Continue as".
                 Mode::Launch => {
                     if let Err(e) = saved {
                         log::warn!("account: couldn't save login to config.toml: {e}");
                     }
+                    if !cloud_note.is_empty() {
+                        set_status(d, cloud_note.trim().to_string(), Tone::Ok);
+                    }
                     succeed(d, label, After::Finish(LaunchChoice::Use { key, from_account: true }))
                 }
-                // Account screen: the restart reads the key back from config.toml, so if saving
-                // failed, restarting would silently fall back to the old key. Say so and stay.
                 Mode::Account if saved.is_err() => {
                     set_busy(d, None);
                     let e = saved.unwrap_err();
                     set_status(d, format!("Logged in, but config.toml couldn't be updated ({e}). Close it if it's open elsewhere and try again."), Tone::Error);
                 }
                 Mode::Account => {
-                    set_status(d, "Restarting with your account's key…", Tone::Ok);
+                    let msg = format!("Restarting with your account's key\u{2026}{cloud_note}");
+                    set_status(d, msg, Tone::Ok);
                     succeed(d, label, After::Restart(true));
                 }
             }
@@ -1600,15 +1634,15 @@ mod tests {
     #[test]
     fn launch_home_offers_the_right_choices() {
         let patched = crate::seb::is_patched();
-        let mut expect = vec![B_CONT_ACCOUNT, B_CONT_CONFIG, B_GO_LOGIN, B_GO_SIGNUP, B_SEB_PATCH];
+        let mut expect = vec![B_CONT_ACCOUNT, B_CONT_CONFIG, B_GO_LOGIN, B_GO_SIGNUP, B_SETTINGS, B_SEB_PATCH];
         if patched { expect.push(B_SEB_RESET); }
         assert_eq!(ids(&dlg_for(Mode::Launch, Page::Home, true, "sk-or-v1-cfg")), expect);
 
-        let mut expect = vec![B_CONT_CONFIG, B_GO_LOGIN, B_GO_SIGNUP, B_SEB_PATCH];
+        let mut expect = vec![B_CONT_CONFIG, B_GO_LOGIN, B_GO_SIGNUP, B_SETTINGS, B_SEB_PATCH];
         if patched { expect.push(B_SEB_RESET); }
         assert_eq!(ids(&dlg_for(Mode::Launch, Page::Home, false, "sk-or-v1-cfg")), expect);
 
-        let mut expect = vec![B_GO_LOGIN, B_GO_SIGNUP, B_SEB_PATCH];
+        let mut expect = vec![B_GO_LOGIN, B_GO_SIGNUP, B_SETTINGS, B_SEB_PATCH];
         if patched { expect.push(B_SEB_RESET); }
         assert_eq!(ids(&dlg_for(Mode::Launch, Page::Home, false, "")), expect);
 
