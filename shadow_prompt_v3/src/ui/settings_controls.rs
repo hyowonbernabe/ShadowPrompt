@@ -564,7 +564,7 @@ pub fn read_color(hwnd: HWND) -> String {
 // 3. CornerDropdown
 // ===========================================================================
 
-const CORNERS: [&str; 4] = ["top-left", "top-right", "bottom-left", "bottom-right"];
+const CORNERS: [&str; 4] = ["top_left", "top_right", "bottom_left", "bottom_right"];
 
 /// Create a corner picker: a dark field box that opens a dark list popup (via `on_click`).
 #[allow(clippy::too_many_arguments)]
