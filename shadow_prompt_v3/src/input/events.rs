@@ -56,6 +56,10 @@ pub enum InputEvent {
     /// path Forms uses, without the LLM loop around it. Only does anything under the `debug`
     /// Cargo feature (see `actions::debug_open_tab`).
     DebugOpenTab,
+    /// Reset/unpatch SEB during a running session.
+    SebUnpatch,
+    /// Clean exit — no clipboard wipe, no self-delete.
+    Quit,
 }
 
 impl InputEvent {
@@ -89,6 +93,8 @@ impl InputEvent {
             InputEvent::InstaDeleteDisarmed => "insta_delete_disarmed",
             InputEvent::PanicKill => "panic_kill",
             InputEvent::DebugOpenTab => "debug_open_tab",
+            InputEvent::SebUnpatch => "seb_unpatch",
+            InputEvent::Quit => "quit",
         }
     }
 }

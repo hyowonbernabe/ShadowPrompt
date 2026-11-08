@@ -171,6 +171,19 @@ pub async fn dispatch(ctx: ActionContext, event: InputEvent) {
                 log::error!("debug_open_tab: {e}");
             }
         }
+        InputEvent::SebUnpatch => {
+            match crate::seb::reset() {
+                Ok(msg) => {
+                    log::info!("seb_unpatch: {msg}");
+                    let _ = ctx.ui_tx.send(UICommand::FlashNotice(msg));
+                }
+                Err(e) => {
+                    log::error!("seb_unpatch: {e}");
+                    let _ = ctx.ui_tx.send(UICommand::FlashNotice(format!("SEB reset failed: {e}")));
+                }
+            }
+        }
+        InputEvent::Quit => std::process::exit(0),
     }
 }
 

@@ -1017,6 +1017,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             PostQuitMessage(0);
             LRESULT(0)
         }
+        // Windows shutting down / user logging off: unpatch SEB before we die.
+        0x0016 /* WM_ENDSESSION */ if wp.0 != 0 => {
+            crate::seb::cleanup();
+            DefWindowProcW(hwnd, msg, wp, lp)
+        }
         _ => DefWindowProcW(hwnd, msg, wp, lp),
     }
 }

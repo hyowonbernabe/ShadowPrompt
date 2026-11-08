@@ -140,6 +140,8 @@ const I_CLOSE: char = '\u{E711}';
 /// Skull and crossbones (Segoe UI Symbol), shown in place of the app name.
 const SKULL: char = '\u{2620}';
 const I_ERROR: char = '\u{E783}';
+const I_SHIELD: char = '\u{E83D}';
+const I_UNDO: char = '\u{E7A7}';
 const NO_ICON: char = '\0';
 
 fn s(px: i32) -> i32 {
@@ -257,6 +259,8 @@ const B_CLOSE: i32 = 112;
 const B_SAVE_KEY: i32 = 113;
 const B_SAVE_CODE: i32 = 114;
 const B_X: i32 = 115;
+const B_SEB_PATCH: i32 = 116;
+const B_SEB_RESET: i32 = 117;
 // Field ids
 const F_CODE: i32 = 201;
 const F_KEY: i32 = 202;
@@ -490,29 +494,37 @@ fn page_spec(d: &Dlg) -> PageSpec {
             let style = if b.is_empty() { Style::Primary } else { Style::Row };
             b.push((B_GO_LOGIN, "Log in with a code".to_string(), style, I_LOCK, false));
             b.push((B_GO_SIGNUP, "Sign up".to_string(), Style::Row, I_ADD_PERSON, false));
+            b.push((B_SEB_PATCH, "Patch SEB".to_string(), Style::Row, I_SHIELD, false));
+            if crate::seb::is_patched() {
+                b.push((B_SEB_RESET, "Reset SEB".to_string(), Style::Danger, I_UNDO, false));
+            }
             (SKULL.to_string(), String::new(), vec![], b)
         }
-        (Mode::Account, Page::Home) if logged_in => (
-            "Account".into(),
-            format!("Logged in as {who}"),
-            vec![],
-            vec![
+        (Mode::Account, Page::Home) if logged_in => {
+            let mut b = vec![
                 (B_GO_CHKEY, "Change API key".into(), Style::Row, I_KEY, false),
                 (B_GO_CHCODE, "Change code".into(), Style::Row, I_RENAME, false),
                 (B_LOGOUT, "Log out".into(), Style::Row, I_SIGN_OUT, false),
-                (B_DELETE, "Delete account".into(), Style::Danger, I_DELETE, false),
-                (B_CLOSE, "Done".into(), Style::Primary, NO_ICON, true),
-            ],
-        ),
-        (Mode::Account, Page::Home) => (
-            "Account".into(),
-            "Not logged in. Using the key in config.toml.".into(),
-            vec![],
-            vec![
+                (B_SEB_PATCH, "Patch SEB".to_string(), Style::Row, I_SHIELD, false),
+            ];
+            if crate::seb::is_patched() {
+                b.push((B_SEB_RESET, "Reset SEB".to_string(), Style::Danger, I_UNDO, false));
+            }
+            b.push((B_DELETE, "Delete account".into(), Style::Danger, I_DELETE, false));
+            b.push((B_CLOSE, "Done".into(), Style::Primary, NO_ICON, true));
+            ("Account".into(), format!("Logged in as {who}"), vec![], b)
+        }
+        (Mode::Account, Page::Home) => {
+            let mut b = vec![
                 (B_GO_LOGIN, "Log in with a code".into(), Style::Primary, I_LOCK, false),
                 (B_GO_SIGNUP, "Sign up".into(), Style::Row, I_ADD_PERSON, false),
-            ],
-        ),
+                (B_SEB_PATCH, "Patch SEB".to_string(), Style::Row, I_SHIELD, false),
+            ];
+            if crate::seb::is_patched() {
+                b.push((B_SEB_RESET, "Reset SEB".to_string(), Style::Danger, I_UNDO, false));
+            }
+            ("Account".into(), "Not logged in. Using the key in config.toml.".into(), vec![], b)
+        }
         (_, Page::Login) => (
             "Log in".into(),
             "Enter your code to load your key.".into(),
@@ -929,6 +941,24 @@ fn on_action(d: &mut Dlg, id: i32) {
         B_GO_SIGNUP => go(d, Page::Signup),
         B_GO_CHKEY => go(d, Page::ChangeKey),
         B_GO_CHCODE => go(d, Page::ChangeCode),
+        B_SEB_PATCH => {
+            match crate::seb::patch() {
+                Ok(msg) => {
+                    go(d, Page::Home);
+                    set_status(d, &msg, Tone::Ok);
+                }
+                Err(e) => set_status(d, &format!("Patch failed: {e}"), Tone::Error),
+            }
+        }
+        B_SEB_RESET => {
+            match crate::seb::reset() {
+                Ok(msg) => {
+                    go(d, Page::Home);
+                    set_status(d, &msg, Tone::Ok);
+                }
+                Err(e) => set_status(d, &format!("Reset failed: {e}"), Tone::Error),
+            }
+        }
         B_BACK => go(d, Page::Home),
         B_CLOSE | B_X => close(d),
         B_DO_LOGIN => {
@@ -1569,9 +1599,19 @@ mod tests {
 
     #[test]
     fn launch_home_offers_the_right_choices() {
-        assert_eq!(ids(&dlg_for(Mode::Launch, Page::Home, true, "sk-or-v1-cfg")), vec![B_CONT_ACCOUNT, B_CONT_CONFIG, B_GO_LOGIN, B_GO_SIGNUP]);
-        assert_eq!(ids(&dlg_for(Mode::Launch, Page::Home, false, "sk-or-v1-cfg")), vec![B_CONT_CONFIG, B_GO_LOGIN, B_GO_SIGNUP]);
-        assert_eq!(ids(&dlg_for(Mode::Launch, Page::Home, false, "")), vec![B_GO_LOGIN, B_GO_SIGNUP]);
+        let patched = crate::seb::is_patched();
+        let mut expect = vec![B_CONT_ACCOUNT, B_CONT_CONFIG, B_GO_LOGIN, B_GO_SIGNUP, B_SEB_PATCH];
+        if patched { expect.push(B_SEB_RESET); }
+        assert_eq!(ids(&dlg_for(Mode::Launch, Page::Home, true, "sk-or-v1-cfg")), expect);
+
+        let mut expect = vec![B_CONT_CONFIG, B_GO_LOGIN, B_GO_SIGNUP, B_SEB_PATCH];
+        if patched { expect.push(B_SEB_RESET); }
+        assert_eq!(ids(&dlg_for(Mode::Launch, Page::Home, false, "sk-or-v1-cfg")), expect);
+
+        let mut expect = vec![B_GO_LOGIN, B_GO_SIGNUP, B_SEB_PATCH];
+        if patched { expect.push(B_SEB_RESET); }
+        assert_eq!(ids(&dlg_for(Mode::Launch, Page::Home, false, "")), expect);
+
         let spec = page_spec(&dlg_for(Mode::Launch, Page::Home, true, ""));
         assert_eq!(spec.3[0].1, "Continue as ••••644");
     }

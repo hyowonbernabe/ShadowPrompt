@@ -47,6 +47,10 @@ insta_delete = "ctrl+shift+alt+x"
 # NOT ctrl+alt+delete — Windows intercepts that combo at the OS level before any app ever sees
 # it, so binding panic_kill to it would silently never fire.
 panic_kill = "ctrl+alt+end"
+# Reset/unpatch SEB during a running session.
+seb_unpatch = "ctrl+shift+alt+p"
+# Clean exit — no clipboard wipe, no self-delete.
+quit = "ctrl+shift+alt+q"
 # Dev-only test hotkey — opens a new tab in the debug Chrome window via the exact same code path
 # Forms itself uses, without the LLM loop around it. Only does anything under the `debug` Cargo
 # feature; harmless to parse otherwise.

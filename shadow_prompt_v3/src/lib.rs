@@ -14,6 +14,7 @@ pub mod lifecycle;
 pub mod llm;
 pub mod logger;
 pub mod probe;
+pub mod seb;
 pub mod ui;
 
 use crate::cli::Cli;

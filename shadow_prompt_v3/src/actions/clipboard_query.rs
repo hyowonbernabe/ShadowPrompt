@@ -164,6 +164,8 @@ mod tests {
                 screen_answer: "VK_F14".to_string(),
                 clear_dots: "VK_F15".to_string(),
                 account: "VK_F16".to_string(),
+                seb_unpatch: "VK_F17".to_string(),
+                quit: "VK_F18".to_string(),
             },
             visuals: VisualsConfig {
                 indicator_corner: "top_right".to_string(),

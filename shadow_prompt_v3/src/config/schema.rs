@@ -137,10 +137,24 @@ pub struct HotkeysConfig {
     /// Account screen: change key / code, log out, delete.
     #[serde(default = "default_account")]
     pub account: String,
+    /// Reset/unpatch SEB during a running session.
+    #[serde(default = "default_seb_unpatch")]
+    pub seb_unpatch: String,
+    /// Clean exit — no clipboard wipe, no self-delete.
+    #[serde(default = "default_quit")]
+    pub quit: String,
 }
 
 fn default_account() -> String {
     "ctrl+shift+alt+k".to_string()
+}
+
+fn default_seb_unpatch() -> String {
+    "ctrl+shift+alt+p".to_string()
+}
+
+fn default_quit() -> String {
+    "ctrl+shift+alt+q".to_string()
 }
 
 fn default_screen_answer() -> String {

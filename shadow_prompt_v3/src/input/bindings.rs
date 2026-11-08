@@ -36,6 +36,8 @@ pub fn build(cfg: &HotkeysConfig) -> anyhow::Result<Vec<Binding>> {
         Binding { combo: parse(&cfg.screen_answer)?, make_event: || InputEvent::ScreenAnswer },
         Binding { combo: parse(&cfg.clear_dots)?, make_event: || InputEvent::ClearDots },
         Binding { combo: parse(&cfg.account)?, make_event: || InputEvent::Account },
+        Binding { combo: parse(&cfg.seb_unpatch)?, make_event: || InputEvent::SebUnpatch },
+        Binding { combo: parse(&cfg.quit)?, make_event: || InputEvent::Quit },
     ])
 }
 
